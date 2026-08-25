@@ -1,12 +1,29 @@
 # Session 05 Status
 
-- Current task: unassigned
-- State: not_started
+- Current task: S05-001 — Produce threat model and proposed deny-by-default Tailscale policy
+- State: done (owner checks and named independent review complete; Session 06 verification not yet performed)
 - Branch: `session/05-security-network`
-- Files changed: none
-- Commands/evidence: none
-- Independent reviewer/evidence: none
-- Assumptions: none
-- Blockers/requests: none
-- Product/task commit: none
+- Files changed in product/task commit:
+  - `docs/security/S05-001-threat-model.md`
+  - `infrastructure/tailscale/README.md`
+  - `infrastructure/tailscale/policy.fragment.template.hujson`
+  - `tests/security/Test-S05-001.ps1`
+- Commands/evidence:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-001.ps1` — PASS before and after the product commit; confirmed the proposal has one narrow grant, unresolved live tokens, no SSH/ACL/node-attribute/auto-approver section, and the required allow/deny policy assertions. This was a static local check, not Tailscale compilation or service proof.
+  - `git diff --cached --check` — PASS before the product commit.
+  - `git diff --check HEAD^ HEAD` — PASS after the product commit.
+  - `git show --stat --oneline --decorate --no-renames HEAD` — product commit contains four Session 05-owned files and 465 inserted lines.
+  - `git status --short --branch` — clean after the product commit on `session/05-security-network`.
+  - Primary Tailscale sources checked on 2026-08-26: grants syntax, tailnet policy/test syntax, targets/tags, Serve, Funnel, and policy-management documentation at `https://tailscale.com/docs/reference/syntax/grants`, `https://tailscale.com/docs/reference/syntax/policy-file`, `https://tailscale.com/docs/reference/targets-and-selectors`, `https://tailscale.com/docs/features/tags`, `https://tailscale.com/docs/reference/examples/serve`, `https://tailscale.com/docs/features/tailscale-funnel`, and `https://tailscale.com/docs/features/tailnet-policy-file/manage-tailnet-policies`.
+  - No tailnet sign-in, live inspection, policy compilation, policy mutation, device/tag change, Serve/Funnel change, DNS change, or service access was performed.
+- Independent reviewer/evidence:
+  - Reviewer: `/root/s05_001_reviewer` (read-only Codex reviewer).
+  - Post-commit PASS against exact commit `ccc6a11c97b26223e8aa8d7d9c0b4fda5eba9a3e`; exact expected-path and Session 05 ownership assertions passed, all four pre-review SHA-256 values matched, `git diff --check ccc6a11^ ccc6a11` passed, `tests/security/Test-S05-001.ps1` passed, working copies matched the commit, and `git status --short` was clean.
+  - Reviewer reported no findings and performed no edits or live tailnet/service access.
+- Assumptions:
+  - The proposal uses `group:terminus-terminal-operators` as the exact source selector and `tag:terminus-windows-agent` as the exact destination selector, but every real identity and the private Serve HTTPS port remain unresolved until separately authorized live verification.
+  - Tailscale grants are additive; the complete current policy must be audited for broader matching ACLs/grants before this fragment can be considered deny-by-default in a real tailnet.
+  - A Windows service node tag and the browser private-network compatibility path remain subject to explicit validation; the proposal does not claim either exists.
+- Blockers/requests: none for S05-001. Live substitution, compilation, application, and endpoint testing intentionally require separate explicit authorization. S05-002 remains dependency-blocked by the task queue.
+- Product/task commit: `ccc6a11c97b26223e8aa8d7d9c0b4fda5eba9a3e`
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
