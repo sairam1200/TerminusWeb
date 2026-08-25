@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terminus Verification Release"
+  short_description: "Independently verify builds and releases"
+  default_prompt: "Use $terminus-verification-release to verify the next Session 06 task independently and report exact evidence."

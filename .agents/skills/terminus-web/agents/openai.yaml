@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terminus Web"
+  short_description: "Build the responsive web and PWA client"
+  default_prompt: "Use $terminus-web to complete the next unblocked Session 02 web/PWA task within its owned paths."

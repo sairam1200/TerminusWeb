@@ -1,0 +1,36 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# JavaScript / Next.js
+node_modules/
+.next/
+out/
+coverage/
+.vercel/
+
+# Go / Windows build output
+bin/
+dist/
+*.exe
+*.dll
+*.test
+
+# Test and tool output
+playwright-report/
+test-results/
+*.log
+.cache/
+tmp/
+temp/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
