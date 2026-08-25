@@ -1,12 +1,55 @@
 # Session 02 Status
 
-- Current task: unassigned
-- State: not_started
+- Current task: `S02-001` — Scaffold responsive Next.js PWA and terminal adapter boundary
+- State: review_pending_independent_reviewer (queue transition remains Session 01-owned)
 - Branch: `session/02-web`
-- Files changed: none
-- Commands/evidence: none
-- Independent reviewer/evidence: none
-- Assumptions: none
-- Blockers/requests: none
-- Product/task commit: none
+- Files changed:
+  - `apps/web/app/**`: Next.js App Router shell, responsive styles, metadata, and web manifest.
+  - `apps/web/components/**`: accessible terminal shell, PWA registration, and component tests.
+  - `apps/web/terminal/**`: UI-facing adapter boundary and explicitly labelled, socket-free test double.
+  - `apps/web/public/**`: SVG app icon and non-caching service worker.
+  - `apps/web/{package.json,package-lock.json,tsconfig.json,next.config.ts,eslint.config.mjs,vitest.config.ts,vitest.setup.ts,securityHeaders.test.ts}` plus local formatting/ignore files.
+- Dependency verification:
+  - `node --version` => `v24.15.0`; `npm --version` => `11.14.1`.
+  - `npm view next version; npm view react version; npm view vitest version; npm view @playwright/test version` => `next 16.3.3`, `react 19.2.8`, `vitest 4.1.11`, `@playwright/test 1.62.1` (the Playwright test package was not added; browser evidence used the CLI).
+  - `npm view eslint-config-next@16.3.3 peerDependencies --json; npm view vitest@4.1.11 engines --json; npm view next@16.3.3 engines --json` => ESLint `>=9`, Vitest supports Node 24, Next requires Node `>=20.9.0`.
+  - `npm view typescript@6 version --json` => latest supported TypeScript 6 release `6.0.3`; TypeScript 7.0.2 was rejected after the installed `typescript-eslint` reported that it does not support TypeScript 7.
+  - `npm install --ignore-scripts` and subsequent lock updates => 442 packages audited, 0 vulnerabilities. `package-lock.json` locks every dependency.
+  - `npm ls --depth=0` => exact direct graph: Next 16.3.3, React/React DOM 19.2.8, TypeScript 6.0.3, ESLint 9.39.5, eslint-config-next 16.3.3, Vitest 4.1.11, jsdom 30.0.1, Testing Library packages, Prettier 3.9.6, and matching React/Node types; exit 0.
+- Deterministic commands/evidence (final run):
+  - `npm run format:check` => pass; all matched files use Prettier style.
+  - `npm run lint` => pass; 0 errors and 0 warnings.
+  - `npm run typecheck` => pass; `tsc --noEmit` exit 0.
+  - `npm test` => pass outside the filesystem sandbox after the sandboxed Vite config loader received `spawn EPERM`; 3 files and 9 tests passed. Coverage includes successful simulated lifecycle, destination rejection, disconnected input, resize boundaries, keyboard submit, paste, focus, mobile keys, disconnect, connection failure/retry, orientation, and CSP.
+  - `npm run build` => pass; Next.js 16.3.3 production build compiled, typechecked, and statically prerendered `/`, `/_not-found`, and `/manifest.webmanifest`.
+  - `git diff --cached --check` before the product commit => pass with no output; staged scope contained only `apps/web/**`.
+- Browser evidence (real Chromium browser against the built app; terminal behavior remains mock-backed):
+  - Server command: `npx next start -H 127.0.0.1 -p 3212` => both Local and Network URLs reported `http://127.0.0.1:3212`; no deployment.
+  - Playwright CLI entry: `npx --yes --package @playwright/cli playwright-cli -s=terminus-s02-final open http://127.0.0.1:3212`.
+  - `... resize 1440 900` then `... snapshot` => accessible desktop shell; disconnected state, disabled input, labelled simulation, and computed viewport `134 × 23`.
+  - `... click e16`, `... resize 390 844`, then `... snapshot` => connected simulated state, focused input, portrait state `43 × 17`, and seven accessible mobile-key buttons.
+  - `... resize 844 390` then `... snapshot` => landscape state `90 × 8`; mobile key bar remains accessible after the browser-discovered responsive correction.
+  - `... eval "() => ({ innerWidth: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, activeElement: document.activeElement?.id })"` => `{ innerWidth: 844, scrollWidth: 844, activeElement: "terminal-input" }` (no horizontal overflow; focus retained).
+  - `... requests --static` => exactly 9 requests, all `GET http://127.0.0.1:3212/...`; no external, WSS, agent, or control-plane request.
+  - `... console error` => 0 errors and 0 warnings.
+  - `... eval "async () => (await navigator.serviceWorker.getRegistrations()).map((registration) => registration.scope)"` => `http://127.0.0.1:3212/` registered.
+  - `(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3212/).Headers.'Content-Security-Policy'` => CSP present with `connect-src 'self'`, `frame-ancestors 'none'`, and `object-src 'none'`.
+  - `[System.Text.Encoding]::UTF8.GetString((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3212/manifest.webmanifest).Content)` => valid standalone manifest with `any` and `maskable` icon declarations.
+- Mock-backed versus real-path evidence:
+  - Mock-backed: connection lifecycle, input acknowledgement, paste, mobile key sequences, resize calls, disconnect, and failure/retry. The adapter is visibly labelled `SIMULATED UI — NO TERMINAL CONNECTION`, never opens a socket, never executes or retains input, and rejects every supplied destination.
+  - Real browser: responsive layout, accessible roles/names/states, focus, orientation/resize display, no overflow, CSP response header, local-only network request list, manifest, and service-worker registration.
+  - Real terminal/private WSS path: not implemented or tested in S02-001; explicitly deferred to S02-002 after the approved protocol 0.1 contract.
+- Independent reviewer/evidence: none yet. A named independent reviewer must inspect product commit `055692f46ac61228f0592af96f06a99e55e431ce` before S02-001 can become `done`.
+- Assumptions:
+  - S02-001 may proceed because it has no dependency in `coordination/tasks.yaml`.
+  - S01-001 remains incomplete (`ready` when read), so no frame shape, protocol state machine, authentication, destination format, or private WSS behavior was inferred.
+- Blockers/requests:
+  - S02-001: independent review is pending; no contract request was required.
+  - S02-002: remains blocked on S01-001 and S02-001 per the queue; Session 02 made no queue edit.
+- Limitations:
+  - Browser evidence is Chromium at desktop and iPhone-sized viewports, not physical iPhone Safari evidence or end-to-end terminal proof.
+  - The service worker intentionally performs no caching so terminal/user data cannot be persisted by this scaffold; offline shell support remains future work.
+  - CSP uses Next-compatible inline script/style allowances for the static scaffold; nonce-based hardening remains unresolved future work, while `connect-src` is restricted to `'self'`.
+  - ESLint 9.39.5 is deprecated upstream but is the current peer-compatible major for eslint-config-next 16.3.3's bundled plugins; upgrading to ESLint 10 must wait for those peer ranges.
+- Product/task commit: `055692f46ac61228f0592af96f06a99e55e431ce`
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
