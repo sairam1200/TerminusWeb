@@ -1,0 +1,83 @@
+name: Session 06 verification harness
+
+on:
+  pull_request:
+    paths:
+      - "tests/browser/**"
+      - "tests/contract/**"
+      - "tests/integration/**"
+      - "infrastructure/vercel/**"
+      - ".github/workflows/session-06-harness.yml"
+  push:
+    branches:
+      - "session/06-verification-release"
+    paths:
+      - "tests/browser/**"
+      - "tests/contract/**"
+      - "tests/integration/**"
+      - "infrastructure/vercel/**"
+      - ".github/workflows/session-06-harness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: session-06-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-harness:
+    name: Contract harness - labelled double
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: tests/contract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/contract/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  integration-inputs:
+    name: Integration input schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: tests/integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/integration/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: TERMINUS_EVIDENCE_CLASS=labelled-test-double npm run validate:double
+
+  browser-harness:
+    name: Browser/PWA harness - labelled double
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tests/browser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/browser/package-lock.json
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
