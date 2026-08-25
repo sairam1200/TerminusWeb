@@ -1,0 +1,59 @@
+[
+  {
+    "id": "runner-accepts-opaque-positive-fixture",
+    "requirement": "positive",
+    "stimulusRef": "labelled-double://opaque-positive",
+    "expected": { "disposition": "accept", "reasonClass": "accepted" }
+  },
+  {
+    "id": "runner-observes-malformed-rejection",
+    "requirement": "malformed",
+    "stimulusRef": "labelled-double://opaque-malformed",
+    "expected": { "disposition": "reject", "reasonClass": "malformed" }
+  },
+  {
+    "id": "runner-observes-oversized-rejection",
+    "requirement": "oversized",
+    "stimulusRef": "labelled-double://opaque-oversized",
+    "expected": { "disposition": "reject", "reasonClass": "oversized" }
+  },
+  {
+    "id": "runner-observes-unauthenticated-rejection",
+    "requirement": "unauthenticated",
+    "stimulusRef": "labelled-double://opaque-unauthenticated",
+    "expected": { "disposition": "reject", "reasonClass": "unauthenticated" }
+  },
+  {
+    "id": "runner-observes-unauthorized-rejection",
+    "requirement": "unauthorized",
+    "stimulusRef": "labelled-double://opaque-unauthorized",
+    "expected": { "disposition": "reject", "reasonClass": "unauthorized" }
+  },
+  {
+    "id": "runner-observes-expired-rejection",
+    "requirement": "expired",
+    "stimulusRef": "labelled-double://opaque-expired",
+    "expected": { "disposition": "reject", "reasonClass": "expired" }
+  },
+  {
+    "id": "runner-observes-replayed-sequence-rejection",
+    "requirement": "replayed",
+    "stimulusRef": "labelled-double://opaque-replayed",
+    "expected": { "disposition": "reject", "reasonClass": "replayed" }
+  },
+  {
+    "id": "runner-observes-illegal-transition-rejection",
+    "requirement": "illegal-transition",
+    "stimulusRef": "labelled-double://opaque-illegal-transition",
+    "expected": { "disposition": "reject", "reasonClass": "illegal-transition" }
+  },
+  {
+    "id": "runner-observes-unsupported-version-rejection",
+    "requirement": "unsupported-version",
+    "stimulusRef": "labelled-double://opaque-unsupported-version",
+    "expected": {
+      "disposition": "reject",
+      "reasonClass": "unsupported-version"
+    }
+  }
+]

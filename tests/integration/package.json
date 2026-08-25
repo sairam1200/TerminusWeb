@@ -1,0 +1,14 @@
+{
+  "name": "@terminus-verification/integration-inputs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test environment.test.mjs",
+    "validate:double": "node validate-environment.mjs double",
+    "validate:real": "node validate-environment.mjs real"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

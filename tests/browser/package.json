@@ -1,0 +1,20 @@
+{
+  "name": "@terminus-verification/browser-harness",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:double",
+    "test:double": "node run-tests.mjs labelled-double",
+    "test:real": "node run-tests.mjs real",
+    "format:check": "prettier --check README.md package.json playwright.config.mjs run-tests.mjs specs support test-double ../contract ../integration ../../infrastructure/vercel ../../.github/workflows/session-06-harness.yml",
+    "lint": "node check-sources.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "prettier": "^3.9.6"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

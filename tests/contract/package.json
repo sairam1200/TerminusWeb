@@ -1,0 +1,14 @@
+{
+  "name": "@terminus-verification/contract-harness",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:double",
+    "test:double": "node run-tests.mjs labelled-double",
+    "test:real": "node run-tests.mjs real"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
