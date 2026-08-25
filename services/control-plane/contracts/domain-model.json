@@ -1,0 +1,139 @@
+{
+  "contractVersion": "0.1.0",
+  "status": "proposed-inactive",
+  "boundary": "metadata-only-control-plane",
+  "commercialActivation": "disabled",
+  "entities": {
+    "accounts": {
+      "scope": "global-identity",
+      "purpose": "External identity subject and deletion state",
+      "identifiers": ["id", "identity_provider", "provider_subject"]
+    },
+    "tenants": {
+      "scope": "tenant-root",
+      "purpose": "Isolation, lifecycle, and retention boundary",
+      "identifiers": ["id"]
+    },
+    "memberships": {
+      "scope": "tenant",
+      "purpose": "Account participation in one tenant",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["accounts", "tenants"]
+    },
+    "role_assignments": {
+      "scope": "tenant",
+      "purpose": "Revocable human authorization role",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["memberships"],
+      "values": ["owner", "admin", "operator", "auditor"]
+    },
+    "hosts": {
+      "scope": "tenant",
+      "purpose": "Private Windows-agent registry metadata",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["tenants"]
+    },
+    "device_keys": {
+      "scope": "tenant",
+      "purpose": "Rotatable host public verification keys",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["hosts"]
+    },
+    "pairings": {
+      "scope": "tenant",
+      "purpose": "Expiring account-to-host pairing confirmation metadata",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["memberships", "hosts"]
+    },
+    "entitlement_grants": {
+      "scope": "tenant",
+      "purpose": "Time-bounded tenant or member product capability",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["memberships", "entitlement_catalog"]
+    },
+    "quota_ledger": {
+      "scope": "tenant",
+      "purpose": "Append-only idempotent unit reservations and releases",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["memberships", "leases", "entitlement_catalog"]
+    },
+    "leases": {
+      "scope": "tenant",
+      "purpose": "Short-lived authorization for one member and private host",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["memberships", "hosts", "pairings", "entitlement_catalog"]
+    },
+    "subscriptions": {
+      "scope": "tenant",
+      "purpose": "Inactive provider-synchronized commercial metadata",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["tenants"]
+    },
+    "audit_events": {
+      "scope": "tenant",
+      "purpose": "Allowlisted authorization and lifecycle metadata",
+      "identifiers": ["tenant_id", "id"],
+      "references": ["accounts", "tenants"]
+    }
+  },
+  "authorizationInvariants": [
+    "Every tenant object reference carries and matches tenant_id.",
+    "Missing or mismatched tenant context fails closed and does not disclose object existence.",
+    "An actor must have an active membership in the request tenant.",
+    "Role assignment targets must be active memberships in the same tenant.",
+    "Admins cannot grant or revoke owner or admin roles.",
+    "The final active owner role cannot be revoked.",
+    "Roles never imply terminal_access, premium, staff, or quota entitlement.",
+    "Lease issuance requires an active pairing, active host and device key, terminal_access entitlement, and atomically reserved quota.",
+    "Subscription synchronization is a non-human provider-adapter action and cannot be authorized by a tenant role.",
+    "No platform role can decrypt, relay, observe, or silently authorize a tenant terminal stream."
+  ],
+  "leaseSemantics": {
+    "format": "signed-claims",
+    "maximumLifetimeSeconds": 300,
+    "clockSkewSeconds": 30,
+    "audience": "one private host id",
+    "singleTenant": true,
+    "singleMembership": true,
+    "replayBoundary": "unique nonce hash plus lease state; agent rejects a consumed or expired lease",
+    "signingBoundary": "private signing key stays outside the database; records contain only signing key id and token hash",
+    "transportBoundary": "lease authorizes a direct browser-to-agent connection and is not a relay credential"
+  },
+  "retention": {
+    "accounts": "Delete external subject and normalized email after all memberships close; retain only irreversible audit actor hash where legally required.",
+    "tenants": "Soft-close immediately; purge tenant metadata after configured 30-3650 day retention and legal holds.",
+    "device_keys": "Retain revoked public-key fingerprint for 90 days, then purge key material.",
+    "pairings": "Purge confirmation metadata 30 days after expiry, consumption, or revocation.",
+    "leases": "Purge token and nonce hashes 30 days after expiry; aggregated quota entries may outlive lease rows without session content.",
+    "subscriptions": "Retain hashed provider references only for the approved accounting period; no payment instrument data.",
+    "audit_events": "Retain allowlisted fields until tenant retain_until; no free-form payload column."
+  },
+  "dataMap": {
+    "allowed": [
+      "opaque ids",
+      "identity provider subject",
+      "normalized email",
+      "tenant membership and role metadata",
+      "private host label and tailnet DNS name",
+      "public device key and fingerprint",
+      "pairing state and browser key thumbprint",
+      "entitlement and quota unit metadata",
+      "lease claims hashes, timestamps, state, and signing key id",
+      "hashed subscription provider references",
+      "allowlisted audit action, outcome, resource kind, and correlation id"
+    ],
+    "forbidden": [
+      "terminal input",
+      "terminal output",
+      "commands",
+      "clipboard contents",
+      "shell environment",
+      "terminal session recording",
+      "private device keys",
+      "control-plane signing keys",
+      "reusable pairing secrets",
+      "payment instrument data",
+      "free-form audit payloads"
+    ]
+  }
+}

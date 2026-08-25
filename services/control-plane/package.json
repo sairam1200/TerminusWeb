@@ -1,0 +1,15 @@
+{
+  "name": "@terminus/control-plane-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format:check": "node --test test/format.test.mjs",
+    "lint": "node --check src/authorization.mjs && node --check test/authorization.test.mjs && node --check test/contracts.test.mjs && node --check test/format.test.mjs",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "node --check src/authorization.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

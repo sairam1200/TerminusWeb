@@ -1,0 +1,318 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Terminus metadata-only control-plane contract",
+    "version": "0.1.0",
+    "description": "Proposed inactive contract. It never relays or stores terminal traffic."
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "security": [{ "bearerAuth": [] }],
+  "x-terminus-boundary": "metadata-only",
+  "x-terminus-commercial-activation": "disabled",
+  "paths": {
+    "/v1/tenants/{tenantId}/memberships/{membershipId}/roles/{role}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/TenantId" },
+        { "$ref": "#/components/parameters/MembershipId" },
+        { "$ref": "#/components/parameters/Role" }
+      ],
+      "put": {
+        "operationId": "assignRole",
+        "summary": "Assign an allowed role to an active same-tenant membership",
+        "x-terminus-authorization-action": "role.assign",
+        "x-terminus-cross-tenant-response": 404,
+        "responses": {
+          "204": { "description": "Role assigned idempotently" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      },
+      "delete": {
+        "operationId": "revokeRole",
+        "summary": "Revoke an allowed role without removing the final owner",
+        "x-terminus-authorization-action": "role.revoke",
+        "x-terminus-cross-tenant-response": 404,
+        "responses": {
+          "204": { "description": "Role revoked idempotently" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/v1/tenants/{tenantId}/hosts/{hostId}/pairings": {
+      "parameters": [
+        { "$ref": "#/components/parameters/TenantId" },
+        { "$ref": "#/components/parameters/HostId" }
+      ],
+      "post": {
+        "operationId": "createPairing",
+        "summary": "Create expiring pairing confirmation metadata",
+        "x-terminus-authorization-action": "pairing.create",
+        "x-terminus-cross-tenant-response": 404,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PairingRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pending pairing metadata created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Pairing" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      }
+    },
+    "/v1/tenants/{tenantId}/hosts/{hostId}/leases": {
+      "parameters": [
+        { "$ref": "#/components/parameters/TenantId" },
+        { "$ref": "#/components/parameters/HostId" }
+      ],
+      "post": {
+        "operationId": "issueLease",
+        "summary": "Atomically reserve quota and issue a signed short-lived host lease",
+        "x-terminus-authorization-action": "lease.issue",
+        "x-terminus-cross-tenant-response": 404,
+        "x-terminus-terminal-relay": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LeaseRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Signed lease issued; browser connects directly to the private host",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LeaseEnvelope" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      }
+    },
+    "/v1/tenants/{tenantId}/audit-events": {
+      "parameters": [{ "$ref": "#/components/parameters/TenantId" }],
+      "get": {
+        "operationId": "listAuditEvents",
+        "summary": "List allowlisted metadata-only audit events",
+        "x-terminus-authorization-action": "audit.read",
+        "x-terminus-cross-tenant-response": 404,
+        "responses": {
+          "200": {
+            "description": "Audit metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": { "$ref": "#/components/schemas/AuditEvent" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/v1/internal/subscription-state": {
+      "post": {
+        "operationId": "synchronizeSubscriptionState",
+        "summary": "Record provider state after a separately approved commercial activation",
+        "security": [{ "providerAdapter": [] }],
+        "x-terminus-authorization-action": "subscription.sync",
+        "x-terminus-commercial-activation": "disabled",
+        "x-terminus-human-role-authorized": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SubscriptionState" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Provider state recorded" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "opaque" },
+      "providerAdapter": { "type": "mutualTLS" }
+    },
+    "parameters": {
+      "TenantId": {
+        "name": "tenantId",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "#/components/schemas/Uuid" }
+      },
+      "MembershipId": {
+        "name": "membershipId",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "#/components/schemas/Uuid" }
+      },
+      "HostId": {
+        "name": "hostId",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "#/components/schemas/Uuid" }
+      },
+      "Role": {
+        "name": "role",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "#/components/schemas/Role" }
+      }
+    },
+    "schemas": {
+      "Uuid": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "Role": {
+        "type": "string",
+        "enum": ["owner", "admin", "operator", "auditor"]
+      },
+      "PairingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["browser_key_thumbprint"],
+        "properties": {
+          "browser_key_thumbprint": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          }
+        }
+      },
+      "Pairing": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "tenant_id", "host_id", "status", "expires_at"],
+        "properties": {
+          "id": { "$ref": "#/components/schemas/Uuid" },
+          "tenant_id": { "$ref": "#/components/schemas/Uuid" },
+          "host_id": { "$ref": "#/components/schemas/Uuid" },
+          "status": { "type": "string", "enum": ["pending", "confirmed"] },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "LeaseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pairing_id", "quota_units", "ttl_seconds"],
+        "properties": {
+          "pairing_id": { "$ref": "#/components/schemas/Uuid" },
+          "quota_units": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+          "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 300 }
+        }
+      },
+      "LeaseEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lease_id", "expires_at", "signed_lease"],
+        "properties": {
+          "lease_id": { "$ref": "#/components/schemas/Uuid" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "signed_lease": {
+            "type": "string",
+            "description": "Compact signed authorization claims; never terminal data.",
+            "maxLength": 4096
+          }
+        }
+      },
+      "AuditEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "tenant_id", "action", "outcome", "resource_kind", "occurred_at"],
+        "properties": {
+          "id": { "$ref": "#/components/schemas/Uuid" },
+          "tenant_id": { "$ref": "#/components/schemas/Uuid" },
+          "action": {
+            "type": "string",
+            "enum": ["membership.changed", "role.changed", "host.changed", "device_key.changed", "pairing.changed", "entitlement.changed", "lease.changed", "subscription.changed"]
+          },
+          "outcome": { "type": "string", "enum": ["allowed", "denied"] },
+          "resource_kind": { "type": "string", "enum": ["membership", "role_assignment", "host", "device_key", "pairing", "entitlement", "lease", "subscription"] },
+          "resource_id": { "$ref": "#/components/schemas/Uuid" },
+          "correlation_id": { "$ref": "#/components/schemas/Uuid" },
+          "occurred_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SubscriptionState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tenant_id", "provider", "provider_event_id", "state", "plan_code"],
+        "properties": {
+          "tenant_id": { "$ref": "#/components/schemas/Uuid" },
+          "provider": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "provider_event_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "state": { "type": "string", "enum": ["inactive", "trialing", "active", "past_due", "canceled"] },
+          "plan_code": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code"],
+        "properties": {
+          "code": { "type": "string", "enum": ["UNAUTHENTICATED", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "INVALID_REQUEST"] },
+          "correlation_id": { "$ref": "#/components/schemas/Uuid" }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Authentication is missing or invalid",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      },
+      "Forbidden": {
+        "description": "Same-tenant actor lacks authorization",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      },
+      "NotFound": {
+        "description": "Object absent or outside the authenticated tenant boundary",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      },
+      "Conflict": {
+        "description": "State invariant or atomic reservation conflict",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      },
+      "Invalid": {
+        "description": "Request is malformed or outside contract bounds",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      }
+    }
+  }
+}
