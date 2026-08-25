@@ -43,11 +43,21 @@ This repository is a contract-first workspace for a private web terminal that lo
 ## Branch and handoff rules
 
 - Branch names: `session/01-architecture`, `session/02-web`, `session/03-windows-agent`, `session/04-control-plane`, `session/05-security-network`, and `session/06-verification-release`.
-- Keep commits scoped to one task ID from `coordination/tasks.yaml`. A task must have an immutable commit SHA before independent verification; the session owner creates that task commit.
-- Update only your own `coordination/status/session-XX.md` with current task, files changed, commands run, evidence, assumptions, blockers, and the task commit SHA.
-- Session 01 owns task-queue transitions. A session begins by marking its own status `in_progress`; Session 01 updates `coordination/tasks.yaml` to `in_progress`, `review`, `verified`, `done`, or newly `ready` only from recorded dependency and verifier evidence.
+- Keep commits scoped to one task ID from `coordination/tasks.yaml`. A task handoff uses two commits: first the immutable product/task commit, then a status-only handoff commit that records the product commit SHA and evidence. Integration uses the product commit, not the handoff commit.
+- Update only your own `coordination/status/session-XX.md` with current task, files changed, commands run, evidence, assumptions, blockers, independent reviewer identity/evidence, and the product/task commit SHA. Commit that status separately as the branch-head handoff commit.
+- Session 01 owns task-queue transitions. It reads another session's committed handoff through the shared Git branch ref, not its own stale worktree copy. Session 01 updates `coordination/tasks.yaml` to `in_progress`, `review`, `done`, `verified`, or newly `ready` only from committed evidence.
 - Integration occurs through explicit integration tasks. Session 01 first prepares a manifest of exact verified SHAs. Git merge/cherry-pick into an integration branch requires the user's explicit authorization, and Session 06 then verifies the integrated candidate.
 - Never weaken or delete a test merely to make a gate pass without an approved contract change.
+
+## Completion levels
+
+- `done`: the task's Definition of Done passes and a named independent reviewer has examined the task commit. This may be a read-only subagent or another designated session. `done` can satisfy implementation dependencies.
+- `verified`: Session 06 independently reproduces the applicable deterministic checks against exact commits. `verified` is required for integration and release claims.
+- A producer need not be `verified` before a dependent implementation task begins unless that dependency explicitly requires it. This prevents review deadlocks while retaining an independent release gate.
+
+## Governance files
+
+`AGENTS.md`, `coordination/ownership.yaml`, and the session-ownership model cannot be changed by an implementation session under ordinary task authority. Changes require a dedicated governance task, independent Session 06 review, and explicit user authorization.
 
 ## Safe stopping rule
 

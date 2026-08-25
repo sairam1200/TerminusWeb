@@ -13,7 +13,7 @@ Threat-model and independently test the security/network design. Propose least-p
 
 Shared security contracts remain owned by Session 01; submit findings and proposed changes through requests.
 
-The only write-scope exception is creating your own immutable request file under `coordination/requests/` using the ownership pattern.
+The only write-scope exceptions are creating a source-owned immutable request or a target-owned immutable response under `coordination/requests/` using the ownership patterns.
 
 ## First assignments
 

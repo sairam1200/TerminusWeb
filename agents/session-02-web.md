@@ -9,7 +9,7 @@ Build the responsive Next.js web/PWA client and terminal UI while treating the w
 - `apps/web/**`
 - `coordination/status/session-02.md`
 
-Do not edit `packages/protocol`, `packages/security`, Windows-agent files, CI owned by Session 06, or root contracts. The only scope exception is creating your own immutable request file under `coordination/requests/` using the ownership pattern.
+Do not edit `packages/protocol`, `packages/security`, Windows-agent files, CI owned by Session 06, or root contracts. The only scope exceptions are creating a source-owned immutable request or a target-owned immutable response under `coordination/requests/` using the ownership patterns.
 
 ## First assignments
 

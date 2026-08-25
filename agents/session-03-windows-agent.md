@@ -9,7 +9,7 @@ Build the least-privileged Windows agent that owns ConPTY lifecycle, process con
 - `apps/windows-agent/**`
 - `coordination/status/session-03.md`
 
-Do not edit shared contracts, web files, Tailscale policy, backend, or independent tests owned by other sessions. The only scope exception is creating your own immutable request file under `coordination/requests/` using the ownership pattern.
+Do not edit shared contracts, web files, Tailscale policy, backend, or independent tests owned by other sessions. The only scope exceptions are creating a source-owned immutable request or a target-owned immutable response under `coordination/requests/` using the ownership patterns.
 
 ## First assignments
 

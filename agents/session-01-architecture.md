@@ -17,11 +17,12 @@ Own the system contracts and integrate only independently verified work. You are
 - `docs/ARCHITECTURE.md`
 - `docs/SHARED_CONTRACTS.md`
 - `coordination/facts.md`
-- `coordination/ownership.yaml`
 - `coordination/tasks.yaml`
 - `coordination/status/session-01.md`
 
 Root-level integration edits require a reviewed integration task. Do not absorb another session's implementation scope.
+
+`coordination/ownership.yaml` and root governance rules are not ordinary Session 01 scope. Changing them requires a dedicated governance task, Session 06 review, and explicit user authorization.
 
 ## First assignment
 
@@ -45,6 +46,7 @@ Do not allow the author and reviewer to silently edit the same file. Review find
 ## Queue and integration assignments
 
 - Maintain task states from status/verification evidence; never self-certify another session's work.
+- Read other sessions through committed branch refs using `docs/SESSION_OPERATIONS.md`; never assume your worktree copy is current.
 - `S01-002` produces only an integration manifest of verified SHAs.
 - `S01-003` remains blocked until the user explicitly authorizes integration.
 - During authorized integration, combine exact approved commits. If a conflict requires implementation edits, return it to the owning session instead of resolving it by changing their code.

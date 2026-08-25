@@ -9,15 +9,16 @@ A task is complete only when all applicable evidence exists.
 - New behavior has positive, negative, boundary, and failure-path tests.
 - No secrets or terminal plaintext are present in source, fixtures, logs, screenshots, or test artifacts.
 - Dependency names and APIs were verified against installed versions or official primary documentation.
-- The owning session status records commands, results, remaining limitations, and commit SHA if committed.
+- The owning session status records commands, results, remaining limitations, and the mandatory task commit SHA before independent verification.
 - No unrelated files changed.
+- A named independent reviewer has inspected the task commit and recorded evidence before the task becomes `done`. Session 06 verification is a later, stronger gate required before integration/release.
 
 ## Contract-sensitive changes
 
 - Protocol/security version is explicit.
 - Both consumers pass the same contract fixtures.
 - Malformed, oversized, unauthenticated, unauthorized, expired, and replayed inputs are rejected.
-- Session 01 confirms compatibility and Session 06 independently verifies it.
+- Session 01 confirms compatibility before dependent implementation begins; Session 06 independently verifies exact consumer commits before integration.
 
 ## Web changes
 

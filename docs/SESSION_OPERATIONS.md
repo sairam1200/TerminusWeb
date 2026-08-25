@@ -7,7 +7,7 @@ Run each main session in a separate Git branch and worktree. The repository can 
 Use the exact brief for the session. Example:
 
 ```text
-Read AGENTS.md and agents/session-02-web.md completely. Use the terminus-web skill if it is discoverable. Work only on tasks assigned to Session 02 and only inside its owned paths. Begin with the first unblocked task in coordination/tasks.yaml. Update coordination/status/session-02.md with evidence before stopping. Do not merge, deploy, or edit shared contracts.
+Follow the required read order in AGENTS.md, then read the assigned session brief completely and use its exact Launch prompt. Work only on the assigned task and owned paths, plus uniquely named source-owned requests or target-owned responses. Commit the task before independent verification and record exact evidence and SHA in the session status. Do not merge, deploy, or edit shared contracts.
 ```
 
 ## Parallelism inside one session
@@ -27,18 +27,32 @@ After Git, the reviewed base commit, and six worktrees exist, the six initial re
 ## Task-state transitions
 
 - `coordination/tasks.yaml` is owned by Session 01 as queue coordinator.
-- A task owner records start, evidence, and task commit SHA in its own status file.
-- Session 01 changes `ready` to `in_progress` after seeing the start record, changes it to `review` after a committed handoff, and changes it to `verified` or `done` only from Session 06 or the named independent review evidence.
-- A blocked task becomes `ready` only when every listed dependency is `done` or `verified`, as appropriate, and Session 01 records that transition.
+- A task owner records start in its status file and commits that status if another worktree must observe it.
+- The owner creates a product/task commit containing implementation or contract changes.
+- The owner then updates its status with the product commit SHA, evidence, limitations, and independent reviewer evidence, and creates a separate status-only handoff commit.
+- Session 01 changes `ready` to `in_progress` after seeing a committed start record, changes it to `review` after a committed handoff, changes it to `done` after owner DoD plus named independent review, and changes it to `verified` only from Session 06 evidence.
+- A blocked implementation task becomes `ready` when every listed dependency is `done` or `verified`, unless the task explicitly requires `verified`. Integration/release tasks require Session 06 verification through their dependency chain.
 - Other sessions never edit the queue directly.
 
 Reading a dependency means reading its task entry, owner status, produced contract/artifact, and exact task commit SHA. A task title or another agent's summary is not sufficient dependency evidence.
+
+## Cross-worktree branch-ref handoff
+
+All worktrees share Git branch refs but not uncommitted files or branch contents.
+
+- Session 01 reads a committed Session 02 handoff with `git show session/02-web:coordination/status/session-02.md` and resolves its branch-head handoff SHA with `git rev-parse session/02-web`.
+- Sessions 02-06 read the authoritative queue with `git show session/01-architecture:coordination/tasks.yaml` after Session 01 has made a queue commit.
+- Produced artifacts are inspected from the owner branch or exact product commit using `git show`, `git diff`, or an isolated verification worktree.
+- Coordination files are not merged merely to make them visible.
+- A handoff message names the owner branch, product commit SHA, handoff commit SHA, status path, and relevant artifact paths.
 
 ## Request lifecycle
 
 - The source session creates an immutable `from-SS-to-TT-id.request.md` file and owns it permanently.
 - The target session responds in a separate `from-TT-to-SS-id.response.md` file that it owns permanently.
 - Revisions create a new numbered request/response pair. No ownership transfer or shared editing occurs.
+- The source commits the request and sends its branch/ref plus exact request commit SHA. The target reads it with `git show <request-sha>:<request-path>`.
+- The target commits the response and returns its exact response commit SHA. Requests/responses are not merged solely for delivery.
 
 ## Integration cadence
 

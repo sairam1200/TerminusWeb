@@ -5,6 +5,8 @@
 - Branch: `session/02-web`
 - Files changed: none
 - Commands/evidence: none
+- Independent reviewer/evidence: none
 - Assumptions: none
 - Blockers/requests: none
-- Last verified commit: none
+- Product/task commit: none
+- Handoff commit: resolve from branch HEAD after the status-only handoff commit

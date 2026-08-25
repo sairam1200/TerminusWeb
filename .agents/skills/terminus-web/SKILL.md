@@ -9,4 +9,4 @@ Read the repository `AGENTS.md` and follow its required read order. Then read [t
 
 Edit only `apps/web/**` and the Session 02 status. Keep test doubles clearly labelled. Consume versioned protocol fixtures without redefining them. Verify dependencies from the lockfile/types or primary documentation, and report real browser evidence separately from mocked results.
 
-Do not deploy, edit CI, or change shared contracts. The only scope exception is a source-owned immutable coordination request when a contract change is required.
+Do not deploy, edit CI, or change shared contracts. The only scope exceptions are source-owned immutable requests and target-owned immutable responses using the coordination ownership patterns.

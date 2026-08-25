@@ -15,7 +15,7 @@ Build independent verification and release evidence. Do not repair implementatio
 
 Do not edit product implementation or shared contracts to make tests pass.
 
-The only write-scope exception is creating your own immutable request file under `coordination/requests/` to return a reproducible failure to an owning session.
+The only write-scope exceptions are creating a source-owned immutable request or a target-owned immutable response under `coordination/requests/` using the ownership patterns.
 
 ## First assignments
 

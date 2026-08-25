@@ -1,5 +1,8 @@
 version: 1
 states: [blocked, ready, in_progress, review, verified, done]
+state_semantics:
+  done: Owner Definition of Done plus named independent reviewer evidence; satisfies ordinary implementation dependencies.
+  verified: Session 06 independently reproduced applicable checks against exact commits; required by the integration chain.
 
 tasks:
   - id: S01-001

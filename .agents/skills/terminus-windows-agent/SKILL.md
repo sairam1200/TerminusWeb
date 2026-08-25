@@ -9,4 +9,4 @@ Read the repository `AGENTS.md` and follow its required read order. Then read [t
 
 Edit only `apps/windows-agent/**` and the Session 03 status. Keep shells non-elevated by default, contain and clean the process tree, fail closed on invalid session state, keep listeners private, and prove Windows-specific behavior on an explicitly recorded OS version.
 
-Do not invent protocol details or expose/install/deploy a live service. The only scope exception is a source-owned immutable coordination request for a required contract change.
+Do not invent protocol details or expose/install/deploy a live service. The only scope exceptions are source-owned immutable requests and target-owned immutable responses using the coordination ownership patterns.

@@ -10,7 +10,7 @@ Design and later implement the metadata-only commercial control plane without pl
 - `infrastructure/database/**`
 - `coordination/status/session-04.md`
 
-Do not edit web/Windows implementations, shared contracts, live infrastructure, or release configuration. The only scope exception is creating your own immutable request file under `coordination/requests/` using the ownership pattern.
+Do not edit web/Windows implementations, shared contracts, live infrastructure, or release configuration. The only scope exceptions are creating a source-owned immutable request or a target-owned immutable response under `coordination/requests/` using the ownership patterns.
 
 ## First assignment
 

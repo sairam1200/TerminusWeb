@@ -15,7 +15,6 @@ sessions:
       - docs/ARCHITECTURE.md
       - docs/SHARED_CONTRACTS.md
       - coordination/facts.md
-      - coordination/ownership.yaml
       - coordination/tasks.yaml
       - coordination/status/session-01.md
     integrates: true
@@ -61,3 +60,12 @@ request_files:
   request_pattern: coordination/requests/from-SS-to-TT-id.request.md
   response_pattern: coordination/requests/from-TT-to-SS-id.response.md
   rule: The source owns an immutable request file and the target owns a separate immutable response file; neither session edits the other file.
+
+governance:
+  immutable_under_ordinary_session_tasks:
+    - AGENTS.md
+    - coordination/ownership.yaml
+  change_requires:
+    - dedicated_governance_task
+    - session_06_independent_review
+    - explicit_user_authorization
