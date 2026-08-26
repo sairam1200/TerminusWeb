@@ -98,14 +98,14 @@ tasks:
 
   - id: S03-003
     owner: session_03
-    state: ready
+    state: done
     title: Build runnable non-elevated integration host around private WSS library
     depends_on: [S03-002]
     evidence: Windows-protected credential storage, private-device resolution, mandatory local approval, loopback-only TLS listener, bounded lifecycle/reset/health commands, positive and denied endpoint paths, cleanup and secret-safe logs, exact product and reviewer commits.
 
   - id: S05-005
     owner: session_05
-    state: blocked
+    state: ready
     title: Review TLS/private publication design and prove private-only access
     depends_on: [S03-003, S05-001]
     evidence: Read-only exact-design review proving intended private access, denied LAN/public access, existing browser/OS certificate trust, Funnel disabled, and separation of Tailscale policy from application pairing/authentication; no live mutation.
