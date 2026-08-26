@@ -14,10 +14,11 @@ import (
 )
 
 type sessionRegistry struct {
-	mu      sync.Mutex
-	adapter terminal.Adapter
-	now     func() time.Time
-	active  *managedSession
+	mu           sync.Mutex
+	adapter      terminal.Adapter
+	now          func() time.Time
+	active       *managedSession
+	shuttingDown bool
 }
 
 type managedSession struct {
@@ -39,9 +40,9 @@ type managedSession struct {
 
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
 	r.mu.Lock()
-	if r.active != nil {
+	if r.shuttingDown || r.active != nil {
 		r.mu.Unlock()
-		return "", errors.New("one terminal session is already active")
+		return "", errors.New("terminal session admission is unavailable")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	session, err := r.adapter.Open(ctx, terminal.Config{Columns: dimensions.Columns, Rows: dimensions.Rows})
@@ -200,6 +201,7 @@ func (r *sessionRegistry) close(reason string) error {
 
 func (r *sessionRegistry) shutdown() error {
 	r.mu.Lock()
+	r.shuttingDown = true
 	managed := r.active
 	r.mu.Unlock()
 	if managed == nil {

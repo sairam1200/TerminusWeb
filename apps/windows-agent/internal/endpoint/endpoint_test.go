@@ -532,6 +532,17 @@ func TestClosingSessionKeepsReservationAndReturnsCleanupError(t *testing.T) {
 	}
 }
 
+func TestEndpointShutdownPermanentlyClosesSessionAdmission(t *testing.T) {
+	endpoint, _, _ := newTestEndpoint(t)
+	if err := endpoint.Close(); err != nil {
+		t.Fatal(err)
+	}
+	owner := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000083"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+	if _, err := endpoint.sessions.open(owner, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
+		t.Fatal("session opened after endpoint shutdown began")
+	}
+}
+
 func TestUnsupportedNegotiationAndExpiredChallenge(t *testing.T) {
 	base := time.Now().UTC().Truncate(time.Millisecond)
 	var nanos atomic.Int64
