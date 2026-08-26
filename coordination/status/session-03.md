@@ -1,7 +1,7 @@
 # Session 03 Status
 
 - Current task: S03-001 — Prove non-elevated local ConPTY lifecycle behind an internal adapter
-- State: blocked (fresh resumed run reached the three-attempt safe-stop threshold)
+- State: done (owner Definition of Done and exact-commit independent review pass; awaiting Session 01 queue transition)
 - Branch: `session/03-windows-agent`
 - Files changed:
   - `apps/windows-agent/README.md`
@@ -12,41 +12,36 @@
   - `apps/windows-agent/internal/terminal/conpty_unsupported.go`
   - `apps/windows-agent/internal/terminal/conpty_windows.go`
   - `apps/windows-agent/internal/terminal/conpty_windows_test.go`
-  - `coordination/requests/from-03-to-01-s03-001-conpty-startup-blocker.request.md`
-  - `coordination/requests/from-03-to-01-s03-001-conpty-attachment-resume-blocker.request.md`
+  - Historical immutable blocker requests remain unchanged under `coordination/requests/`.
 - Commands/evidence:
-  - On 2026-08-26, the required files were reread in order and the authoritative `session/01-architecture` queue was inspected at exact commit `a07e570113a6a88ac935c1c23f93ba02373428c7`; S03-001 was `ready` with no dependencies.
-  - The resumed diagnostics started from exact prior product commit `0dd577f0d0f2432ab411394b23a6a72eee44c4f9` and reused a checksum-verified temporary Go 1.25.12 Windows AMD64 toolchain from a non-elevated process.
-  - Fresh attempt 1, exact `0dd577f` with `-NoExit -Command -`: `go test -v ./internal/terminal -run TestConPTYInputOutputResizeAndExit -count=1` failed in 0.27 seconds with `read conpty-output: file already closed`.
-  - Fresh attempt 2 replaced the vet-reported HPCON conversion with a direct `UpdateProcThreadAttribute` call using the documented handle value; the same test failed in 0.25 seconds with the same closed-output condition.
-  - Fresh attempt 3 retained that direct attribute call and used ordinary console-mode PowerShell (`-NoLogo -NoProfile`); the same test failed in 0.26 seconds, and the PowerShell prompt appeared on the Go test runner's console. This proves the child is not attached to the pseudoconsole even though both attribute-update variants returned success.
-  - Experimental product edits were reverted after the safe stop; no failing product change remains in the worktree.
-  - Required repository, contract, Session 03, ownership, task queue, verified facts, and status files were read before edits.
-  - Primary API sources checked: Microsoft `CreatePseudoConsole`, pseudoconsole-session, `ResizePseudoConsole`, `ClosePseudoConsole`, Job Objects, `AssignProcessToJobObject`, `CreateJobObjectW`, `SetInformationJobObject`, and `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` documentation; Go `x/sys/windows` v0.47.0 source/API and module metadata.
-  - Official `go1.25.12.windows-amd64.zip` was downloaded to the temporary directory only and verified against SHA-256 `d5dc82da351b00e5eedd04f41356817d674cc4308131f0f638a5b14c5c3af4cb`; it was not installed system-wide.
-  - Host evidence: registry reports Windows 10 Home Single Language, display version 25H2, build 26200.9168; the test process reported `ElevatedAdministrator=False`.
-  - `gofmt -w` over all Go files: passed.
-  - `go test -short ./...`: passed (`ok terminus/windows-agent/internal/terminal 0.860s`); Windows integration tests are explicitly skipped in short mode.
-  - `go test ./...` attempt 1 (`-NoLogo -NoProfile`): failed; input/output, cancellation, timeout, and close cases observed an early clean PowerShell exit/closed ConPTY output.
-  - `go test ./...` attempt 2 (added `-NoExit`): failed with the same condition.
-  - `go test ./internal/terminal -run TestConPTYInputOutputResizeAndExit -count=1` attempt 3 (added `-NoExit -Command -`): failed after about 0.4 seconds with `read conpty-output: file already closed`.
-  - `go vet ./...`: failed at `conpty_windows.go:115` with `possible misuse of unsafe.Pointer` for the ConPTY process-attribute handle conversion.
-  - `go test -short -race ./...`: not run; Go reported `-race requires cgo; enable cgo by setting CGO_ENABLED=1`.
-  - `git diff --check`/`git show --check 0dd577f`: passed.
-  - Listener/secret scans found no listener, WebSocket server, service installation, logging path, credential, secret, or reusable pairing material; no protocol 0.1 shapes were added.
+  - Required repository, architecture, shared-contract, Definition of Done, Session 03, ownership, authoritative queue, dependency, blocker-request, reviewer-finding, and status files were reread before edits.
+  - Authoritative `session/01-architecture` queue commit `7422df6d827e20bf8c770d1ea0d0762229121f12` records S03-001 as `blocked` with no dependencies and S03-002 as `blocked` on S01-001 plus S03-001. S03-002 was not started.
+  - Root cause: the Go test/agent parent has redirected standard handles, which Windows copied into PowerShell despite the pseudoconsole attribute. `STARTF_USESTDHANDLES` with null standard handles prevents that inheritance and ordinary `-NoLogo -NoProfile` PowerShell now uses ConPTY. The source was Microsoft Terminal discussion 15814, consistent with the escaped prompt recorded in the resumed blocker.
+  - The vet-reported `unsafe.Pointer(HPCON)` conversion was replaced by a direct `UpdateProcThreadAttribute` call that passes the documented HPCON value. `go vet ./...` passes.
+  - Job shutdown explicitly terminates and closes the kill-on-close job. A finite 50 ms process wait plus abandonment handshake ensures no process handle is closed while `WaitForSingleObject` is pending, and the public shutdown path remains bounded.
+  - Real Windows tests prove input/output, resize, natural exit, explicit close, timeout, cancellation, concurrent close/wait, and forced agent-process failure. Each applicable lifecycle case asserts both the PowerShell PID and a spawned `ping.exe -t` descendant have exited.
+  - Agent-failure proof launches a helper agent, records only shell/child PIDs through an atomically published temporary state file, forcibly terminates the helper, and verifies kill-on-job-close removes the complete process tree. Helper output is discarded and every failure path performs bounded reap cleanup.
+  - Official Go 1.25.12 Windows AMD64 ZIP was used only from a temporary directory after SHA-256 verification: `d5dc82da351b00e5eedd04f41356817d674cc4308131f0f638a5b14c5c3af4cb`. Pinned `golang.org/x/sys` v0.47.0 was downloaded into a temporary module cache; nothing was installed.
+  - Host: Windows 10 Home Single Language, display version 25H2, build 26200.9168. Both owner and reviewer integration processes were non-elevated; integration tests fail rather than skip if elevated.
+  - `go fmt ./...`: passed.
+  - `go vet ./...`: passed.
+  - `go test -short ./...`: passed.
+  - `go test -v ./... -count=1`: passed; all real Windows lifecycle tests passed.
+  - `go test ./internal/terminal -run '^TestConPTYConcurrentCloseAndWaitContainsProcessTree$' -count=20`: passed.
+  - After reviewer fixes, `go test ./internal/terminal -run '^(TestWaitForShutdownStopsWaiterBeforeHandleCleanup|TestConPTYAgentFailureContainsProcessTree|TestConPTYConcurrentCloseAndWaitContainsProcessTree)$' -count=10`: passed.
+  - `go test -short -race ./...`: unavailable because the non-installed Windows archive reports `CGO_ENABLED=0`; Go returned `-race requires cgo`. No compiler was installed. The dedicated real-Windows concurrency test and repeated runs are the applicable concurrency evidence.
+  - `git diff --check`, `git show --check`, owned-path review, and scans for listener/WSS/protocol/logging/secret behavior passed. No network listener, protocol 0.1 behavior, service installation, live exposure, terminal logging, or reusable secret was added.
 - Independent reviewer/evidence:
-  - Read-only reviewer `/root/s03_001_readonly_review` inspected exact commit `0dd577f` and made no edits.
-  - Verdict: remain blocked/not done. Ownership, non-elevated rejection, local-only/no-listener boundary, suspended-create/job-assign/resume ordering, and absence of invented protocol 0.1 passed inspection.
-  - High finding: `-NoExit -Command -` is a plausible but unconfirmed mismatch for ConPTY interactive input; earlier variants also failed, so no root cause is claimed.
-  - Medium finding: if `TerminateJobObject` fails, supervision waits indefinitely before closing the kill-on-close job handle.
-  - Medium finding: timeout covers only the direct PowerShell PID, not a spawned process tree, and agent-failure/crash containment is untested.
-  - Low finding: elevated integration runs skip rather than fail, so an elevated `go test ./...` could misleadingly omit all Windows integration coverage.
-- Assumptions:
-  - No protocol or transport behavior is required or permitted for S03-001.
-  - The inbox Windows PowerShell executable inherits the verified non-elevated caller token; no alternate credentials or elevation mechanism are used.
-- Blockers/requests:
-  - Immutable request `coordination/requests/from-03-to-01-s03-001-conpty-startup-blocker.request.md` asks Session 01 to keep S03-001 blocked and S03-002 unavailable.
-  - Immutable request `coordination/requests/from-03-to-01-s03-001-conpty-attachment-resume-blocker.request.md`, committed at `cb91642`, records the fresh attachment evidence and asks Session 01 to return S03-001 to blocked.
-  - S03-001 still requires a confirmed startup fix, a clean vet result, real input/output/resize evidence, timeout/cancellation/close/agent-failure process-tree cleanup proof, and an applicable race/concurrency check.
-- Product/task commit: `0dd577f` (`wip(S03-001): preserve blocked ConPTY lifecycle proof`)
-- Handoff commit: resolve from branch HEAD after the status-only handoff commit
+  - Read-only reviewer `/root/s03_001_readonly_review` inspected exact final product tree `637f1e99970ee543f3028a9e899bc8001a16a8e1` and confirmed ancestry `235b28a -> cc836ed -> 637f1e9`; no edits or commits were made.
+  - Final verdict: PASS for S03-001 product completion with no remaining severity findings.
+  - Independent `gofmt -d` passed with no diff; `go vet ./...` passed; `go test -short ./... -count=1` passed in 2.648s; `go test -v ./... -count=1 -timeout=120s` passed in 6.182s.
+  - Reviewer repeated the bounded-wait, agent-failure, and concurrent close/wait tests five times each; all 15 executions passed in 5.119s.
+  - Reviewer confirmed non-elevated behavior, process-tree containment, owned paths, no listener/WSS/protocol/service/deployment/public exposure, and absence of logging, secrets, credentials, reusable pairing material, or user terminal plaintext artifacts.
+- Assumptions/limitations:
+  - S03-001 deliberately contains no listener or transport. Therefore listener scope is proven by absence of listener code; private WSS remains S03-002 work after its dependencies are satisfied.
+  - This owner/reviewer `done` evidence is not Session 06 `verified` evidence.
+- Blockers/next task:
+  - The two historical S03-001 blocker requests are resolved by the final product tree; Session 01 still owns the authoritative queue transition.
+  - Do not begin S03-002 until Session 01 marks S03-001 `done`. No S03-002 work has begun.
+- Product/task commit: `637f1e99970ee543f3028a9e899bc8001a16a8e1` (includes product ancestry `235b28a48b5c8c888164e2e0c1def93b8505d5c3` and reviewer-fix commit `cc836ed491b76496d32ee8c059a3ecaeefdda120`)
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit
