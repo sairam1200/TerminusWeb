@@ -51,15 +51,16 @@ type Config struct {
 }
 
 type Endpoint struct {
-	cfg           Config
-	pairing       pairingManager
-	limiter       *rateLimiter
-	sessions      sessionRegistry
-	upgrader      websocket.Upgrader
-	mu            sync.Mutex
-	connections   map[*connection]struct{}
-	connectionIDs map[string]struct{}
-	closed        bool
+	cfg                Config
+	pairing            pairingManager
+	limiter            *rateLimiter
+	sessions           sessionRegistry
+	upgrader           websocket.Upgrader
+	mu                 sync.Mutex
+	connections        map[*connection]struct{}
+	connectionIDs      map[string]struct{}
+	revokedCredentials map[string]struct{}
+	closed             bool
 }
 
 func New(config Config) (*Endpoint, error) {
@@ -78,7 +79,7 @@ func New(config Config) (*Endpoint, error) {
 	if config.Log == nil {
 		config.Log = func(Event) {}
 	}
-	e := &Endpoint{cfg: config, limiter: newRateLimiter(), connections: make(map[*connection]struct{}), connectionIDs: make(map[string]struct{})}
+	e := &Endpoint{cfg: config, limiter: newRateLimiter(), connections: make(map[*connection]struct{}), connectionIDs: make(map[string]struct{}), revokedCredentials: make(map[string]struct{})}
 	e.sessions.adapter = config.Terminal
 	e.sessions.now = config.Now
 	e.upgrader = websocket.Upgrader{
@@ -98,10 +99,11 @@ func (e *Endpoint) Close() error {
 		connections = append(connections, connection)
 	}
 	e.mu.Unlock()
+	err := e.sessions.shutdown()
 	for _, connection := range connections {
 		connection.shutdown()
 	}
-	return e.sessions.close("agent_shutdown")
+	return err
 }
 
 func (e *Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -187,19 +189,40 @@ func (e *Endpoint) RevokeCredential(ctx context.Context, credentialID string) er
 	if err := e.cfg.Credentials.Delete(ctx, credentialID); err != nil {
 		return err
 	}
-	_ = e.sessions.revokeCredential(credentialID)
 	e.mu.Lock()
+	e.revokedCredentials[credentialID] = struct{}{}
 	connections := make([]*connection, 0, len(e.connections))
 	for connection := range e.connections {
 		connections = append(connections, connection)
 	}
 	e.mu.Unlock()
+	sessionErr := e.sessions.revokeCredential(credentialID)
 	for _, connection := range connections {
 		if connection.credentialID() == credentialID {
 			connection.fail(protocol.NewError(protocol.AuthenticationFailed, 1008, nil))
 		}
 	}
-	return nil
+	return sessionErr
+}
+
+func (e *Endpoint) bindCredential(connection *connection, credential Credential) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, revoked := e.revokedCredentials[credential.ID]; revoked {
+		return false
+	}
+	connection.setCredential(credential)
+	return true
+}
+
+func (e *Endpoint) authorizeCredential(connection *connection, credentialID string, deadline time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, revoked := e.revokedCredentials[credentialID]; revoked {
+		return false
+	}
+	connection.setAuthorizationDeadline(deadline)
+	return true
 }
 
 func validateOrigin(value string) error {
@@ -327,7 +350,10 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 				c.finishAttempt(false)
 				return protocol.NewError(protocol.AuthenticationFailed, 1008, nil)
 			}
-			c.setCredential(credential)
+			if !c.endpoint.bindCredential(c, credential) {
+				c.finishAttempt(false)
+				return protocol.NewError(protocol.AuthenticationFailed, 1008, nil)
+			}
 			return c.issueChallenge()
 		}
 	case *protocol.PairingRequestPayload:
@@ -362,7 +388,11 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 			c.finishAttempt(false)
 			return protocol.NewError(protocol.PairingFailed, 1011, err)
 		}
-		c.setCredential(credential)
+		if !c.endpoint.bindCredential(c, credential) {
+			_ = c.endpoint.cfg.Credentials.Delete(context.Background(), credential.ID)
+			c.finishAttempt(false)
+			return protocol.NewError(protocol.PairingFailed, 1008, nil)
+		}
 		if err := c.send("pairing_result", protocol.PairingResultPayload{CredentialID: credential.ID, CredentialSecret: protocol.EncodeBase64(credential.Secret[:]), CredentialExpiresAt: protocol.FormatTimestamp(credential.ExpiresAt)}); err != nil {
 			_ = c.endpoint.cfg.Credentials.Delete(context.Background(), credential.ID)
 			c.finishAttempt(false)
@@ -387,7 +417,10 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 			return protocol.NewError(protocol.AuthenticationFailed, 1008, nil)
 		}
 		deadline := minTime(now.Add(authorizationLifetime), credential.ExpiresAt)
-		c.setAuthorizationDeadline(deadline)
+		if !c.endpoint.authorizeCredential(c, credential.ID, deadline) {
+			c.finishAttempt(false)
+			return protocol.NewError(protocol.AuthenticationFailed, 1008, nil)
+		}
 		c.finishAttempt(true)
 		c.ws.SetReadDeadline(time.Time{})
 		if err := c.send("auth_result", protocol.AuthResultPayload{Authenticated: true, AuthorizationExpiresAt: protocol.FormatTimestamp(deadline)}); err != nil {
@@ -458,7 +491,12 @@ func (c *connection) issueChallenge() error {
 func (c *connection) send(messageType string, payload any) error {
 	c.protocolMu.Lock()
 	defer c.protocolMu.Unlock()
-	frame, err := protocol.NewFrame(messageType, c.id, c.machine.NextSequence(protocol.AgentToClient), payload)
+	sequence, available := c.machine.NextSequence(protocol.AgentToClient)
+	if !available {
+		c.cleanSequenceClose()
+		return protocol.ErrSequenceExhausted
+	}
+	frame, err := protocol.NewFrame(messageType, c.id, sequence, payload)
 	if err != nil {
 		return err
 	}
@@ -476,10 +514,18 @@ func (c *connection) send(messageType string, payload any) error {
 	}
 	select {
 	case err := <-item.result:
+		if err == nil && sequence == protocol.MaxSequence {
+			c.cleanSequenceClose()
+		}
 		return err
 	case <-c.done:
 		return io.ErrClosedPipe
 	}
+}
+
+func (c *connection) cleanSequenceClose() {
+	_ = c.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
+	go c.shutdown()
 }
 
 func (c *connection) writeLoop() {

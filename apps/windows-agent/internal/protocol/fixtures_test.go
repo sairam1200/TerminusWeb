@@ -119,6 +119,9 @@ func TestMaximumSequenceDuplicateIsReplay(t *testing.T) {
 	if err := machine.Apply(ClientToAgent, decoded); err != nil {
 		t.Fatal(err)
 	}
+	if _, available := machine.NextSequence(ClientToAgent); available {
+		t.Fatal("sequence remained available after maximum")
+	}
 	if code, _, ok := ErrorDetails(machine.Apply(ClientToAgent, decoded)); !ok || code != SequenceReplay {
 		t.Fatalf("code = %s", code)
 	}
