@@ -30,6 +30,11 @@ type dpapiStore struct {
 	path string
 }
 
+type processStoreLock struct {
+	file *os.File
+	over windows.Overlapped
+}
+
 type storedCredential struct {
 	ID        string    `json:"id"`
 	Secret    []byte    `json:"secret"`
@@ -68,6 +73,11 @@ func (s *dpapiStore) Put(ctx context.Context, credential endpoint.Credential) er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockProcess()
+	if err != nil {
+		return err
+	}
+	defer lock.Unlock()
 	records, err := s.readLocked()
 	if err != nil {
 		return err
@@ -84,6 +94,11 @@ func (s *dpapiStore) Get(ctx context.Context, id string) (endpoint.Credential, e
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockProcess()
+	if err != nil {
+		return endpoint.Credential{}, err
+	}
+	defer lock.Unlock()
 	records, err := s.readLocked()
 	if err != nil {
 		return endpoint.Credential{}, err
@@ -103,6 +118,11 @@ func (s *dpapiStore) Delete(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockProcess()
+	if err != nil {
+		return err
+	}
+	defer lock.Unlock()
 	records, err := s.readLocked()
 	if err != nil {
 		return err
@@ -117,6 +137,11 @@ func (s *dpapiStore) IDs(ctx context.Context) ([]string, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockProcess()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Unlock()
 	records, err := s.readLocked()
 	if err != nil {
 		return nil, err
@@ -135,10 +160,39 @@ func (s *dpapiStore) Reset(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockProcess()
+	if err != nil {
+		return err
+	}
+	defer lock.Unlock()
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove protected credential store: %w", err)
 	}
 	return nil
+}
+
+func (s *dpapiStore) lockProcess() (*processStoreLock, error) {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
+		return nil, fmt.Errorf("create credential store lock directory: %w", err)
+	}
+	file, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open credential store lock: %w", err)
+	}
+	lock := &processStoreLock{file: file}
+	if err := windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &lock.over); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("lock credential store: %w", err)
+	}
+	return lock, nil
+}
+
+func (l *processStoreLock) Unlock() {
+	if l == nil || l.file == nil {
+		return
+	}
+	_ = windows.UnlockFileEx(windows.Handle(l.file.Fd()), 0, 1, 0, &l.over)
+	_ = l.file.Close()
 }
 
 func (s *dpapiStore) readLocked() (map[string]storedCredential, error) {

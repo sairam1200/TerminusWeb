@@ -9,22 +9,29 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
-	"net/http/httptest"
+	"net/http"
 	"testing"
 	"time"
 )
 
-func TestLoopbackDeviceResolverRejectsNonLoopbackPeer(t *testing.T) {
-	resolver := loopbackDeviceResolver("local-integration-device")
-	request := httptest.NewRequest("GET", "https://127.0.0.1/terminal", nil)
-	request.RemoteAddr = "192.0.2.10:443"
-	if _, err := resolver(request); err == nil {
-		t.Fatal("non-loopback peer was accepted")
+func TestValidateLoopbackAddressRejectsBeforeBind(t *testing.T) {
+	if _, err := validateLoopbackAddress("0.0.0.0:0"); err == nil {
+		t.Fatal("wildcard listener was accepted")
 	}
-	request.RemoteAddr = "127.0.0.1:443"
-	identity, err := resolver(request)
-	if err != nil || identity != "local-integration-device" {
-		t.Fatalf("loopback identity resolution failed: %q, %v", identity, err)
+	if _, err := validateLoopbackAddress("192.0.2.10:0"); err == nil {
+		t.Fatal("LAN listener was accepted")
+	}
+	address, err := validateLoopbackAddress("127.0.0.1:0")
+	if err != nil || !address.IP.IsLoopback() {
+		t.Fatalf("loopback listener was rejected: %v", err)
+	}
+}
+
+func TestCertificateDeviceResolverRequiresVerifiedPeer(t *testing.T) {
+	resolver := certificateDeviceResolver(x509.NewCertPool(), "integration-device")
+	request := &http.Request{RemoteAddr: "127.0.0.1:1"}
+	if _, err := resolver(request); err == nil {
+		t.Fatal("missing verified device certificate was accepted")
 	}
 }
 
