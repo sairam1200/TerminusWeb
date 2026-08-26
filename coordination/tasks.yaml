@@ -14,21 +14,21 @@ tasks:
 
   - id: S02-001
     owner: session_02
-    state: review
+    state: done
     title: Scaffold responsive Next.js PWA and terminal adapter boundary
     depends_on: []
     evidence: Build, typecheck, component tests, and mock adapter clearly labelled.
 
   - id: S02-002
     owner: session_02
-    state: blocked
+    state: ready
     title: Integrate browser terminal with protocol 0.1
     depends_on: [S01-001, S02-001]
     evidence: Shared fixtures pass and malformed frames fail closed.
 
   - id: S03-001
     owner: session_03
-    state: ready
+    state: blocked
     title: Prove non-elevated local ConPTY lifecycle behind an internal adapter
     depends_on: []
     evidence: Windows test output for open, input/output, resize, close, timeout, and cleanup.

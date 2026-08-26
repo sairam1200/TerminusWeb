@@ -21,3 +21,10 @@
   - Session 06 branch `61ae8665e6a8770f955dd6556282296cee6d88f2`; status records final cumulative product commit `4d01799`, named reviewer, and reproduced passing checks, so S06-001 is `done`.
 - Queue transitions made: S02-001 `ready` -> `review`; S04-001 `ready` -> `done`; S05-001 `ready` -> `done`; S06-001 `ready` -> `done`; S05-003 `blocked` -> `ready` because its only dependency S04-001 is now done.
 - No implementation, merge, push, deployment, or live infrastructure changes were made.
+
+## Queue review evidence (2026-08-26, resumed)
+
+- Session 02 exact branch ref `session/02-web` at `0ded9446187327ade915401bfc053cf51dff829c0` records S02-001 `done`, product commit `055692f46ac61228f0592af96f06a99e55e431ce`, named independent reviewer `/root/s02_001_independent_review`, and reproduced passing owner checks. Queue transition: S02-001 `review` -> `done`.
+- Session 03 exact branch ref `session/03-windows-agent` at `7e5e72bf09410a144a0c909877d9226af72e70f9` records S03-001 blocked after the safe-stopping threshold, with immutable blocker requests and no passing lifecycle evidence. Queue transition: stale S03-001 `ready` -> `blocked`.
+- Because S01-001 and S02-001 are done, S02-002 is now `ready`. S03-002 remains blocked on S03-001; S05-002 remains blocked on S02-002 and S03-002; S06-002 remains blocked on its full dependency set.
+- No Session 02/03 implementation files were changed.
