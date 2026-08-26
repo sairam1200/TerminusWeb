@@ -14,7 +14,7 @@ tasks:
 
   - id: S02-001
     owner: session_02
-    state: ready
+    state: review
     title: Scaffold responsive Next.js PWA and terminal adapter boundary
     depends_on: []
     evidence: Build, typecheck, component tests, and mock adapter clearly labelled.
@@ -42,14 +42,14 @@ tasks:
 
   - id: S04-001
     owner: session_04
-    state: ready
+    state: done
     title: Define control-plane domain model and API contract without terminal relay
     depends_on: []
     evidence: Schema, tenant isolation invariants, lease boundaries, and API tests.
 
   - id: S05-001
     owner: session_05
-    state: ready
+    state: done
     title: Produce threat model and proposed deny-by-default Tailscale policy
     depends_on: []
     evidence: Threat cases, allowed/denied matrix, rollback plan, and no live mutation.
@@ -63,14 +63,14 @@ tasks:
 
   - id: S05-003
     owner: session_05
-    state: blocked
+    state: ready
     title: Review control-plane tenancy and authorization contract
     depends_on: [S04-001]
     evidence: Cross-tenant and privilege-escalation contract findings with reproducible cases.
 
   - id: S06-001
     owner: session_06
-    state: ready
+    state: done
     title: Create independent contract and browser verification harness
     depends_on: []
     evidence: Tests initially run against labelled test doubles and define real-integration switch.
