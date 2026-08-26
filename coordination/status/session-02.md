@@ -1,9 +1,9 @@
 # Session 02 Status
 
 - Current task: `S02-002` — Implement browser protocol client and private WSS behavior
-- State: blocked after the third real-path attempt; trusted certificate/private publication authorization remains absent and is escalated to Session 01. Deterministic Session 02 owner gate remains passed.
+- State: blocked; deterministic Session 02 owner gate remains passed, but no exact Preview Origin or endpoint-ready private WSS path exists. Vercel's mandatory first-deployment Production classification now requires a Session 01 decision before Preview bootstrap can continue.
 - Branch: `session/02-web`
-- Authoritative queue: latest Session 01 commit `ed4cc9bd6aad6bd36373eeaa36775b1d8df2c397`.
+- Authoritative queue: latest Session 01 commit `aca900c02d0608ec38b0317a418ef8393a91cabf`.
 - Protocol consumed: exact Session 01 product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`, wire version `0.1`, subprotocol `terminus.v0_1`.
 
 ## Dependency verification
@@ -106,3 +106,18 @@
 - This is the third S02-002 attempt stopped by the same missing live-publication prerequisite. Per the safe-stopping rule, Session 02 created immutable request `828d7485217464e073bb409bc4ea5decec340408` at `coordination/requests/from-02-to-01-s02-002-live-publication-blocker.request.md` and stopped.
 - No real WSS URL or approved Origin existed, so the requested real lifecycle/negative-path checks, desktop/iPhone real-path browser checks, configured CSP proof, deterministic reruns, repairs, or new independent review were run. Existing product tip remains `aec63af0ce7512341555910e59f3617543869c4a` with its prior deterministic reviewer PASS.
 - No `apps/web/**` product file, Session 03/05 file, shared contract, certificate, listener, Tailscale setting, deployment, merge, push, or public exposure was changed.
+
+## Authorized Vercel Preview bootstrap attempt
+
+- Read the exact Session 01 request at `e1c5cb7cbcff2a271c73d5dcf452d01a0ca39d57:coordination/requests/from-01-to-02-s02-002-vercel-preview-origin.request.md`, latest Session 01 queue/status `aca900c02d0608ec38b0317a418ef8393a91cabf`, exact S03/S05 dependency handoffs, ownership, and all required sources. No newer committed Session 01 deployment authorization existed; the user's direct prompt supplied the narrow push/Preview authorization.
+- `git push origin d479f5b3f058d01dccc3258e6c50bb7d1865e52e:refs/heads/session/02-web` created the remote branch. A read-back `git ls-remote --heads origin session/02-web` returned exactly `d479f5b3f058d01dccc3258e6c50bb7d1865e52e`.
+- `npm view vercel version engines --json` verified Vercel CLI `59.5.0` and Node requirement `>=18`; the local runtime was Node `24.15.0`. Official Vercel CLI/project/environment documentation was read before live use.
+- `npx --yes vercel@59.5.0 whoami --no-color` initially reported logged out. The official device flow authenticated the CLI to the already signed-in Vercel account without recording a token or auth code in repository evidence.
+- Created Hobby project `gaddr/terminus-web`, ID `prj_1Rl0q10z0cgPi64e0LchB0eXXpC7`. The Vercel dashboard saved Root Directory `apps/web`; final `vercel project inspect terminus-web --scope gaddr` reports that exact root.
+- Before the first deployment, `vercel env ls preview` reported no environment variables. `NEXT_PUBLIC_TERMINUS_WEB_ORIGIN` and `NEXT_PUBLIC_TERMINUS_WSS_ENDPOINT` were not set.
+- The first `vercel deploy --target preview --yes --scope gaddr --logs --json` unexpectedly returned `target: production`, deployment `dpl_9eMRUXo1C4T6cFSehtwodq41pGHW`, despite the explicit Preview target. This matches Vercel's documented platform rule that a new project's first deployment is automatically marked Production.
+- The exact unintended deployment was immediately removed with `vercel remove dpl_9eMRUXo1C4T6cFSehtwodq41pGHW --yes --scope gaddr`. Follow-up inspect returned not found; `vercel list terminus-web --scope gaddr` reports no deployments. The guarded environment rejected an ambiguous default-deploy retry, and Session 02 did not bypass that rejection.
+- Vercel CLI-created local `.env.local` (containing generated credential material) and `.vercel/` metadata were removed without reading secret contents; its `.gitignore` edit was reverted. `git diff --check` and `git status --short --branch` then showed a clean reviewed web tree.
+- No exact Preview HTTPS Origin exists, so no Origin/WSS environment configuration, redeploy, live browser gate, or response claiming deployment readiness was created. No terminal path, production deployment, product edit, merge, main deployment, Tailscale change, certificate change, or public terminal exposure remains.
+- Immutable decision request: `d1345d771b4cf2152f389bbd59a9a02727d18174:coordination/requests/from-02-to-01-s02-002-vercel-first-deployment-preview-blocker.request.md`. Session 01 must provide an exact path reconciling Vercel's first-deployment rule with the user's no-Production boundary.
+- Existing exact cumulative web product remains `aec63af0ce7512341555910e59f3617543869c4a`; no product commit or new independent product review was required for this coordination-only attempt.
