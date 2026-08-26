@@ -33,6 +33,8 @@ type managedSession struct {
 	detachedConnectionID string
 	pending              []byte
 	closed               bool
+	closeDone            chan struct{}
+	closeErr             error
 }
 
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
@@ -55,7 +57,7 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 		r.mu.Unlock()
 		return "", err
 	}
-	managed := &managedSession{id: id, credentialID: owner.credentialID(), terminal: session, cancel: cancel, owner: owner}
+	managed := &managedSession{id: id, credentialID: owner.credentialID(), terminal: session, cancel: cancel, owner: owner, closeDone: make(chan struct{})}
 	r.active = managed
 	r.mu.Unlock()
 	go r.copyOutput(managed)
@@ -196,6 +198,16 @@ func (r *sessionRegistry) close(reason string) error {
 	return r.closeManaged(managed, reason)
 }
 
+func (r *sessionRegistry) shutdown() error {
+	r.mu.Lock()
+	managed := r.active
+	r.mu.Unlock()
+	if managed == nil {
+		return nil
+	}
+	return r.closeManagedMode(managed, "agent_shutdown", false)
+}
+
 func (r *sessionRegistry) disconnected(owner *connection) {
 	r.mu.Lock()
 	managed := r.active
@@ -270,22 +282,35 @@ func (r *sessionRegistry) expire(managed *managedSession, expected time.Time) {
 }
 
 func (r *sessionRegistry) closeManaged(managed *managedSession, reason string) error {
+	return r.closeManagedMode(managed, reason, true)
+}
+
+func (r *sessionRegistry) closeManagedMode(managed *managedSession, reason string, notify bool) error {
 	r.mu.Lock()
 	if managed.closed {
+		done := managed.closeDone
 		r.mu.Unlock()
-		return nil
+		<-done
+		r.mu.Lock()
+		err := managed.closeErr
+		r.mu.Unlock()
+		return err
 	}
 	managed.closed = true
-	if r.active == managed {
-		r.active = nil
-	}
 	owner := managed.owner
 	managed.owner = nil
 	r.mu.Unlock()
 	managed.cancel()
 	err := managed.terminal.Close()
-	if owner != nil && owner.sessionState() == protocol.SessionOpen {
+	r.mu.Lock()
+	managed.closeErr = err
+	if r.active == managed {
+		r.active = nil
+	}
+	r.mu.Unlock()
+	if notify && owner != nil && owner.sessionState() == protocol.SessionOpen {
 		_ = owner.send("session_closed", protocol.SessionClosedPayload{SessionID: managed.id, Reason: reason})
 	}
+	close(managed.closeDone)
 	return err
 }

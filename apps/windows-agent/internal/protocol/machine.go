@@ -14,11 +14,11 @@ func NewMachine(connection ConnectionState, session SessionState, nextClient, ne
 	return &Machine{Connection: connection, Session: session, nextClient: nextClient, nextAgent: nextAgent}
 }
 
-func (m *Machine) NextSequence(direction Direction) uint64 {
+func (m *Machine) NextSequence(direction Direction) (uint64, bool) {
 	if direction == ClientToAgent {
-		return m.nextClient
+		return m.nextClient, !m.clientExhausted
 	}
-	return m.nextAgent
+	return m.nextAgent, !m.agentExhausted
 }
 
 func (m *Machine) SetSession(state SessionState) { m.Session = state }

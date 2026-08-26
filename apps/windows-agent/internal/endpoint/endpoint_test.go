@@ -44,6 +44,37 @@ type memoryCredentialStore struct {
 	credentials map[string]Credential
 }
 
+type blockingCredentialStore struct {
+	*memoryCredentialStore
+	getStarted chan struct{}
+	releaseGet chan struct{}
+	once       sync.Once
+}
+
+func (s *blockingCredentialStore) Get(ctx context.Context, id string) (Credential, error) {
+	credential, err := s.memoryCredentialStore.Get(ctx, id)
+	s.once.Do(func() { close(s.getStarted) })
+	<-s.releaseGet
+	return credential, err
+}
+
+type blockingCloseAdapter struct{ session *blockingCloseSession }
+type blockingCloseSession struct {
+	*fakeSession
+	closeStarted chan struct{}
+	releaseClose chan struct{}
+	closeErr     error
+	onceBlock    sync.Once
+}
+
+func (a *blockingCloseAdapter) Open(context.Context, terminal.Config) (terminal.Session, error) {
+	return a.session, nil
+}
+func (s *blockingCloseSession) Close() error {
+	s.onceBlock.Do(func() { close(s.closeStarted); <-s.releaseClose; s.fakeSession.Close() })
+	return s.closeErr
+}
+
 func newMemoryCredentialStore() *memoryCredentialStore {
 	return &memoryCredentialStore{credentials: make(map[string]Credential)}
 }
@@ -442,6 +473,62 @@ func TestCredentialRevocationClosesAuthorizationAndSession(t *testing.T) {
 	client.read("session_closed")
 	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
 		t.Fatalf("code = %s", got)
+	}
+}
+
+func TestRevocationCannotRaceCredentialBinding(t *testing.T) {
+	memory := newMemoryCredentialStore()
+	store := &blockingCredentialStore{memoryCredentialStore: memory, getStarted: make(chan struct{}), releaseGet: make(chan struct{})}
+	credential := Credential{ID: "30000000-0000-4000-8000-000000000080", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := store.Put(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{}
+	endpoint, err := New(Config{AllowedOrigin: testOrigin, AgentID: testAgentID, Terminal: adapter, Credentials: store, ApprovePairing: func(context.Context, PairingApproval) bool { return true }, ResolveDevice: func(*http.Request) (string, error) { return "revocation-race-device", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	ws, _, err := dial(t, server, testOrigin, protocol.Subprotocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &testClient{t: t, ws: ws, id: "10000000-0000-4000-8000-000000000080"}
+	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, CredentialID: credential.ID, SupportedVersions: []string{"0.1"}})
+	client.read("hello_ack")
+	<-store.getStarted
+	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(store.releaseGet)
+	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
+		t.Fatalf("code = %s", got)
+	}
+}
+
+func TestClosingSessionKeepsReservationAndReturnsCleanupError(t *testing.T) {
+	sentinel := errors.New("synthetic cleanup failure")
+	inner := &fakeSession{output: make(chan []byte), closed: make(chan struct{})}
+	blocking := &blockingCloseSession{fakeSession: inner, closeStarted: make(chan struct{}), releaseClose: make(chan struct{}), closeErr: sentinel}
+	endpoint, err := New(Config{AllowedOrigin: testOrigin, AgentID: testAgentID, Terminal: &blockingCloseAdapter{session: blocking}, Credentials: newMemoryCredentialStore(), ApprovePairing: func(context.Context, PairingApproval) bool { return true }, ResolveDevice: func(*http.Request) (string, error) { return "cleanup-device", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000081"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+	if _, err := endpoint.sessions.open(owner, protocol.Dimensions{Columns: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- endpoint.Close() }()
+	<-blocking.closeStarted
+	other := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000082"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+	if _, err := endpoint.sessions.open(other, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
+		t.Fatal("new session opened while prior cleanup was in progress")
+	}
+	close(blocking.releaseClose)
+	if err := <-result; !errors.Is(err, sentinel) {
+		t.Fatalf("cleanup error = %v", err)
 	}
 }
 
