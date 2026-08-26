@@ -160,26 +160,31 @@ func TestConPTYAgentFailureContainsProcessTree(t *testing.T) {
 	go func() {
 		waitDone <- command.Wait()
 	}()
-	killed := false
+	helperReaped := false
 	defer func() {
-		if !killed {
+		if !helperReaped {
 			_ = command.Process.Kill()
-			<-waitDone
+			select {
+			case <-waitDone:
+			case <-time.After(shutdownWaitPeriod):
+				t.Error("timed out reaping agent-failure helper")
+			}
 		}
 	}()
 
-	shellPID, childPID, err := waitForAgentFailureState(statePath, waitDone)
+	shellPID, childPID, reaped, err := waitForAgentFailureState(statePath, waitDone)
 	if err != nil {
-		killed = true // Wait already reaped a helper that exited before readiness.
+		helperReaped = reaped
 		t.Fatalf("wait for agent-failure helper: %v", err)
 	}
 	if err := command.Process.Kill(); err != nil {
 		t.Fatalf("terminate agent-failure helper: %v", err)
 	}
-	if err := <-waitDone; err == nil {
+	waitErr := <-waitDone
+	helperReaped = true
+	if waitErr == nil {
 		t.Fatal("agent-failure helper exited cleanly after forced termination")
 	}
-	killed = true
 	assertProcessExited(t, shellPID)
 	assertProcessExited(t, childPID)
 }
@@ -201,8 +206,12 @@ func TestConPTYAgentFailureHelper(t *testing.T) {
 	conpty := session.(*conPTYSession)
 	childPID := startSyntheticChild(t, session)
 	state := []byte(fmt.Sprintf("%d %d", conpty.pid, childPID))
-	if err := os.WriteFile(statePath, state, 0o600); err != nil {
+	temporaryStatePath := statePath + ".tmp"
+	if err := os.WriteFile(temporaryStatePath, state, 0o600); err != nil {
 		t.Fatalf("write agent-failure state: %v", err)
+	}
+	if err := os.Rename(temporaryStatePath, statePath); err != nil {
+		t.Fatalf("publish agent-failure state: %v", err)
 	}
 	select {}
 }
@@ -279,7 +288,7 @@ func requireConPTYIntegration(t *testing.T) {
 	}
 }
 
-func waitForAgentFailureState(path string, helperDone <-chan error) (uint32, uint32, error) {
+func waitForAgentFailureState(path string, helperDone <-chan error) (uint32, uint32, bool, error) {
 	deadline := time.NewTimer(integrationTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -289,21 +298,21 @@ func waitForAgentFailureState(path string, helperDone <-chan error) (uint32, uin
 		if err == nil {
 			var shellPID, childPID uint32
 			if _, err := fmt.Sscanf(string(data), "%d %d", &shellPID, &childPID); err != nil {
-				return 0, 0, fmt.Errorf("parse state: %w", err)
+				return 0, 0, false, fmt.Errorf("parse state: %w", err)
 			}
-			return shellPID, childPID, nil
+			return shellPID, childPID, false, nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
-			return 0, 0, fmt.Errorf("read state: %w", err)
+			return 0, 0, false, fmt.Errorf("read state: %w", err)
 		}
 		select {
 		case err := <-helperDone:
 			if err == nil {
-				return 0, 0, errors.New("helper exited cleanly before readiness")
+				return 0, 0, true, errors.New("helper exited cleanly before readiness")
 			}
-			return 0, 0, fmt.Errorf("helper exited before ready: %w", err)
+			return 0, 0, true, fmt.Errorf("helper exited before ready: %w", err)
 		case <-deadline.C:
-			return 0, 0, errors.New("timed out waiting for helper")
+			return 0, 0, false, errors.New("timed out waiting for helper")
 		case <-ticker.C:
 		}
 	}
