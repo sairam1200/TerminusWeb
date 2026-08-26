@@ -9,16 +9,21 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-const forcedExitCode uint32 = 0x5445524d // "TERM"; local lifecycle only.
+const (
+	forcedExitCode     uint32 = 0x5445524d // "TERM"; local lifecycle only.
+	shutdownWaitPeriod        = 5 * time.Second
+)
 
 var (
 	kernel32                = windows.NewLazySystemDLL("kernel32.dll")
 	procCreatePseudoConsole = kernel32.NewProc("CreatePseudoConsole")
+	procUpdateProcAttribute = kernel32.NewProc("UpdateProcThreadAttribute")
 	procResizePseudoConsole = kernel32.NewProc("ResizePseudoConsole")
 	procClosePseudoConsole  = kernel32.NewProc("ClosePseudoConsole")
 )
@@ -110,11 +115,7 @@ func openLocalSession(parent context.Context, cfg Config) (_ Session, retErr err
 		return nil, fmt.Errorf("create process attribute list: %w", err)
 	}
 	defer attributes.Delete()
-	if err := attributes.Update(
-		windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-		unsafe.Pointer(s.hpc),
-		unsafe.Sizeof(s.hpc),
-	); err != nil {
+	if err := attachPseudoConsole(attributes, s.hpc); err != nil {
 		return nil, fmt.Errorf("attach pseudoconsole process attribute: %w", err)
 	}
 
@@ -130,9 +131,6 @@ func openLocalSession(parent context.Context, cfg Config) (_ Session, retErr err
 		powerShellPath,
 		"-NoLogo",
 		"-NoProfile",
-		"-NoExit",
-		"-Command",
-		"-",
 	}))
 	if err != nil {
 		return nil, fmt.Errorf("encode PowerShell command line: %w", err)
@@ -140,6 +138,10 @@ func openLocalSession(parent context.Context, cfg Config) (_ Session, retErr err
 
 	startup := windows.StartupInfoEx{}
 	startup.Cb = uint32(unsafe.Sizeof(startup))
+	// The agent and its test runner can have redirected standard handles.
+	// Explicitly selecting null standard handles prevents Windows from copying
+	// those redirected handles into the child instead of using the ConPTY.
+	startup.Flags = windows.STARTF_USESTDHANDLES
 	startup.ProcThreadAttributeList = attributes.List()
 	processInfo := windows.ProcessInformation{}
 	creationFlags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_SUSPENDED | windows.CREATE_UNICODE_ENVIRONMENT)
@@ -263,11 +265,11 @@ func (s *conPTYSession) supervise(ctx context.Context, cancel context.CancelFunc
 	case request := <-s.stop:
 		cause = request.cause
 		terminateErr = s.terminateJob()
-		result = <-processDone
+		result = waitForShutdown(processDone)
 	case <-ctx.Done():
 		cause = ctx.Err()
 		terminateErr = s.terminateJob()
-		result = <-processDone
+		result = waitForShutdown(processDone)
 	}
 
 	cleanupErr := s.releaseHandles()
@@ -284,15 +286,38 @@ func (s *conPTYSession) supervise(ctx context.Context, cancel context.CancelFunc
 }
 
 func (s *conPTYSession) terminateJob() error {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
+	s.stateMu.Lock()
 	if s.closed || s.job == 0 {
+		s.stateMu.Unlock()
 		return nil
 	}
-	if err := windows.TerminateJobObject(s.job, forcedExitCode); err != nil {
-		return fmt.Errorf("terminate containment job: %w", err)
+	job := s.job
+	s.job = 0
+	s.stateMu.Unlock()
+
+	// Closing a kill-on-close job is the deterministic fallback if explicit
+	// termination fails. Removing it from session state first prevents cleanup
+	// from racing a second close against this path.
+	terminateErr := windows.TerminateJobObject(job, forcedExitCode)
+	closeErr := windows.CloseHandle(job)
+	if terminateErr != nil {
+		terminateErr = fmt.Errorf("terminate containment job: %w", terminateErr)
 	}
-	return nil
+	if closeErr != nil {
+		closeErr = fmt.Errorf("close containment job after termination: %w", closeErr)
+	}
+	return errors.Join(terminateErr, closeErr)
+}
+
+func waitForShutdown(processDone <-chan processResult) processResult {
+	timer := time.NewTimer(shutdownWaitPeriod)
+	defer timer.Stop()
+	select {
+	case result := <-processDone:
+		return result
+	case <-timer.C:
+		return processResult{err: fmt.Errorf("wait for PowerShell shutdown: exceeded %s", shutdownWaitPeriod)}
+	}
 }
 
 func (s *conPTYSession) releaseHandles() error {
@@ -402,6 +427,22 @@ func createPseudoConsole(columns, rows uint16, input, output windows.Handle, hpc
 		uintptr(unsafe.Pointer(hpc)),
 	)
 	return hresultError("CreatePseudoConsole", result)
+}
+
+func attachPseudoConsole(attributes *windows.ProcThreadAttributeListContainer, hpc windows.Handle) error {
+	result, _, callErr := procUpdateProcAttribute.Call(
+		uintptr(unsafe.Pointer(attributes.List())),
+		0,
+		windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+		uintptr(hpc),
+		unsafe.Sizeof(hpc),
+		0,
+		0,
+	)
+	if result == 0 {
+		return callErr
+	}
+	return nil
 }
 
 func resizePseudoConsole(hpc windows.Handle, columns, rows uint16) error {
