@@ -1,7 +1,7 @@
 # Session 02 Status
 
 - Current task: `S02-001` — Scaffold responsive Next.js PWA and terminal adapter boundary
-- State: review_pending_independent_reviewer (queue transition remains Session 01-owned)
+- State: done (owner Definition of Done; queue transition remains Session 01-owned)
 - Branch: `session/02-web`
 - Files changed:
   - `apps/web/app/**`: Next.js App Router shell, responsive styles, metadata, and web manifest.
@@ -39,12 +39,21 @@
   - Mock-backed: connection lifecycle, input acknowledgement, paste, mobile key sequences, resize calls, disconnect, and failure/retry. The adapter is visibly labelled `SIMULATED UI — NO TERMINAL CONNECTION`, never opens a socket, never executes or retains input, and rejects every supplied destination.
   - Real browser: responsive layout, accessible roles/names/states, focus, orientation/resize display, no overflow, CSP response header, local-only network request list, manifest, and service-worker registration.
   - Real terminal/private WSS path: not implemented or tested in S02-001; explicitly deferred to S02-002 after the approved protocol 0.1 contract.
-- Independent reviewer/evidence: none yet. A named independent reviewer must inspect product commit `055692f46ac61228f0592af96f06a99e55e431ce` before S02-001 can become `done`.
+- Independent reviewer/evidence:
+  - Reviewer: read-only agent `/root/s02_001_independent_review`.
+  - Verdict: PASS against `agents/session-02-web.md`, `docs/DEFINITION_OF_DONE.md`, and applicable `AGENTS.md` boundaries for exact product commit `055692f46ac61228f0592af96f06a99e55e431ce`.
+  - `git diff --quiet 055692f46ac61228f0592af96f06a99e55e431ce -- apps/web` => exit 0; reviewed working tree exactly matched the immutable product commit.
+  - Commit scope inspection => all 24 product files are under Session 02-owned `apps/web/**`; `git diff --check 055692f46ac61228f0592af96f06a99e55e431ce~1 055692f46ac61228f0592af96f06a99e55e431ce` passed.
+  - Independently reproduced `npm ls --depth=0`, `npm run format:check`, `npm run lint`, and `npm run typecheck` => pass with the locked direct graph and no lint/type errors.
+  - Sandboxed test/build attempt received environmental `spawn EPERM`; approved outside-sandbox reruns passed: `npm test` => 3 files and 9 tests passed; `npm run build` => production build passed and statically prerendered `/`, `/_not-found`, and `/manifest.webmanifest`.
+  - Code review confirmed the visibly labelled test double opens no socket, executes/retains no input, rejects every destination, and implements no guessed frames or real WSS path. CSP keeps `connect-src 'self'`; positive, negative, boundary, and failure tests cover the applicable scaffold behavior; no secrets, terminal plaintext logging, browser persistence, or relay path were found.
+  - Reviewer inspected but did not independently reproduce the previously recorded Chromium viewport/browser evidence. Physical iPhone Safari, real terminal/private WSS, deployment, and Session 06 verification remain explicitly out of scope.
+  - Final reviewer `git status --short` => clean. Reviewer concluded the commit satisfies owner-level `done`, not Session 06 `verified`.
 - Assumptions:
   - S02-001 may proceed because it has no dependency in `coordination/tasks.yaml`.
-  - S01-001 remains incomplete (`ready` when read), so no frame shape, protocol state machine, authentication, destination format, or private WSS behavior was inferred.
+  - S01-001 remains incomplete (`review` when the authoritative queue was re-read), so no frame shape, protocol state machine, authentication, destination format, or private WSS behavior was inferred.
 - Blockers/requests:
-  - S02-001: independent review is pending; no contract request was required.
+  - S02-001: none; owner-level implementation and independent review are complete. Session 01 owns the authoritative queue transition.
   - S02-002: remains blocked on S01-001 and S02-001 per the queue; Session 02 made no queue edit.
 - Limitations:
   - Browser evidence is Chromium at desktop and iPhone-sized viewports, not physical iPhone Safari evidence or end-to-end terminal proof.
