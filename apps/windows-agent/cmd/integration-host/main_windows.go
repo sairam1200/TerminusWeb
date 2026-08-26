@@ -143,8 +143,10 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	cleanup := func() error {
 		cleanupOnce.Do(func() {
 			cancelRevocation()
+			watcherStopped := false
 			select {
 			case <-revocationDone:
+				watcherStopped = true
 			case <-time.After(2 * time.Second):
 			}
 			closeErr := endpointInstance.Close()
@@ -170,11 +172,15 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 				errs = append(errs, serveErr)
 			}
 			if ephemeralStore {
-				resetCtx, cancelReset := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := store.Reset(resetCtx); err != nil {
-					errs = append(errs, err)
+				if !watcherStopped {
+					errs = append(errs, errors.New("revocation watcher did not stop before credential-store reset"))
+				} else {
+					resetCtx, cancelReset := context.WithTimeout(context.Background(), 5*time.Second)
+					if err := store.Reset(resetCtx); err != nil {
+						errs = append(errs, err)
+					}
+					cancelReset()
 				}
-				cancelReset()
 			}
 			cleanupErr = errors.Join(errs...)
 		})
@@ -272,6 +278,7 @@ func boundedLocalApproval(ctx context.Context, approval endpoint.PairingApproval
 	case approved := <-result:
 		return approved
 	case <-ctx.Done():
+		approvalConsoleInstance.abort()
 		return false
 	}
 }
@@ -321,7 +328,7 @@ func requestRevocation(storePath, credentialID string) error {
 	if !protocol.ValidUUID(credentialID) {
 		return errors.New("credential ID must be a lowercase UUIDv4")
 	}
-	directory := filepath.Join(filepath.Dir(storePath), ".terminus-revocations")
+	directory := storeMarkerDirectory(storePath)
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return fmt.Errorf("create revocation request directory: %w", err)
 	}
@@ -344,7 +351,7 @@ func revocationLoop(ctx context.Context, ep *endpoint.Endpoint, store *dpapiStor
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			directory := filepath.Join(filepath.Dir(store.path), ".terminus-revocations")
+			directory := storeMarkerDirectory(store.path)
 			entries, err := os.ReadDir(directory)
 			if err != nil {
 				continue
@@ -365,6 +372,11 @@ func revocationLoop(ctx context.Context, ep *endpoint.Endpoint, store *dpapiStor
 			}
 		}
 	}
+}
+
+func storeMarkerDirectory(storePath string) string {
+	digest := sha256.Sum256([]byte(storePath))
+	return filepath.Join(filepath.Dir(storePath), ".terminus-revocations", fmt.Sprintf("%x", digest[:8]))
 }
 
 func verifyCertificate(certificate tls.Certificate, serverName string) error {
