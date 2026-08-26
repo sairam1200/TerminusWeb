@@ -8,9 +8,9 @@ npx playwright install chromium
 npm test
 ```
 
-The suite covers desktop and iPhone-sized layout, terminal keyboard input, the mobile key bar, resize propagation, reconnect and focus restoration, PWA manifest metadata, CSP, exact-destination acceptance, and unapproved-origin rejection.
+The suite covers desktop and iPhone-sized layout, terminal keyboard and paste input, the mobile key bar, resize propagation, reconnect and focus restoration, accessible control names, PWA manifest metadata, CSP, exact-destination allowlisting, and an actual browser WebSocket handshake with allowed and denied page origins.
 
-Real-browser mode is fail-closed. It requires an HTTPS base URL, an immutable candidate SHA, and a Session 06-owned profile module that exports `metadata`, `selectors`, `approvedDestination`, `rejectedDestination`, and `induceDisconnect(page)`. The profile metadata must declare `evidenceClass: 'real-browser'` and the selected SHA.
+Real-browser mode is fail-closed. It requires an HTTPS base URL, a candidate SHA that resolves to a commit in the local repository, and a Session 06-owned profile module. The profile metadata must declare `evidenceClass: 'real-browser'` and the selected SHA. Its `readCandidateSha(page)` probe must independently read the build-stamped SHA from the loaded web candidate; matching self-reported profile metadata alone is insufficient.
 
 ```powershell
 $env:TERMINUS_BROWSER_TARGET = 'real'

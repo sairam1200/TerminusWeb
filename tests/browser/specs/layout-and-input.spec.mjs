@@ -72,3 +72,42 @@ test("viewport resize is propagated to the terminal adapter boundary", async ({
     }),
   );
 });
+
+test("plain-text paste reaches the adapter boundary without recording pasted content", async ({
+  page,
+}) => {
+  await page.locator(selectors.terminal).evaluate((terminal) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData("text/plain", "x");
+    terminal.dispatchEvent(
+      new ClipboardEvent("paste", { bubbles: true, clipboardData: clipboard }),
+    );
+  });
+
+  const pasteEvent = (await readRecordedEvents(page)).find(
+    ({ type }) => type === "paste",
+  );
+  expect(pasteEvent).toEqual({ type: "paste", plainText: true, length: 1 });
+  expect(pasteEvent).not.toHaveProperty("content");
+});
+
+test("terminal controls expose accessible names and live connection status", async ({
+  page,
+}) => {
+  await expect(page.locator(selectors.terminal)).toHaveAccessibleName(
+    "Terminal input",
+  );
+  await expect(page.locator(selectors.destination)).toHaveAccessibleName(
+    "Private WebSocket destination",
+  );
+  await expect(page.locator(selectors.connect)).toHaveAccessibleName("Connect");
+  await expect(page.locator(selectors.status)).toHaveAttribute(
+    "role",
+    "status",
+  );
+  await page.setViewportSize({ width: 390, height: 664 });
+  await expect(page.locator(selectors.mobileKeyBar)).toBeVisible();
+  await expect(page.locator(selectors.mobileKeyBar)).toHaveAccessibleName(
+    "Mobile terminal keys",
+  );
+});

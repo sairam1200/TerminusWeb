@@ -56,13 +56,18 @@ export function validateEnvironment(environment, profileName) {
       errors.push(`${name} must be one of: ${allowed.join(", ")}`);
   }
 
-  const agentUrl = environment.TERMINUS_AGENT_WSS_URL?.trim();
-  const expectedOrigin = environment.TERMINUS_EXPECTED_WSS_ORIGIN?.trim();
-  if (agentUrl && expectedOrigin) {
+  const browserBaseUrl = environment.TERMINUS_BROWSER_BASE_URL?.trim();
+  const expectedBrowserOrigin =
+    environment.TERMINUS_EXPECTED_BROWSER_ORIGIN?.trim();
+  if (browserBaseUrl && expectedBrowserOrigin) {
     try {
-      if (new URL(agentUrl).origin !== new URL(expectedOrigin).origin) {
+      const parsedExpectedOrigin = new URL(expectedBrowserOrigin);
+      if (
+        parsedExpectedOrigin.href !== `${parsedExpectedOrigin.origin}/` ||
+        new URL(browserBaseUrl).origin !== parsedExpectedOrigin.origin
+      ) {
         errors.push(
-          "TERMINUS_EXPECTED_WSS_ORIGIN must exactly match the agent URL origin",
+          "TERMINUS_EXPECTED_BROWSER_ORIGIN must exactly match the browser page origin",
         );
       }
     } catch {

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { defineConfig, devices } from "@playwright/test";
 
 const mode = process.env.TERMINUS_BROWSER_TARGET ?? "labelled-double";
@@ -12,7 +13,7 @@ const baseURL = isReal
 
 if (isReal) {
   requireValue("TERMINUS_BROWSER_PROFILE_MODULE");
-  requireSha("TERMINUS_BROWSER_CANDIDATE_SHA");
+  requireCommit("TERMINUS_BROWSER_CANDIDATE_SHA");
 }
 
 export default defineConfig({
@@ -64,6 +65,18 @@ function requireSha(name) {
   const value = requireValue(name);
   if (!/^[0-9a-f]{40}$/i.test(value)) {
     throw new Error(`${name} must be a 40-character immutable Git SHA`);
+  }
+  return value;
+}
+
+function requireCommit(name) {
+  const value = requireSha(name);
+  const result = spawnSync("git", ["cat-file", "-e", `${value}^{commit}`], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`${name} does not resolve to a local Git commit object`);
   }
   return value;
 }
