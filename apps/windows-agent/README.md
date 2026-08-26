@@ -62,8 +62,11 @@ go run ./cmd/integration-host -mode reset -store <protected-store-path>
 
 The pairing-code flag is explicit operator-console output only; never redirect
 it, log it, or commit it. Do not use the synthetic `httptest` certificates in
-the tests for browser integration. Until an already-trusted certificate and
-approved private publication mapping are supplied, no real WSS URL exists.
+the tests for browser integration. Revoke mode writes a local non-secret marker
+and also removes the encrypted record; a running host consumes the marker and
+calls `Endpoint.RevokeCredential` so active authorizations and sessions close.
+Until an already-trusted certificate, client-CA bundle, and approved private
+publication mapping are supplied, no real WSS URL exists.
 
 ## Development checks
 

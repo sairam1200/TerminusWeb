@@ -54,12 +54,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if elevated, err := currentProcessElevated(); err != nil {
+		return fmt.Errorf("check process elevation: %w", err)
+	} else if elevated {
+		return errors.New("refusing to run integration host from an elevated process")
+	}
 	switch *mode {
 	case "reset":
 		return store.Reset(context.Background())
 	case "revoke":
 		if *revokeID == "" {
 			return errors.New("-revoke-id is required in revoke mode")
+		}
+		if err := requestRevocation(store.path, *revokeID); err != nil {
+			return err
 		}
 		return revokeCredential(context.Background(), store, *revokeID)
 	case "serve":
@@ -79,11 +87,6 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	if origin == "" || serverName == "" || certPath == "" || keyPath == "" || clientCAPath == "" || deviceID == "" {
 		return errors.New("serve requires -origin, -server-name, -cert, -key, -client-ca, and -device-id")
 	}
-	if elevated, err := currentProcessElevated(); err != nil {
-		return fmt.Errorf("check process elevation: %w", err)
-	} else if elevated {
-		return errors.New("refusing to start integration host from an elevated process")
-	}
 	certificate, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		return fmt.Errorf("load externally supplied TLS certificate: %w", err)
@@ -101,7 +104,7 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 		Terminal:       terminal.LocalAdapter{},
 		Credentials:    store,
 		ApprovePairing: boundedLocalApproval,
-		ResolveDevice:  certificateDeviceResolver(clientRoots, deviceID),
+		ResolveDevice:  certificateDeviceResolver(deviceID),
 		Log: func(event endpoint.Event) {
 			// Only stable event metadata is emitted. Never log payloads, IDs from
 			// requests, credentials, proofs, or terminal bytes.
@@ -129,6 +132,9 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	tlsConfig.ClientCAs = clientRoots
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- endpoint.ServeTLS(listener, tlsConfig, healthAndEndpoint(endpointInstance)) }()
+	revocationCtx, cancelRevocation := context.WithCancel(context.Background())
+	defer cancelRevocation()
+	go revocationLoop(revocationCtx, endpointInstance, store)
 	var cleanupOnce sync.Once
 	var cleanupErr error
 	var serveResult error
@@ -147,15 +153,22 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 					serveErr = errors.New("loopback listener did not shut down within 5 seconds")
 				}
 			}
+			var errs []error
 			if closeErr != nil {
-				cleanupErr = fmt.Errorf("endpoint cleanup: %w", closeErr)
-			} else if listenerErr != nil && !errors.Is(listenerErr, net.ErrClosed) {
-				cleanupErr = fmt.Errorf("loopback listener shutdown: %w", listenerErr)
-			} else if serveErr != nil && !errors.Is(serveErr, net.ErrClosed) {
-				cleanupErr = serveErr
-			} else if ephemeralStore {
-				cleanupErr = store.Reset(context.Background())
+				errs = append(errs, fmt.Errorf("endpoint cleanup: %w", closeErr))
 			}
+			if listenerErr != nil && !errors.Is(listenerErr, net.ErrClosed) {
+				errs = append(errs, fmt.Errorf("loopback listener shutdown: %w", listenerErr))
+			}
+			if serveErr != nil && !errors.Is(serveErr, net.ErrClosed) {
+				errs = append(errs, serveErr)
+			}
+			if ephemeralStore {
+				if err := store.Reset(context.Background()); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			cleanupErr = errors.Join(errs...)
 		})
 		return cleanupErr
 	}
@@ -214,7 +227,7 @@ func validateLoopbackAddress(value string) (*net.TCPAddr, error) {
 	return address, nil
 }
 
-func certificateDeviceResolver(roots *x509.CertPool, fallback string) endpoint.DeviceResolver {
+func certificateDeviceResolver(fallback string) endpoint.DeviceResolver {
 	return func(r *http.Request) (string, error) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil || !net.ParseIP(host).IsLoopback() {
@@ -224,9 +237,6 @@ func certificateDeviceResolver(roots *x509.CertPool, fallback string) endpoint.D
 			return "", errors.New("verified private-device certificate is required")
 		}
 		leaf := r.TLS.PeerCertificates[0]
-		if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "", KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
-			return "", errors.New("private-device certificate verification failed")
-		}
 		if fallback == "" {
 			return "", errors.New("private-device identity is empty")
 		}
@@ -235,8 +245,11 @@ func certificateDeviceResolver(roots *x509.CertPool, fallback string) endpoint.D
 	}
 }
 
-func boundedLocalApproval(ctx context.Context, _ endpoint.PairingApproval) bool {
+func boundedLocalApproval(ctx context.Context, approval endpoint.PairingApproval) bool {
 	if ctx == nil {
+		return false
+	}
+	if approval.Origin == "" || approval.ClientInstanceID == "" || approval.DeviceIdentity == "" {
 		return false
 	}
 	result := make(chan bool, 1)
@@ -282,6 +295,46 @@ func (c *approvalConsole) run() {
 		approved := err == nil && strings.EqualFold(strings.TrimSpace(line), "y")
 		if request.ctx.Err() == nil {
 			request.result <- approved
+		}
+	}
+}
+
+func requestRevocation(storePath, credentialID string) error {
+	if storePath == "" || credentialID == "" {
+		return errors.New("store path and credential ID are required")
+	}
+	marker := storePath + ".revoke." + credentialID
+	file, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("create revocation request: %w", err)
+	}
+	if file != nil {
+		_ = file.Close()
+	}
+	return nil
+}
+
+func revocationLoop(ctx context.Context, ep *endpoint.Endpoint, store *dpapiStore) {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			markers, err := filepath.Glob(store.path + ".revoke.*")
+			if err != nil {
+				continue
+			}
+			for _, marker := range markers {
+				credentialID := strings.TrimPrefix(marker, store.path+".revoke.")
+				if credentialID == "" {
+					continue
+				}
+				if err := ep.RevokeCredential(ctx, credentialID); err == nil {
+					_ = os.Remove(marker)
+				}
+			}
 		}
 	}
 }
