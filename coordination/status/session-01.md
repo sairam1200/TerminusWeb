@@ -1,14 +1,14 @@
 # Session 01 Status
 
 - Current task: `S01-001` — freeze protocol and security contract version 0.1
-- State: review_pending_independent_reviewer
+- State: done
 - Branch: `session/01-architecture`
 - Files changed: `packages/protocol/**`, `packages/security/**`
-- Commands/evidence: `npm run verify` in `packages/protocol` passed: `protocol 0.1 verified: schema, state machine, 27 fixtures, 1 auth vector(s)`; `git diff --check` passed. Rejected fixture JSON was repaired and is now parsed by the verifier.
-- Independent reviewer/evidence: pending review of the immutable product/task commit
+- Commands/evidence: `npm run verify` in `packages/protocol` passed: `protocol 0.1 verified: schema semantics, 22 transcripts, 27 fixtures, 1 positive auth vector(s), 4 negative auth mutations`; `git diff --check` and `git show --check` passed. The verifier executes schema semantics, accepted/rejected transcripts, direction/sequence/state transitions, UTF-8 wire limits, payload limits, handshake expectations, timestamp/base64 canonicality, replay, and explicit positive/negative authentication checks.
+- Independent reviewer/evidence: `/root/s01_001_readonly_review` independently reviewed exact cumulative product tip `910b69e24f464bb3e89152f3e5881beb9b706b76`; PASS. Reviewer reran `npm run verify`, exact artifact hash checks, `git show --check`, and `git diff --check`; no files modified.
 - Assumptions: JSON Schema 2020-12 and JSON fixtures are the language-neutral interchange artifacts; verification may use the installed Node.js runtime without adding a package dependency
 - Blockers/requests: exact protocol/security details are being resolved only from primary standards; any remaining cryptographic choice will be recorded explicitly rather than guessed
-- Product/task commit: `6af3f67` (`S01-001 freeze protocol and security contract 0.1`).
+- Product/task commit: `910b69e` (cumulative S01-001 product tip; includes `6af3f67`, `6c80dad`, and `e14f1ba`).
 - Handoff commit: pending status-only handoff commit.
 
 ## Queue review evidence (2026-08-26)

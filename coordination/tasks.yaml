@@ -7,7 +7,7 @@ state_semantics:
 tasks:
   - id: S01-001
     owner: session_01
-    state: review
+    state: done
     title: Freeze protocol and security contract version 0.1
     depends_on: []
     evidence: Versioned schemas, state machine, fixtures, and rejection cases.
