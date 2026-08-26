@@ -1,7 +1,7 @@
 # Session 01 Status
 
 - Current task: `S01-001` — freeze protocol and security contract version 0.1
-- State: in_progress
+- State: review_pending_independent_reviewer
 - Branch: `session/01-architecture`
 - Files changed: `packages/protocol/**`, `packages/security/**`
 - Commands/evidence: `npm run verify` in `packages/protocol` passed: `protocol 0.1 verified: schema, state machine, 27 fixtures, 1 auth vector(s)`; `git diff --check` passed. Rejected fixture JSON was repaired and is now parsed by the verifier.
