@@ -1,7 +1,7 @@
 # Session 03 Status
 
 - Current task: S03-001 — Prove non-elevated local ConPTY lifecycle behind an internal adapter
-- State: blocked (safe-stopping rule reached after three equivalent Windows runtime failures)
+- State: blocked (fresh resumed run reached the three-attempt safe-stop threshold)
 - Branch: `session/03-windows-agent`
 - Files changed:
   - `apps/windows-agent/README.md`
@@ -13,7 +13,14 @@
   - `apps/windows-agent/internal/terminal/conpty_windows.go`
   - `apps/windows-agent/internal/terminal/conpty_windows_test.go`
   - `coordination/requests/from-03-to-01-s03-001-conpty-startup-blocker.request.md`
+  - `coordination/requests/from-03-to-01-s03-001-conpty-attachment-resume-blocker.request.md`
 - Commands/evidence:
+  - On 2026-08-26, the required files were reread in order and the authoritative `session/01-architecture` queue was inspected at exact commit `a07e570113a6a88ac935c1c23f93ba02373428c7`; S03-001 was `ready` with no dependencies.
+  - The resumed diagnostics started from exact prior product commit `0dd577f0d0f2432ab411394b23a6a72eee44c4f9` and reused a checksum-verified temporary Go 1.25.12 Windows AMD64 toolchain from a non-elevated process.
+  - Fresh attempt 1, exact `0dd577f` with `-NoExit -Command -`: `go test -v ./internal/terminal -run TestConPTYInputOutputResizeAndExit -count=1` failed in 0.27 seconds with `read conpty-output: file already closed`.
+  - Fresh attempt 2 replaced the vet-reported HPCON conversion with a direct `UpdateProcThreadAttribute` call using the documented handle value; the same test failed in 0.25 seconds with the same closed-output condition.
+  - Fresh attempt 3 retained that direct attribute call and used ordinary console-mode PowerShell (`-NoLogo -NoProfile`); the same test failed in 0.26 seconds, and the PowerShell prompt appeared on the Go test runner's console. This proves the child is not attached to the pseudoconsole even though both attribute-update variants returned success.
+  - Experimental product edits were reverted after the safe stop; no failing product change remains in the worktree.
   - Required repository, contract, Session 03, ownership, task queue, verified facts, and status files were read before edits.
   - Primary API sources checked: Microsoft `CreatePseudoConsole`, pseudoconsole-session, `ResizePseudoConsole`, `ClosePseudoConsole`, Job Objects, `AssignProcessToJobObject`, `CreateJobObjectW`, `SetInformationJobObject`, and `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` documentation; Go `x/sys/windows` v0.47.0 source/API and module metadata.
   - Official `go1.25.12.windows-amd64.zip` was downloaded to the temporary directory only and verified against SHA-256 `d5dc82da351b00e5eedd04f41356817d674cc4308131f0f638a5b14c5c3af4cb`; it was not installed system-wide.
@@ -39,6 +46,7 @@
   - The inbox Windows PowerShell executable inherits the verified non-elevated caller token; no alternate credentials or elevation mechanism are used.
 - Blockers/requests:
   - Immutable request `coordination/requests/from-03-to-01-s03-001-conpty-startup-blocker.request.md` asks Session 01 to keep S03-001 blocked and S03-002 unavailable.
+  - Immutable request `coordination/requests/from-03-to-01-s03-001-conpty-attachment-resume-blocker.request.md`, committed at `cb91642`, records the fresh attachment evidence and asks Session 01 to return S03-001 to blocked.
   - S03-001 still requires a confirmed startup fix, a clean vet result, real input/output/resize evidence, timeout/cancellation/close/agent-failure process-tree cleanup proof, and an applicable race/concurrency check.
 - Product/task commit: `0dd577f` (`wip(S03-001): preserve blocked ConPTY lifecycle proof`)
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
