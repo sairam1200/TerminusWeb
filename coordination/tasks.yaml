@@ -23,7 +23,7 @@ tasks:
     owner: session_02
     state: blocked
     title: Integrate browser terminal with protocol 0.1
-    depends_on: [S01-001, S02-001, S03-004, S05-005]
+    depends_on: [S01-001, S02-001, S03-004, S05-005, S05-006, S06-004]
     evidence: Shared fixtures pass and malformed frames fail closed.
 
   - id: S03-001
@@ -114,9 +114,33 @@ tasks:
     owner: session_03
     state: blocked
     title: Run the authorized private integration host with supplied trusted inputs
-    depends_on: [S03-003]
+    depends_on: [S03-003, S06-004]
     requires_user_authorization: true
     evidence: Non-elevated Windows host wiring using externally supplied trusted server certificate/key, client-CA bundle, exact Vercel HTTPS Origin, protected credential storage, private-device resolution, mandatory local approval, loopback-only TLS listener, bounded health/reset/revoke lifecycle, secret-safe logs, and an immutable endpoint-ready response; no certificate generation/installation, Tailscale mutation, Funnel, LAN/public exposure, or deployment.
+
+  - id: S02-003
+    owner: session_02
+    state: ready
+    title: Publish the authorized Session 02 source branch for Preview bootstrap
+    depends_on: [S02-001]
+    requires_user_authorization: true
+    evidence: Exact branch tip d479f5b3f058d01dccc3258e6c50bb7d1865e52e is confirmed or pushed to the matching GitHub branch without history rewrite or product changes; remote SHA and command evidence are recorded without credentials.
+
+  - id: S06-004
+    owner: session_06
+    state: blocked
+    title: Bootstrap Preview-only Vercel deployment and freeze HTTPS Origin
+    depends_on: [S02-003, S06-001]
+    requires_user_authorization: true
+    evidence: Preview-only deployment of the exact Session 02 source with Root Directory apps/web; initial WSS endpoint unset; exact final serialized HTTPS Origin recorded, NEXT_PUBLIC_TERMINUS_WEB_ORIGIN set to that origin, and redeployment metadata captured; no production promotion, DNS change, or terminal proxy.
+
+  - id: S05-006
+    owner: session_05
+    state: blocked
+    title: Configure authorized raw-TCP private Serve and prove allowed/denied paths
+    depends_on: [S03-004, S05-001]
+    requires_user_authorization: true
+    evidence: One private raw-TCP Serve mapping from sai.tailf8dcea.ts.net:443 to the exact S03 loopback port, Funnel disabled, no HTTPS/TLS termination or path rewriting, complete pre/post snapshots, one approved private path, denied LAN/public/wrong-device/wrong-Origin/wrong-subprotocol/invalid-client-certificate/Funnel paths, and rollback evidence; no grant broadening or unrelated live mutation.
 
   - id: S01-002
     owner: session_01
