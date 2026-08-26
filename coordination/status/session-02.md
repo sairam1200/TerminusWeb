@@ -1,9 +1,9 @@
 # Session 02 Status
 
 - Current task: `S02-002` — Implement browser protocol client and private WSS behavior
-- State: blocked after the committed Session 03 response confirmed no approved runnable endpoint exists; a new Session 01 task and explicit user authorization are required. Deterministic Session 02 owner gate remains passed.
+- State: blocked after the third real-path attempt; trusted certificate/private publication authorization remains absent and is escalated to Session 01. Deterministic Session 02 owner gate remains passed.
 - Branch: `session/02-web`
-- Authoritative queue: latest Session 01 commit `f004d2cc807ff3cf419e934c0dc3fc1101c4c4ce`.
+- Authoritative queue: latest Session 01 commit `ed4cc9bd6aad6bd36373eeaa36775b1d8df2c397`.
 - Protocol consumed: exact Session 01 product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`, wire version `0.1`, subprotocol `terminus.v0_1`.
 
 ## Dependency verification
@@ -95,3 +95,14 @@
 - Therefore exact destination, real browser Origin header, negotiated subprotocol, pairing/authentication, open/input/output/resize, heartbeat, detach/resume, expiry, malformed/replayed/oversized rejection, close, and configured CSP could not be exercised against a real endpoint. Desktop/iPhone real-path browser checks and a new final-tip independent review were not run.
 - Existing cumulative web product tip remains `aec63af0ce7512341555910e59f3617543869c4a`, with its prior deterministic reviewer PASS unchanged. No `apps/web/**` files changed in this attempt, so there is no repair/product commit to review.
 - Session 02 did not weaken certificate validation, install a certificate, create or expose a listener, alter Tailscale, deploy, modify Session 03 files, merge, or push.
+
+## Third real-path attempt and safe stop
+
+- All branch refs and committed request/response paths were scanned. The required `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint-ready.response.md` does not exist on any ref, so the prompt placeholder could not be resolved to an exact SHA.
+- Latest queue `ed4cc9bd6aad6bd36373eeaa36775b1d8df2c397` records S03-003 `done`, S05-005 `ready`, and S02-002 `blocked` on S05-005.
+- Exact reviewed S03-003 host product `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c` and handoff `662e376094c631890dd22d23391ff6a7e62d8a30` were read. They provide the non-elevated loopback integration host but explicitly report no trusted server certificate/hostname, client-CA bundle, browser Origin, or approved private Serve mapping; no endpoint was started.
+- Exact S05-005 static review product `d95841ea4829a1a5a3a51b0b3f6f3babf3ef26d8` and handoff `de4fb65f923bb29f4ab7e6ed756ed3309ac2d61c` were read. Static/read-only review passed, but live hostname, trusted certificate, Serve mapping, Funnel state, listener, expiry, and network paths remain untested and authorization-blocked.
+- The immutable Session 05 authorization request was read at `de4fb65f923bb29f4ab7e6ed756ed3309ac2d61c:coordination/requests/from-05-to-01-s05-005-private-publication-authorization.request.md`.
+- This is the third S02-002 attempt stopped by the same missing live-publication prerequisite. Per the safe-stopping rule, Session 02 created immutable request `828d7485217464e073bb409bc4ea5decec340408` at `coordination/requests/from-02-to-01-s02-002-live-publication-blocker.request.md` and stopped.
+- No real WSS URL or approved Origin existed, so the requested real lifecycle/negative-path checks, desktop/iPhone real-path browser checks, configured CSP proof, deterministic reruns, repairs, or new independent review were run. Existing product tip remains `aec63af0ce7512341555910e59f3617543869c4a` with its prior deterministic reviewer PASS.
+- No `apps/web/**` product file, Session 03/05 file, shared contract, certificate, listener, Tailscale setting, deployment, merge, push, or public exposure was changed.
