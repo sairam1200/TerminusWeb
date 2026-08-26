@@ -38,7 +38,7 @@ func TestIntegrationHostRunsNonElevated(t *testing.T) {
 }
 
 func TestCertificateDeviceResolverRequiresVerifiedPeer(t *testing.T) {
-	resolver := certificateDeviceResolver(x509.NewCertPool(), "integration-device")
+	resolver := certificateDeviceResolver("integration-device")
 	request := &http.Request{RemoteAddr: "127.0.0.1:1"}
 	if _, err := resolver(request); err == nil {
 		t.Fatal("missing verified device certificate was accepted")

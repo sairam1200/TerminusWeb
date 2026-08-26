@@ -73,7 +73,7 @@ func (s *dpapiStore) Put(ctx context.Context, credential endpoint.Credential) er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := s.lockProcess()
+	lock, err := s.lockProcess(ctx)
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func (s *dpapiStore) Get(ctx context.Context, id string) (endpoint.Credential, e
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := s.lockProcess()
+	lock, err := s.lockProcess(ctx)
 	if err != nil {
 		return endpoint.Credential{}, err
 	}
@@ -118,7 +118,7 @@ func (s *dpapiStore) Delete(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := s.lockProcess()
+	lock, err := s.lockProcess(ctx)
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,7 @@ func (s *dpapiStore) IDs(ctx context.Context) ([]string, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := s.lockProcess()
+	lock, err := s.lockProcess(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (s *dpapiStore) Reset(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := s.lockProcess()
+	lock, err := s.lockProcess(ctx)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (s *dpapiStore) Reset(ctx context.Context) error {
 	return nil
 }
 
-func (s *dpapiStore) lockProcess() (*processStoreLock, error) {
+func (s *dpapiStore) lockProcess(ctx context.Context) (*processStoreLock, error) {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
 		return nil, fmt.Errorf("create credential store lock directory: %w", err)
 	}
@@ -180,11 +180,22 @@ func (s *dpapiStore) lockProcess() (*processStoreLock, error) {
 		return nil, fmt.Errorf("open credential store lock: %w", err)
 	}
 	lock := &processStoreLock{file: file}
-	if err := windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &lock.over); err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("lock credential store: %w", err)
+	for {
+		err = windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &lock.over)
+		if err == nil {
+			return lock, nil
+		}
+		if !errors.Is(err, windows.ERROR_LOCK_VIOLATION) && !errors.Is(err, windows.ERROR_IO_PENDING) {
+			_ = file.Close()
+			return nil, fmt.Errorf("lock credential store: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			_ = file.Close()
+			return nil, ctx.Err()
+		case <-time.After(25 * time.Millisecond):
+		}
 	}
-	return lock, nil
 }
 
 func (l *processStoreLock) Unlock() {
