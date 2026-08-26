@@ -21,17 +21,18 @@ type sessionRegistry struct {
 }
 
 type managedSession struct {
-	id           string
-	credentialID string
-	terminal     terminal.Session
-	cancel       context.CancelFunc
-	owner        *connection
-	detached     bool
-	resuming     bool
-	grant        [32]byte
-	grantExpires time.Time
-	pending      []byte
-	closed       bool
+	id                   string
+	credentialID         string
+	terminal             terminal.Session
+	cancel               context.CancelFunc
+	owner                *connection
+	detached             bool
+	resuming             bool
+	grant                [32]byte
+	grantExpires         time.Time
+	detachedConnectionID string
+	pending              []byte
+	closed               bool
 }
 
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
@@ -54,7 +55,7 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 		r.mu.Unlock()
 		return "", err
 	}
-	managed := &managedSession{id: id, credentialID: owner.credential.ID, terminal: session, cancel: cancel, owner: owner}
+	managed := &managedSession{id: id, credentialID: owner.credentialID(), terminal: session, cancel: cancel, owner: owner}
 	r.active = managed
 	r.mu.Unlock()
 	go r.copyOutput(managed)
@@ -93,6 +94,7 @@ func (r *sessionRegistry) detach(owner *connection, id string) (string, time.Tim
 		return "", time.Time{}, err
 	}
 	managed.detached = true
+	managed.detachedConnectionID = owner.connectionID()
 	managed.owner = nil
 	managed.grantExpires = r.now().Add(resumeLifetime)
 	expires := managed.grantExpires
@@ -107,7 +109,7 @@ func (r *sessionRegistry) resume(owner *connection, id, encodedGrant string, dim
 	}
 	r.mu.Lock()
 	managed := r.active
-	if managed == nil || managed.id != id || !managed.detached || managed.resuming || managed.credentialID != owner.credential.ID || !r.now().Before(managed.grantExpires) || subtle.ConstantTimeCompare(provided, managed.grant[:]) != 1 {
+	if managed == nil || managed.id != id || !managed.detached || managed.resuming || managed.credentialID != owner.credentialID() || managed.detachedConnectionID == owner.connectionID() || !r.now().Before(managed.grantExpires) || subtle.ConstantTimeCompare(provided, managed.grant[:]) != 1 {
 		r.mu.Unlock()
 		return errors.New("resume grant rejected")
 	}
@@ -122,30 +124,56 @@ func (r *sessionRegistry) resume(owner *connection, id, encodedGrant string, dim
 }
 
 func (r *sessionRegistry) activateResume(owner *connection, id string) error {
+	for {
+		r.mu.Lock()
+		managed := r.active
+		if managed == nil || managed.id != id || !managed.resuming {
+			r.mu.Unlock()
+			return errors.New("session is not resuming")
+		}
+		if len(managed.pending) == 0 {
+			managed.owner = owner
+			managed.detached = false
+			managed.detachedConnectionID = ""
+			managed.resuming = false
+			r.mu.Unlock()
+			return nil
+		}
+		pending := append([]byte(nil), managed.pending...)
+		managed.pending = nil
+		r.mu.Unlock()
+		for len(pending) > 0 {
+			length := len(pending)
+			if length > protocol.MaxTerminalOutput {
+				length = protocol.MaxTerminalOutput
+			}
+			if err := owner.send("terminal_output", protocol.TerminalPayload{SessionID: id, Data: protocol.EncodeBase64(pending[:length])}); err != nil {
+				r.closeManaged(managed, "backpressure_limit")
+				return err
+			}
+			pending = pending[length:]
+		}
+	}
+}
+
+func (r *sessionRegistry) abortTransition(id string) {
 	r.mu.Lock()
 	managed := r.active
-	if managed == nil || managed.id != id || !managed.resuming {
-		r.mu.Unlock()
-		return errors.New("session is not resuming")
-	}
-	managed.owner = owner
-	managed.detached = false
-	managed.resuming = false
-	pending := append([]byte(nil), managed.pending...)
-	managed.pending = nil
+	shouldClose := managed != nil && managed.id == id && (managed.detached || managed.resuming)
 	r.mu.Unlock()
-	for len(pending) > 0 {
-		length := len(pending)
-		if length > protocol.MaxTerminalOutput {
-			length = protocol.MaxTerminalOutput
-		}
-		if err := owner.send("terminal_output", protocol.TerminalPayload{SessionID: id, Data: protocol.EncodeBase64(pending[:length])}); err != nil {
-			r.closeManaged(managed, "backpressure_limit")
-			return err
-		}
-		pending = pending[length:]
+	if shouldClose {
+		_ = r.closeManaged(managed, "protocol_error")
 	}
-	return nil
+}
+
+func (r *sessionRegistry) revokeCredential(credentialID string) error {
+	r.mu.Lock()
+	managed := r.active
+	r.mu.Unlock()
+	if managed == nil || managed.credentialID != credentialID {
+		return nil
+	}
+	return r.closeManaged(managed, "protocol_error")
 }
 
 func (r *sessionRegistry) closeBy(owner *connection, id, _ string) error {
@@ -234,7 +262,7 @@ func (r *sessionRegistry) expire(managed *managedSession, expected time.Time) {
 	defer timer.Stop()
 	<-timer.C
 	r.mu.Lock()
-	expired := r.active == managed && managed.detached && managed.grantExpires.Equal(expected) && !r.now().Before(expected)
+	expired := r.active == managed && managed.detached && !managed.resuming && managed.grantExpires.Equal(expected) && !r.now().Before(expected)
 	r.mu.Unlock()
 	if expired {
 		_ = r.closeManaged(managed, "idle_timeout")

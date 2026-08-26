@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -88,6 +89,38 @@ func TestCanonicalRejectedSyntaxAndState(t *testing.T) {
 				t.Fatalf("error = %v (%s), want %s", got, code, transcript.Expected.Code)
 			}
 		})
+	}
+}
+
+func TestRequiredEnvelopeAndOptionalCredentialPresence(t *testing.T) {
+	base := `{"version":"0.1","type":"hello","connectionId":"10000000-0000-4000-8000-000000000001","sequence":0,"payload":{"clientInstanceId":"40000000-0000-4000-8000-000000000001","supportedVersions":["0.1"]}}`
+	for _, item := range []struct{ name, raw string }{
+		{"missing-sequence", strings.Replace(base, `,"sequence":0`, "", 1)},
+		{"null-sequence", strings.Replace(base, `"sequence":0`, `"sequence":null`, 1)},
+		{"null-credential", strings.Replace(base, `"supportedVersions"`, `"credentialId":null,"supportedVersions"`, 1)},
+		{"empty-credential", strings.Replace(base, `"supportedVersions"`, `"credentialId":"","supportedVersions"`, 1)},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			if code, _, ok := ErrorDetails(func() error { _, err := Decode([]byte(item.raw)); return err }()); !ok || code != SchemaInvalid {
+				t.Fatalf("code = %s", code)
+			}
+		})
+	}
+}
+
+func TestMaximumSequenceDuplicateIsReplay(t *testing.T) {
+	machine := NewMachine(ConnectionReady, SessionOpen, MaxSequence, 0)
+	frame, err := NewFrame("heartbeat", "10000000-0000-4000-8000-000000000099", MaxSequence, HeartbeatPayload{Kind: "ping", Nonce: "AAECAwQFBgcICQoLDA0ODw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := Marshal(frame)
+	decoded, _ := Decode(data)
+	if err := machine.Apply(ClientToAgent, decoded); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, ok := ErrorDetails(machine.Apply(ClientToAgent, decoded)); !ok || code != SequenceReplay {
+		t.Fatalf("code = %s", code)
 	}
 }
 
