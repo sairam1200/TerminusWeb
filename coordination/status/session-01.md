@@ -9,7 +9,7 @@
 - Assumptions: JSON Schema 2020-12 and JSON fixtures are the language-neutral interchange artifacts; verification may use the installed Node.js runtime without adding a package dependency
 - Blockers/requests: exact protocol/security details are being resolved only from primary standards; any remaining cryptographic choice will be recorded explicitly rather than guessed
 - Product/task commit: `910b69e` (cumulative S01-001 product tip; includes `6af3f67`, `6c80dad`, and `e14f1ba`).
-- Handoff commit: pending status-only handoff commit.
+- Handoff commit: `d87980c` (status-only handoff; this follow-up records the immutable handoff SHA).
 
 ## Queue review evidence (2026-08-26)
 
