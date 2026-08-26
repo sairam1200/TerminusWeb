@@ -27,6 +27,16 @@ func TestValidateLoopbackAddressRejectsBeforeBind(t *testing.T) {
 	}
 }
 
+func TestIntegrationHostRunsNonElevated(t *testing.T) {
+	elevated, err := currentProcessElevated()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elevated {
+		t.Fatal("test process is elevated")
+	}
+}
+
 func TestCertificateDeviceResolverRequiresVerifiedPeer(t *testing.T) {
 	resolver := certificateDeviceResolver(x509.NewCertPool(), "integration-device")
 	request := &http.Request{RemoteAddr: "127.0.0.1:1"}
