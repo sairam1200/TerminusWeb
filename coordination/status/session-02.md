@@ -1,5 +1,20 @@
 # Session 02 Status
 
+## Preview retry authorization audit and safe stop
+
+- Requested work: resume the Vercel Preview bootstrap prerequisite for S02-002 from exact published source `d479f5b3f058d01dccc3258e6c50bb7d1865e52e`.
+- Authoritative queue/status: Session 01 tip `2885951ec99dd25b6879563684d23b802859ac59`; `coordination/tasks.yaml` records S02-003 `review`, S06-004 `blocked`, and S02-002 `blocked`. Preview creation remains S06-004, owned by Session 06.
+- Newest Session 01 instruction consumed: `5a9adf8c58a67b4962e12af5bedb2f2067b85c0d:coordination/requests/from-01-to-02-s02-003-preview-blocker-followup.request.md`. It requires Session 02 to preserve the exact published branch, stop Preview retries, not set either public environment variable, and return only a status handoff because Preview remains Session 06-owned.
+- Exact blocker decision consumed: `5a9adf8c58a67b4962e12af5bedb2f2067b85c0d:coordination/requests/from-01-to-02-s02-003-preview-first-deployment-blocker.response.md`. The deleted first deployment `dpl_9eMRUXo1C4T6cFSehtwodq41pGHW` was Production-classified and is not an approved Origin. A Preview bootstrap requires an already-initialized project whose next deployment will be Preview, or separate authorization for the platform's first-deployment Production classification.
+- Earlier request re-read exactly as required: `e1c5cb7cbcff2a271c73d5dcf452d01a0ca39d57:coordination/requests/from-01-to-02-s02-002-vercel-preview-origin.request.md`. Its own instructions are no-deploy and prohibit guessing an Origin.
+- GitHub evidence: `git ls-remote --heads origin refs/heads/session/02-web` => `d479f5b3f058d01dccc3258e6c50bb7d1865e52e refs/heads/session/02-web`. No push was necessary or run.
+- Read-only Vercel evidence: `npx --yes vercel@59.5.0 project inspect terminus-web --scope gaddr --no-color` found Hobby project `gaddr/terminus-web`, ID `prj_1Rl0q10z0cgPi64e0LchB0eXXpC7`, Root Directory `apps/web`. `npx --yes vercel@59.5.0 list terminus-web --scope gaddr --no-color` returned `No deployments found under gaddr`.
+- Safe stop: no stable Preview HTTPS Origin exists, so `NEXT_PUBLIC_TERMINUS_WEB_ORIGIN` and `NEXT_PUBLIC_TERMINUS_WSS_ENDPOINT` were not configured, no deployment/redeployment was run, and no Origin/deployment-ready response was created. The Session 03 endpoint-ready prerequisite and full S02-002 live browser gate remain blocked.
+- No product file, shared contract, Session 03/05/06 file, Vercel configuration, deployment, merge, main branch, DNS, certificate, Tailscale setting, listener, or public/private route was changed.
+- Files changed for this attempt: only `coordination/status/session-02.md` in this status-only handoff.
+- Existing reviewed web product remains `aec63af0ce7512341555910e59f3617543869c4a`; exact published Preview source remains `d479f5b3f058d01dccc3258e6c50bb7d1865e52e`.
+- Status-only handoff commit: resolve from branch HEAD after committing this status.
+
 ## S02-003 authorized GitHub source publication
 
 - Current task: `S02-003` — Publish the authorized Session 02 source branch for Preview bootstrap.
