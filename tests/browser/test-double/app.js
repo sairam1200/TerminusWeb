@@ -24,11 +24,17 @@ function updateViewport() {
 }
 
 terminal.addEventListener("keydown", (event) => {
-  record("keyboard", {
-    key: event.key,
-    ctrlKey: event.ctrlKey,
-    metaKey: event.metaKey,
-  });
+  const namedControlKeys = new Set(["Enter", "Tab", "Escape"]);
+  record(
+    "keyboard",
+    namedControlKeys.has(event.key)
+      ? { keyClass: "control", controlKey: event.key }
+      : {
+          keyClass: "content-redacted",
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        },
+  );
 });
 
 terminal.addEventListener("paste", (event) => {

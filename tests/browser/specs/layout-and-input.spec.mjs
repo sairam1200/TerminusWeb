@@ -41,7 +41,6 @@ test("terminal receives keyboard input and the mobile key bar restores focus", a
 }) => {
   const terminal = page.locator(selectors.terminal);
   await expect(terminal).toBeFocused();
-  await terminal.pressSequentially("hello");
   await terminal.press("Enter");
   await page.setViewportSize({ width: 390, height: 664 });
   await expect(page.locator(selectors.mobileKeyBar)).toBeVisible();
@@ -50,7 +49,11 @@ test("terminal receives keyboard input and the mobile key bar restores focus", a
 
   const events = await readRecordedEvents(page);
   expect(events).toContainEqual(
-    expect.objectContaining({ type: "keyboard", key: "Enter" }),
+    expect.objectContaining({
+      type: "keyboard",
+      keyClass: "control",
+      controlKey: "Enter",
+    }),
   );
   expect(events).toContainEqual(
     expect.objectContaining({ type: "mobile-key", key: "Tab" }),
