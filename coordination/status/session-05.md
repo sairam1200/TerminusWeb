@@ -1,15 +1,14 @@
 # Session 05 Status
 
-- Current task: S05-005 — Review TLS/private publication design and prove private-only access
-- State: done for static/read-only review; live publication remains authorization-blocked
+- Current task: S05-004 — Re-review control-plane remediation and final-owner invariants
+- State: done (independent exact-SHA review PASS; Session 06 verification remains pending)
 - Branch: `session/05-security-network`
-- Authoritative queue: Session 01 `bfb431a7694152e8d5caf124f58076d78443bd32`; S05-005 ready after S03-003 done.
-- Exact dependency: Session 03 S03-003 product `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c`; handoff `662e376094c631890dd22d23391ff6a7e62d8a30`.
-- Product files: `docs/security/S05-005-private-publication-review.md`, `tests/security/Test-S05-005-publication-review.ps1`, and immutable request `coordination/requests/from-05-to-01-s05-005-private-publication-authorization.request.md`.
-- Evidence: static checks PASS for loopback-only origin, TLS 1.3, system-root/server-name verification, mTLS device identity, exact Origin, `/terminal`, and narrow private policy. Live hostname, trusted certificate, Serve mapping, Funnel state, listener, expiry, and network paths are explicitly untested because no approved mapping or trusted inputs exist.
-- Test command: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-005-publication-review.ps1` — PASS; reports live checks untested. `git diff --check` — PASS.
-- Matrix: intended browser→private Serve→loopback `/terminal` flow is documented; LAN/public, wrong-Origin, wrong-device, wildcard/LAN/public listener, and Funnel/public flows are denied by static design/tests or remain live-unverified. `tailscale ping` is not endpoint proof.
-- Independent reviewer: `/root/s05_003_reviewer` PASS against exact product/handoff; syntax and diff checks PASS; no edits or live access.
-- Blocker/request: no existing approved private Serve mapping, exact hostname, browser Origin, or trusted certificate chain is evidenced. Immutable authorization request is in product commit and must be answered before live validation.
-- Product/task commit: `d95841e`
+- Queue: Session 01 commit `ed4cc9bd6aad6bd36373eeaa36775b1d8df2c397`; S05-004 ready.
+- Exact dependency reviewed: S04-002 product `e281a1287d7d43aa0c29c1feb24455e0bc09c420`; immutable response `2bb9f0b10f2b77e3c9aa1c25facffd10002328cd`.
+- Product files: `docs/security/S05-004-control-plane-rereview.md`, `tests/security/S05-004-authorization-rereview.mjs`.
+- Evidence: exact authorization probe PASS; valid same-tenant lease allowed, six original CP-AUTH mutations and two explicit cross-tenant mutations denied. Exact migration probe PASS for forced RLS, composite tenant FKs, and final-owner trigger detection. Session 04 response evidence records 37/37 tests and direct/stale/concurrent PostgreSQL revocation checks; treated as handoff evidence, not live rerun.
+- Commands: `node --check tests/security/S05-004-authorization-rereview.mjs` PASS; exact `git show e281a128... | node ...` PASS; exact migration probe PASS; `git diff --check` PASS.
+- Boundary: reviewed control-plane paths are metadata-only; no terminal plaintext, relay, or universal decryption key present. No Session 04 code or live infrastructure modified/accessed.
+- Independent reviewer: `/root/s05_003_reviewer` PASS against exact product/response; no remaining findings or request warranted.
+- Product/task commit: `78f7b2a`
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
