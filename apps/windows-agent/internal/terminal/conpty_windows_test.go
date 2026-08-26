@@ -26,6 +26,20 @@ const (
 	agentFailureStatePathEnv = "TERMINUS_CONPTY_AGENT_FAILURE_STATE"
 )
 
+func TestWaitForShutdownStopsWaiterBeforeHandleCleanup(t *testing.T) {
+	processDone := make(chan processResult, 1)
+	abandon := make(chan struct{})
+	go func() {
+		<-abandon
+		processDone <- processResult{}
+	}()
+
+	result := waitForShutdown(processDone, abandon, time.Millisecond)
+	if result.err == nil || !regexp.MustCompile(`exceeded 1ms`).MatchString(result.err.Error()) {
+		t.Fatalf("waitForShutdown error = %v, want bounded-timeout error", result.err)
+	}
+}
+
 func TestConPTYInputOutputResizeAndExit(t *testing.T) {
 	requireConPTYIntegration(t)
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
