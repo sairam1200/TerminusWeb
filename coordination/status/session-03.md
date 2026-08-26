@@ -1,47 +1,59 @@
 # Session 03 Status
 
-- Current task: S03-001 — Prove non-elevated local ConPTY lifecycle behind an internal adapter
-- State: done (owner Definition of Done and exact-commit independent review pass; awaiting Session 01 queue transition)
+- Current task: S03-002 — Implement private HTTPS/WSS protocol 0.1 endpoint
+- State: done (owner Definition of Done and exact-tip independent review PASS; awaiting Session 01 queue transition)
 - Branch: `session/03-windows-agent`
+- Authoritative inputs:
+  - Session 01 queue ref `a9ffbab08f843c46b2321a34b4fdd4d6cc872f31` records S01-001 `done`, S03-001 `done`, and S03-002 `ready` with dependencies `[S01-001, S03-001]`.
+  - Exact protocol/security cumulative product tip: `910b69e24f464bb3e89152f3e5881beb9b706b76`.
+  - Exact completed S03-001 product tip: `637f1e99970ee543f3028a9e899bc8001a16a8e1`.
 - Files changed:
   - `apps/windows-agent/README.md`
   - `apps/windows-agent/go.mod`
   - `apps/windows-agent/go.sum`
-  - `apps/windows-agent/internal/terminal/adapter.go`
-  - `apps/windows-agent/internal/terminal/adapter_test.go`
-  - `apps/windows-agent/internal/terminal/conpty_unsupported.go`
-  - `apps/windows-agent/internal/terminal/conpty_windows.go`
-  - `apps/windows-agent/internal/terminal/conpty_windows_test.go`
-  - Historical immutable blocker requests remain unchanged under `coordination/requests/`.
+  - `apps/windows-agent/internal/protocol/protocol.go`
+  - `apps/windows-agent/internal/protocol/machine.go`
+  - `apps/windows-agent/internal/protocol/fixtures_test.go`
+  - `apps/windows-agent/internal/endpoint/endpoint.go`
+  - `apps/windows-agent/internal/endpoint/security.go`
+  - `apps/windows-agent/internal/endpoint/server.go`
+  - `apps/windows-agent/internal/endpoint/session.go`
+  - `apps/windows-agent/internal/endpoint/endpoint_test.go`
+  - `apps/windows-agent/internal/endpoint/endpoint_windows_test.go`
+- Product evidence:
+  - Implements exact `terminus.v0_1` HTTPS/WSS framing, strict required-member/duplicate/unknown/type/version validation, canonical base64url/timestamps/UUIDs, decoded and wire limits, independent direction sequences, replay/gap rejection, state transitions, and clean sequence exhaustion.
+  - Enforces one exact configured HTTPS Origin, exact subprotocol, TLS-only requests, no credential-bearing query/cookie/authorization metadata, required private-device identity, and a caller-owned listener explicitly bound to loopback. `ServeTLS` rejects wildcard, LAN, unspecified, and tailnet-interface binds and requires TLS 1.3. Private publication remains an external approved Tailscale serving layer.
+  - Enforces single-use 120-second pairing, mandatory bounded local approval, protected-store injection, credential expiry, canonical connection-bound HMAC-SHA-256 challenge authentication, proactive authorization expiry, synchronized revocation, atomic concurrent rate limits, unique connection IDs, and generic failure responses.
+  - Enforces 15-second heartbeat/45-second valid-inbound liveness only after authentication, one terminal, bounded output/backpressure, cross-connection reauthenticated detach/resume, one-time credential/session-bound grants, ordered pending output, expiry, transition-delivery rollback cleanup, client-loss cleanup, and agent-shutdown admission sealing/error propagation.
+  - Logs expose only the structured event code and non-secret connection ID. Terminal bytes, commands, synthetic PIDs, pairing material, credentials, proofs, challenges, grants, tokens, and reusable hashes are absent.
+  - Gorilla WebSocket is pinned to v1.5.3. Installed module source/API was inspected for `Upgrader`, `SetReadLimit`, `ReadMessage`, `WriteMessage`, `WriteControl`, and its one-reader/one-writer contract. No vulnerable pre-v1.5.3 release is used.
 - Commands/evidence:
-  - Required repository, architecture, shared-contract, Definition of Done, Session 03, ownership, authoritative queue, dependency, blocker-request, reviewer-finding, and status files were reread before edits.
-  - Authoritative `session/01-architecture` queue commit `7422df6d827e20bf8c770d1ea0d0762229121f12` records S03-001 as `blocked` with no dependencies and S03-002 as `blocked` on S01-001 plus S03-001. S03-002 was not started.
-  - Root cause: the Go test/agent parent has redirected standard handles, which Windows copied into PowerShell despite the pseudoconsole attribute. `STARTF_USESTDHANDLES` with null standard handles prevents that inheritance and ordinary `-NoLogo -NoProfile` PowerShell now uses ConPTY. The source was Microsoft Terminal discussion 15814, consistent with the escaped prompt recorded in the resumed blocker.
-  - The vet-reported `unsafe.Pointer(HPCON)` conversion was replaced by a direct `UpdateProcThreadAttribute` call that passes the documented HPCON value. `go vet ./...` passes.
-  - Job shutdown explicitly terminates and closes the kill-on-close job. A finite 50 ms process wait plus abandonment handshake ensures no process handle is closed while `WaitForSingleObject` is pending, and the public shutdown path remains bounded.
-  - Real Windows tests prove input/output, resize, natural exit, explicit close, timeout, cancellation, concurrent close/wait, and forced agent-process failure. Each applicable lifecycle case asserts both the PowerShell PID and a spawned `ping.exe -t` descendant have exited.
-  - Agent-failure proof launches a helper agent, records only shell/child PIDs through an atomically published temporary state file, forcibly terminates the helper, and verifies kill-on-job-close removes the complete process tree. Helper output is discarded and every failure path performs bounded reap cleanup.
-  - Official Go 1.25.12 Windows AMD64 ZIP was used only from a temporary directory after SHA-256 verification: `d5dc82da351b00e5eedd04f41356817d674cc4308131f0f638a5b14c5c3af4cb`. Pinned `golang.org/x/sys` v0.47.0 was downloaded into a temporary module cache; nothing was installed.
-  - Host: Windows 10 Home Single Language, display version 25H2, build 26200.9168. Both owner and reviewer integration processes were non-elevated; integration tests fail rather than skip if elevated.
-  - `go fmt ./...`: passed.
-  - `go vet ./...`: passed.
-  - `go test -short ./...`: passed.
-  - `go test -v ./... -count=1`: passed; all real Windows lifecycle tests passed.
-  - `go test ./internal/terminal -run '^TestConPTYConcurrentCloseAndWaitContainsProcessTree$' -count=20`: passed.
-  - After reviewer fixes, `go test ./internal/terminal -run '^(TestWaitForShutdownStopsWaiterBeforeHandleCleanup|TestConPTYAgentFailureContainsProcessTree|TestConPTYConcurrentCloseAndWaitContainsProcessTree)$' -count=10`: passed.
-  - `go test -short -race ./...`: unavailable because the non-installed Windows archive reports `CGO_ENABLED=0`; Go returned `-race requires cgo`. No compiler was installed. The dedicated real-Windows concurrency test and repeated runs are the applicable concurrency evidence.
-  - `git diff --check`, `git show --check`, owned-path review, and scans for listener/WSS/protocol/logging/secret behavior passed. No network listener, protocol 0.1 behavior, service installation, live exposure, terminal logging, or reusable secret was added.
+  - Required governance/docs/session/ownership/queue/dependency/status reads and the all-ref committed request scan were completed before changes; no request addressed to Session 03 required a response.
+  - Exact contract verifier from `910b69e24f464bb3e89152f3e5881beb9b706b76`: `protocol 0.1 verified: schema semantics, 22 transcripts, 27 fixtures, 1 positive auth vector(s), 4 negative auth mutations`.
+  - `go test -count=1 -run Canonical ./internal/protocol ./internal/endpoint`: PASS against fixtures read by exact Git object SHA; canonical authentication proof PASS.
+  - `go fmt ./...`: PASS.
+  - `go vet ./...`: PASS.
+  - `go test -short -count=1 ./...`: PASS.
+  - `go test -count=1 ./...`: PASS, including real Windows endpoint and terminal integration suites.
+  - `go test -short -count=20 ./internal/endpoint`: PASS in 23.709s.
+  - Targeted protocol/security tests PASS for exact/missing/insecure origins, wrong subprotocol, unsupported negotiation, expired challenge/authorization, wrong proof, pairing consumption, concurrent rate reservations/cooldown, duplicate connection IDs, sequence replay/gap/exhaustion, WSS oversize close 1009, one-session admission, detach/resume/replayed grant, revocation and its blocking-store race, bounded cleanup/error propagation, positive/negative listener scope, and log redaction.
+  - Real `TestRealConPTYThroughWSSCleanupPaths`: PASS on non-elevated Windows NT `10.0.26200.0` as `sai\saira`; proves WSS input/output/resize and captures only synthetic PowerShell/`ping.exe -t` PIDs, then verifies both shell and descendant exit after attached client loss and endpoint shutdown.
+  - Real `go test -count=1 -v ./internal/terminal`: PASS for ConPTY input/output/resize/exit plus process-tree containment after natural exit, cancellation, timeout, explicit close, simulated agent failure, and concurrent close/wait.
+  - Go test/log JSON scan: PASS; no terminal markers, synthetic PIDs, or reusable secret field names appeared.
+  - `git diff --check`, `git show --check`, changed-path ownership review, and listener/log/secret scans: PASS.
+  - Official Go 1.25.12 Windows AMD64 ZIP was used only from a temporary directory after SHA-256 verification `d5dc82da351b00e5eedd04f41356817d674cc4308131f0f638a5b14c5c3af4cb`; pinned modules used task-local temporary caches. Nothing was installed.
+  - `CGO_ENABLED=1 go test -race ./internal/endpoint` was unavailable because no `gcc` exists in PATH. No compiler was installed. The repeated endpoint suite, synchronized regression tests, real concurrent lifecycle test, and independent review are the applicable concurrency evidence.
 - Independent reviewer/evidence:
-  - Read-only reviewer `/root/s03_001_readonly_review` inspected exact final product tree `637f1e99970ee543f3028a9e899bc8001a16a8e1` and confirmed ancestry `235b28a -> cc836ed -> 637f1e9`; no edits or commits were made.
-  - Final verdict: PASS for S03-001 product completion with no remaining severity findings.
-  - Independent `gofmt -d` passed with no diff; `go vet ./...` passed; `go test -short ./... -count=1` passed in 2.648s; `go test -v ./... -count=1 -timeout=120s` passed in 6.182s.
-  - Reviewer repeated the bounded-wait, agent-failure, and concurrent close/wait tests five times each; all 15 executions passed in 5.119s.
-  - Reviewer confirmed non-elevated behavior, process-tree containment, owned paths, no listener/WSS/protocol/service/deployment/public exposure, and absence of logging, secrets, credentials, reusable pairing material, or user terminal plaintext artifacts.
+  - Read-only reviewer `/root/s03_002_readonly_review` reviewed the exact ancestry `2e6f205 -> eeaaf1d -> d993c3b -> 6e5ff87` against exact dependencies `910b69e...` and `637f1e9...`; no files or commits were created by the reviewer.
+  - Earlier exact-tip reviews correctly failed schema, authorization-deadline, cross-connection resume, rate-limit, pairing timing, write-bound, output-order, transition-cleanup, revocation, connection-ID, session-reservation, cleanup-error, sequence-exhaustion, real-containment, and shutdown-admission gaps. Each finding was reproduced and fixed in later product-tip ancestry.
+  - Final verdict on exact product tip `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc`: PASS with no remaining severity findings.
+  - Reviewer confirmed atomic permanent session-admission shutdown, all prior finding closures, exact dependency ancestry, `gofmt -d internal` with no diff, `git diff --check`, `git show --check`, owned paths only, clean worktree, and no installation, exposure, deployment, or mutation.
 - Assumptions/limitations:
-  - S03-001 deliberately contains no listener or transport. Therefore listener scope is proven by absence of listener code; private WSS remains S03-002 work after its dependencies are satisfied.
-  - This owner/reviewer `done` evidence is not Session 06 `verified` evidence.
+  - The endpoint is an internal library, not an installed/running service. A future consumer must inject a Windows protected-secret credential store appropriate to its service identity, a private-device resolver, local approval UI, TLS certificate, and an approved loopback listener.
+  - No Tailscale policy, Serve/Funnel setting, DNS, LAN/public listener, service installation, deployment, or live endpoint was created or changed.
+  - This owner/reviewer `done` evidence is not Session 06 `verified` evidence. Session 01 alone owns queue transitions and integration manifests.
 - Blockers/next task:
-  - The two historical S03-001 blocker requests are resolved by the final product tree; Session 01 still owns the authoritative queue transition.
-  - Do not begin S03-002 until Session 01 marks S03-001 `done`. No S03-002 work has begun.
-- Product/task commit: `637f1e99970ee543f3028a9e899bc8001a16a8e1` (includes product ancestry `235b28a48b5c8c888164e2e0c1def93b8505d5c3` and reviewer-fix commit `cc836ed491b76496d32ee8c059a3ecaeefdda120`)
+  - No S03-002 implementation blocker remains. Session 01 must read this committed handoff from `session/03-windows-agent` and transition the authoritative queue.
+  - Do not begin any later Session 03 task until Session 01 marks it ready.
+- Product/task commit: `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc` (cumulative S03-002 product tip; includes `2e6f205477b0179ada04de692dccf52458b5692e`, `eeaaf1d7148ff8c1104af6a645108ee498795a69`, and `d993c3b00e2ad4511d4f83918e230919d6db630a`)
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit
