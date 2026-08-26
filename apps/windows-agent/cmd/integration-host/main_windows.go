@@ -3,7 +3,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -16,9 +18,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"terminus/windows-agent/internal/endpoint"
 	"terminus/windows-agent/internal/terminal"
 )
@@ -39,6 +43,7 @@ func run() error {
 	serverName := flag.String("server-name", "", "certificate DNS name or IP to verify")
 	certPath := flag.String("cert", "", "externally supplied already-trusted certificate chain")
 	keyPath := flag.String("key", "", "externally supplied private key for the certificate")
+	clientCAPath := flag.String("client-ca", "", "externally supplied CA bundle for private-device client certificates")
 	storePath := flag.String("store", defaultStorePath(), "DPAPI CurrentUser credential-store path")
 	deviceID := flag.String("device-id", "", "non-secret local integration device identity")
 	revokeID := flag.String("revoke-id", "", "non-secret credential ID for revoke mode")
@@ -56,7 +61,7 @@ func run() error {
 		if *revokeID == "" {
 			return errors.New("-revoke-id is required in revoke mode")
 		}
-		return store.Delete(context.Background(), *revokeID)
+		return revokeCredential(context.Background(), store, *revokeID)
 	case "serve":
 		storeWasExplicit := false
 		flag.Visit(func(f *flag.Flag) {
@@ -64,15 +69,20 @@ func run() error {
 				storeWasExplicit = true
 			}
 		})
-		return serve(*listen, *origin, *serverName, *certPath, *keyPath, *deviceID, *printPairing, store, !storeWasExplicit)
+		return serve(*listen, *origin, *serverName, *certPath, *keyPath, *clientCAPath, *deviceID, *printPairing, store, !storeWasExplicit)
 	default:
 		return fmt.Errorf("unknown mode %q", *mode)
 	}
 }
 
-func serve(listen, origin, serverName, certPath, keyPath, deviceID string, printPairing bool, store *dpapiStore, ephemeralStore bool) error {
-	if origin == "" || serverName == "" || certPath == "" || keyPath == "" || deviceID == "" {
-		return errors.New("serve requires -origin, -server-name, -cert, -key, and -device-id")
+func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID string, printPairing bool, store *dpapiStore, ephemeralStore bool) error {
+	if origin == "" || serverName == "" || certPath == "" || keyPath == "" || clientCAPath == "" || deviceID == "" {
+		return errors.New("serve requires -origin, -server-name, -cert, -key, -client-ca, and -device-id")
+	}
+	if elevated, err := currentProcessElevated(); err != nil {
+		return fmt.Errorf("check process elevation: %w", err)
+	} else if elevated {
+		return errors.New("refusing to start integration host from an elevated process")
 	}
 	certificate, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
@@ -81,13 +91,17 @@ func serve(listen, origin, serverName, certPath, keyPath, deviceID string, print
 	if err := verifyCertificate(certificate, serverName); err != nil {
 		return err
 	}
+	clientRoots, err := loadClientRoots(clientCAPath)
+	if err != nil {
+		return err
+	}
 	endpointInstance, err := endpoint.New(endpoint.Config{
 		AllowedOrigin:  origin,
 		AgentID:        integrationAgentID,
 		Terminal:       terminal.LocalAdapter{},
 		Credentials:    store,
 		ApprovePairing: boundedLocalApproval,
-		ResolveDevice:  loopbackDeviceResolver(deviceID),
+		ResolveDevice:  certificateDeviceResolver(clientRoots, deviceID),
 		Log: func(event endpoint.Event) {
 			// Only stable event metadata is emitted. Never log payloads, IDs from
 			// requests, credentials, proofs, or terminal bytes.
@@ -97,7 +111,11 @@ func serve(listen, origin, serverName, certPath, keyPath, deviceID string, print
 	if err != nil {
 		return fmt.Errorf("create endpoint: %w", err)
 	}
-	listener, err := net.Listen("tcp", listen)
+	resolved, err := validateLoopbackAddress(listen)
+	if err != nil {
+		return err
+	}
+	listener, err := net.ListenTCP("tcp", resolved)
 	if err != nil {
 		return fmt.Errorf("listen on explicit loopback address: %w", err)
 	}
@@ -107,14 +125,45 @@ func serve(listen, origin, serverName, certPath, keyPath, deviceID string, print
 		return errors.New("integration host refuses a non-loopback listener")
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}, ServerName: serverName}
+	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+	tlsConfig.ClientCAs = clientRoots
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- endpoint.ServeTLS(listener, tlsConfig, healthAndEndpoint(endpointInstance)) }()
+	var cleanupOnce sync.Once
+	var cleanupErr error
+	var serveResult error
+	var serveResultReady bool
+	cleanup := func() error {
+		cleanupOnce.Do(func() {
+			closeErr := endpointInstance.Close()
+			listenerErr := listener.Close()
+			var serveErr error
+			if serveResultReady {
+				serveErr = serveResult
+			} else {
+				select {
+				case serveErr = <-serveDone:
+				case <-time.After(5 * time.Second):
+					serveErr = errors.New("loopback listener did not shut down within 5 seconds")
+				}
+			}
+			if closeErr != nil {
+				cleanupErr = fmt.Errorf("endpoint cleanup: %w", closeErr)
+			} else if listenerErr != nil && !errors.Is(listenerErr, net.ErrClosed) {
+				cleanupErr = fmt.Errorf("loopback listener shutdown: %w", listenerErr)
+			} else if serveErr != nil && !errors.Is(serveErr, net.ErrClosed) {
+				cleanupErr = serveErr
+			} else if ephemeralStore {
+				cleanupErr = store.Reset(context.Background())
+			}
+		})
+		return cleanupErr
+	}
+	defer func() { _ = cleanup() }()
 
 	if printPairing {
 		code, _, issueErr := endpointInstance.IssuePairingCode()
 		if issueErr != nil {
-			_ = endpointInstance.Close()
-			_ = listener.Close()
 			return fmt.Errorf("issue local pairing code: %w", issueErr)
 		}
 		// Explicit opt-in operator output only; it is not logged or persisted.
@@ -128,32 +177,16 @@ func serve(listen, origin, serverName, certPath, keyPath, deviceID string, print
 	select {
 	case <-ctx.Done():
 	case err := <-serveDone:
+		serveResult = err
+		serveResultReady = true
 		if err != nil {
+			if cleanupErr := cleanup(); cleanupErr != nil {
+				return fmt.Errorf("serve failed: %w; cleanup: %v", err, cleanupErr)
+			}
 			return err
 		}
 	}
-	closeErr := endpointInstance.Close()
-	listenerErr := listener.Close()
-	if closeErr != nil {
-		return fmt.Errorf("endpoint cleanup: %w", closeErr)
-	}
-	if listenerErr != nil && !errors.Is(listenerErr, net.ErrClosed) {
-		return fmt.Errorf("loopback listener shutdown: %w", listenerErr)
-	}
-	select {
-	case err := <-serveDone:
-		if err != nil && !errors.Is(err, net.ErrClosed) {
-			return err
-		}
-	case <-time.After(5 * time.Second):
-		return errors.New("loopback listener did not shut down within 5 seconds")
-	}
-	if ephemeralStore {
-		if err := store.Reset(context.Background()); err != nil {
-			return err
-		}
-	}
-	return nil
+	return cleanup()
 }
 
 func healthAndEndpoint(ep *endpoint.Endpoint) http.Handler {
@@ -170,13 +203,35 @@ func healthAndEndpoint(ep *endpoint.Endpoint) http.Handler {
 	return mux
 }
 
-func loopbackDeviceResolver(deviceID string) endpoint.DeviceResolver {
+func validateLoopbackAddress(value string) (*net.TCPAddr, error) {
+	address, err := net.ResolveTCPAddr("tcp", value)
+	if err != nil {
+		return nil, fmt.Errorf("resolve explicit loopback address: %w", err)
+	}
+	if address.IP == nil || address.IP.IsUnspecified() || !address.IP.IsLoopback() {
+		return nil, errors.New("integration host requires an explicit loopback IP listener")
+	}
+	return address, nil
+}
+
+func certificateDeviceResolver(roots *x509.CertPool, fallback string) endpoint.DeviceResolver {
 	return func(r *http.Request) (string, error) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil || !net.ParseIP(host).IsLoopback() {
 			return "", errors.New("peer is not loopback")
 		}
-		return deviceID, nil
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.VerifiedChains) == 0 {
+			return "", errors.New("verified private-device certificate is required")
+		}
+		leaf := r.TLS.PeerCertificates[0]
+		if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "", KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+			return "", errors.New("private-device certificate verification failed")
+		}
+		if fallback == "" {
+			return "", errors.New("private-device identity is empty")
+		}
+		fingerprint := sha256.Sum256(leaf.Raw)
+		return fallback + ":" + fmt.Sprintf("%x", fingerprint[:]), nil
 	}
 }
 
@@ -185,17 +240,49 @@ func boundedLocalApproval(ctx context.Context, _ endpoint.PairingApproval) bool 
 		return false
 	}
 	result := make(chan bool, 1)
-	go func() {
-		var answer string
-		fmt.Fprint(os.Stderr, "pairing request received; approve? [y/N] ")
-		_, err := fmt.Fscanln(os.Stdin, &answer)
-		result <- err == nil && strings.EqualFold(answer, "y")
-	}()
+	request := approvalRequest{ctx: ctx, result: result}
+	select {
+	case approvalConsoleInstance.requests <- request:
+	case <-ctx.Done():
+		return false
+	}
 	select {
 	case approved := <-result:
 		return approved
 	case <-ctx.Done():
 		return false
+	}
+}
+
+type approvalRequest struct {
+	ctx    context.Context
+	result chan bool
+}
+
+type approvalConsole struct {
+	requests chan approvalRequest
+}
+
+var approvalConsoleInstance = newApprovalConsole()
+
+func newApprovalConsole() *approvalConsole {
+	console := &approvalConsole{requests: make(chan approvalRequest)}
+	go console.run()
+	return console
+}
+
+func (c *approvalConsole) run() {
+	reader := bufio.NewReader(os.Stdin)
+	for request := range c.requests {
+		if request.ctx.Err() != nil {
+			continue
+		}
+		fmt.Fprint(os.Stderr, "pairing request received; approve? [y/N] ")
+		line, err := reader.ReadString('\n')
+		approved := err == nil && strings.EqualFold(strings.TrimSpace(line), "y")
+		if request.ctx.Err() == nil {
+			request.result <- approved
+		}
 	}
 }
 
@@ -229,6 +316,45 @@ func verifyCertificate(certificate tls.Certificate, serverName string) error {
 		return fmt.Errorf("supplied certificate is not trusted by the current Windows user: %w", err)
 	}
 	return nil
+}
+
+func loadClientRoots(path string) (*x509.CertPool, error) {
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read private-device CA bundle: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return nil, errors.New("private-device CA bundle contains no certificates")
+	}
+	return pool, nil
+}
+
+func revokeCredential(ctx context.Context, store *dpapiStore, credentialID string) error {
+	ep, err := endpoint.New(endpoint.Config{
+		AllowedOrigin:  "https://integration.invalid",
+		AgentID:        integrationAgentID,
+		Terminal:       terminal.LocalAdapter{},
+		Credentials:    store,
+		ApprovePairing: func(context.Context, endpoint.PairingApproval) bool { return false },
+		ResolveDevice: func(*http.Request) (string, error) {
+			return "", errors.New("device resolution unavailable in revoke mode")
+		},
+	})
+	if err != nil {
+		return err
+	}
+	defer ep.Close()
+	return ep.RevokeCredential(ctx, credentialID)
+}
+
+func currentProcessElevated() (bool, error) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		return false, err
+	}
+	defer token.Close()
+	return token.IsElevated(), nil
 }
 
 func containsServerAuth(usages []x509.ExtKeyUsage) bool {

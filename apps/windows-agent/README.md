@@ -35,11 +35,14 @@ active or detached terminal sessions.
 
 `cmd/integration-host` is a Windows-only, non-elevated local harness around the
 endpoint library. It refuses to start unless the caller supplies one exact
-HTTPS Origin, a certificate/key pair, a certificate hostname, and a device
-identity. The certificate must already chain to the current Windows user's
-trusted roots and cover the hostname; the host never generates, installs, or
-trusts a self-signed certificate. The listener default is `127.0.0.1:0` and
-non-loopback binds are rejected by both the host and `ServeTLS`.
+HTTPS Origin, a server certificate/key pair, a certificate hostname, a trusted
+client-CA bundle, and a non-secret device label. The server certificate must
+already chain to the current Windows user's trusted roots and cover the
+hostname; the host never generates, installs, or trusts a self-signed
+certificate. Client certificates signed by the supplied CA are required and
+their SHA-256 fingerprints are used as the private-device identity. The
+listener default is `127.0.0.1:0` and non-loopback binds are rejected before
+and after binding.
 
 The host encrypts its temporary credential map with DPAPI `CurrentUser`, so
 records are bound to the non-elevated integration identity. The default store
@@ -51,7 +54,7 @@ Safe commands (run from this directory, with an externally supplied already
 trusted certificate) are:
 
 ```powershell
-go run ./cmd/integration-host -mode serve -listen 127.0.0.1:0 -origin <exact-https-origin> -server-name <certificate-hostname> -cert <existing-cert.pem> -key <existing-key.pem> -device-id local-integration-device -print-pairing-code
+go run ./cmd/integration-host -mode serve -listen 127.0.0.1:0 -origin <exact-https-origin> -server-name <certificate-hostname> -cert <existing-cert.pem> -key <existing-key.pem> -client-ca <existing-client-ca.pem> -device-id local-integration-device -print-pairing-code
 Invoke-WebRequest https://<certificate-hostname>/healthz
 go run ./cmd/integration-host -mode revoke -store <protected-store-path> -revoke-id <credential-id>
 go run ./cmd/integration-host -mode reset -store <protected-store-path>
