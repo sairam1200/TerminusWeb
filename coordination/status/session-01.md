@@ -197,3 +197,40 @@
   authoritative remote-presence check. No push, Vercel deployment, certificate
   generation/installation, host start, Serve/Funnel change, merge, or public
   exposure occurred in this session.
+
+## Authorized bootstrap follow-up and Vercel first-deployment blocker (2026-08-26)
+
+- Latest Session 02 committed status was read from branch tip
+  `4df8562db73b36e7823a56adad590e05680de179`. It records the exact authorized
+  branch push/read-back at `d479f5b3f058d01dccc3258e6c50bb7d1865e52e`, then a
+  first Vercel deployment of the empty `gaddr/terminus-web` project being
+  automatically classified as Production and deleted. No Preview Origin,
+  environment variable, or live endpoint exists. The deleted deployment URL
+  is not an approved Origin.
+- Session 02's immutable blocker request was consumed from that branch at
+  `d1345d771b4cf2152f389bbd59a9a02727d18174:coordination/requests/from-02-to-01-s02-002-vercel-first-deployment-preview-blocker.request.md`.
+  Session 01 response commit `5a9adf8c58a67b4962e12af5bedb2f2067b85c0d`
+  explicitly declines any temporary Production-classified bootstrap under the
+  current authorization. An already-initialized Preview project or a separate
+  user decision is required.
+- Session 05 exact recommendation/status (`54625e729437c0271b117b4eb79cf19e59d07cb8` /
+  `d459d8b1fba86d452efc446f75bc2e8a62c9ae0f`) and raw-TCP response
+  (`eb4530f299862da4aca1d7ebcd2cca896cd4bc10`) remain recommendation-only;
+  no route or private-path evidence exists. Session 03's exact Origin request
+  `672a8d593b453a9e72187ac4ba39e5b71ca1d89e` remains unanswered with an exact
+  Origin. Session 06's committed preflight remains `BLOCKED / NOT VERIFIED`.
+- Queue/facts commit `2f8cd4e199734880cd7e27f2809f6b09261677b4` records
+  `S02-003` as `review` (remote push evidence exists) and keeps `S06-004`,
+  `S03-004`, `S05-006`, `S02-002`, `S05-005`, `S05-002`, `S06-002`, and
+  `S01-002` blocked. No task is marked done or verified from the deleted
+  deployment or from a proposal.
+- Follow-up request/response commit
+  `5a9adf8c58a67b4962e12af5bedb2f2067b85c0d` contains exact immutable
+  instructions: Session 02 preserves the pushed branch and stops Preview
+  retries; Session 03 waits for the exact Origin and ClientAuth leaf; Session
+  05 waits for host/Origin gates; Session 06 uses only an already-initialized
+  Preview project and then runs S06-002 after live evidence. Each target must
+  read its named path with `git show`.
+- Session 01 did not push, deploy, install/generate certificates, start the
+  host, configure Serve/Funnel, merge, or expose any route. S01-002 remains
+  blocked until Session 06 independently verifies the exact producer commits.
