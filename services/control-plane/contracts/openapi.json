@@ -88,6 +88,7 @@
         "x-terminus-authorization-action": "lease.issue",
         "x-terminus-cross-tenant-response": 404,
         "x-terminus-terminal-relay": false,
+        "x-terminus-resolution-invariant": "Resolve pairing_id inside tenantId and bind its membership, host, active device key, and terminal_access grant before authorization.",
         "requestBody": {
           "required": true,
           "content": {

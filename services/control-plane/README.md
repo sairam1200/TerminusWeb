@@ -18,6 +18,12 @@ transport. The personal Vercel Hobby prototype does not call this contract.
   until commercial hosting and product decisions are approved.
 - There is no super-administrator terminal grant, universal decryption key, or
   silent tenant impersonation path.
+- Authorization receives fully resolved tenant-scoped UUIDs. Lease policy binds
+  the client-requested pairing ID to the resolved pairing row, host, device key,
+  membership, and entitlement; a missing identity fails closed.
+- Final-owner preservation is a database invariant. Role mutations atomically
+  update a tenant-owned owner counter, so stale caller counts and concurrent
+  revocations cannot remove the final active owner role.
 
 ## Contract artifacts
 
@@ -30,7 +36,9 @@ transport. The personal Vercel Hobby prototype does not call this contract.
 - `src/authorization.mjs` is an executable reference policy, not a network
   handler. API and abuse tests exercise it before any handler is added. Its
   `evaluatedAtEpochSeconds` input represents a trusted server clock and is not
-  part of the client request contract.
+  part of the client request contract. Its `requestedPairingId` is the parsed
+  request value; `target.pairingId` is the exact tenant-scoped row resolved from
+  that value.
 - `../../infrastructure/database/migrations/0001_control_plane.sql` is the sole
   migration history for this task. Tenant-owned foreign keys include
   `tenant_id`, and row-level policies fail closed without transaction-local

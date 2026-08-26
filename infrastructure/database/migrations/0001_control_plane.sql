@@ -57,6 +57,7 @@ CREATE TABLE terminus_cp.tenants (
   id uuid PRIMARY KEY,
   display_name text NOT NULL CHECK (length(display_name) BETWEEN 1 AND 120),
   state terminus_cp.tenant_state NOT NULL DEFAULT 'active',
+  active_owner_count integer NOT NULL DEFAULT 0 CHECK (active_owner_count >= 0),
   retention_days integer NOT NULL DEFAULT 365 CHECK (retention_days BETWEEN 30 AND 3650),
   created_at timestamptz NOT NULL DEFAULT transaction_timestamp(),
   closed_at timestamptz,
@@ -98,6 +99,73 @@ CREATE TABLE terminus_cp.role_assignments (
   ),
   CHECK (revoked_at IS NULL OR revoked_at >= assigned_at)
 );
+
+CREATE FUNCTION terminus_cp.preserve_final_owner()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, terminus_cp
+AS $$
+DECLARE
+  owner_delta integer := 0;
+  affected_tenant_id uuid;
+BEGIN
+  IF TG_OP = 'UPDATE' AND (
+    NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+    OR NEW.id IS DISTINCT FROM OLD.id
+    OR NEW.membership_id IS DISTINCT FROM OLD.membership_id
+  ) THEN
+    RAISE EXCEPTION 'role assignment identity is immutable' USING ERRCODE = '23514';
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    affected_tenant_id := NEW.tenant_id;
+    IF NEW.role = 'owner' AND NEW.revoked_at IS NULL THEN
+      owner_delta := 1;
+    END IF;
+  ELSIF TG_OP = 'DELETE' THEN
+    affected_tenant_id := OLD.tenant_id;
+    IF OLD.role = 'owner' AND OLD.revoked_at IS NULL THEN
+      owner_delta := -1;
+    END IF;
+  ELSE
+    affected_tenant_id := OLD.tenant_id;
+    IF OLD.role = 'owner' AND OLD.revoked_at IS NULL THEN
+      owner_delta := owner_delta - 1;
+    END IF;
+    IF NEW.role = 'owner' AND NEW.revoked_at IS NULL THEN
+      owner_delta := owner_delta + 1;
+    END IF;
+  END IF;
+
+  IF owner_delta > 0 THEN
+    UPDATE terminus_cp.tenants
+      SET active_owner_count = active_owner_count + owner_delta
+      WHERE id = affected_tenant_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'owner role references an unknown tenant' USING ERRCODE = '23503';
+    END IF;
+  ELSIF owner_delta < 0 THEN
+    UPDATE terminus_cp.tenants
+      SET active_owner_count = active_owner_count + owner_delta
+      WHERE id = affected_tenant_id
+        AND active_owner_count >= -owner_delta
+        AND (state = 'closed' OR active_owner_count + owner_delta >= 1);
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'cannot revoke the final active owner role' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER preserve_final_owner
+BEFORE INSERT OR UPDATE OR DELETE ON terminus_cp.role_assignments
+FOR EACH ROW EXECUTE FUNCTION terminus_cp.preserve_final_owner();
 
 CREATE TABLE terminus_cp.hosts (
   tenant_id uuid NOT NULL,

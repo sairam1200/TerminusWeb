@@ -29,6 +29,7 @@ const ROLE_PERMISSIONS = Object.freeze({
 
 const ADMIN_MANAGED_ROLES = new Set(["operator", "auditor"]);
 const KNOWN_ROLES = new Set(Object.keys(ROLE_PERMISSIONS));
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function decision(allowed, code, status) {
   return Object.freeze({ allowed, code, status });
@@ -36,20 +37,70 @@ function decision(allowed, code, status) {
 
 const ALLOW = decision(true, "ALLOWED", 200);
 
-export function authorize({ actor, requestTenantId, action, resource, target, tenantState = "active", evaluatedAtEpochSeconds }) {
+function isUuid(value) {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+function hasUuidFields(value, fields) {
+  return value !== null && typeof value === "object" && fields.every((field) => isUuid(value[field]));
+}
+
+function hasCompleteActionIdentity({ action, resource, target, requestedPairingId }) {
+  if (action === "role.assign" || action === "role.revoke") {
+    return hasUuidFields(target, ["tenantId", "membershipId"]);
+  }
+  if (action === "lease.issue") {
+    return (
+      hasUuidFields(resource, ["tenantId", "hostId", "deviceKeyId"]) &&
+      hasUuidFields(target, ["tenantId", "pairingId", "pairingMembershipId", "pairingHostId"]) &&
+      isUuid(requestedPairingId) &&
+      target.pairingId === requestedPairingId &&
+      target.entitlementKey === "terminal_access"
+    );
+  }
+  if (["host.read", "host.manage", "pairing.create", "pairing.revoke"].includes(action)) {
+    return hasUuidFields(resource, ["tenantId", "hostId"]);
+  }
+  if (action === "device_key.manage") {
+    return hasUuidFields(resource, ["tenantId", "hostId", "deviceKeyId"]);
+  }
+  if (action === "membership.read" || action === "audit.read") {
+    return hasUuidFields(resource, ["tenantId"]);
+  }
+  return true;
+}
+
+export function authorize({
+  actor,
+  requestTenantId,
+  action,
+  resource,
+  target,
+  requestedPairingId,
+  tenantState = "active",
+  evaluatedAtEpochSeconds
+}) {
   if (!actor?.authenticated) {
     return decision(false, "UNAUTHENTICATED", 401);
   }
 
-  if (!requestTenantId || actor.tenantId !== requestTenantId) {
+  if (!isUuid(requestTenantId) || !isUuid(actor.tenantId) || actor.tenantId !== requestTenantId) {
     return decision(false, "NOT_FOUND", 404);
   }
 
-  if (resource?.tenantId !== undefined && resource.tenantId !== requestTenantId) {
+  if (!isUuid(actor.membershipId)) {
+    return decision(false, "INVALID_REQUEST", 422);
+  }
+
+  if (!hasCompleteActionIdentity({ action, resource, target, requestedPairingId })) {
+    return decision(false, "INVALID_REQUEST", 422);
+  }
+
+  if (resource !== undefined && resource.tenantId !== requestTenantId) {
     return decision(false, "NOT_FOUND", 404);
   }
 
-  if (target?.tenantId !== undefined && target.tenantId !== requestTenantId) {
+  if (target !== undefined && target.tenantId !== requestTenantId) {
     return decision(false, "NOT_FOUND", 404);
   }
 
@@ -72,7 +123,7 @@ export function authorize({ actor, requestTenantId, action, resource, target, te
   }
 
   if (action === "lease.issue") {
-    return authorizeLease({ actor, resource, target, evaluatedAtEpochSeconds });
+    return authorizeLease({ actor, resource, target, requestedPairingId, evaluatedAtEpochSeconds });
   }
 
   return ALLOW;
@@ -88,19 +139,10 @@ function authorizeRoleMutation({ actorRoles, action, target }) {
     return decision(false, "FORBIDDEN", 403);
   }
 
-  if (action === "role.revoke" && target.role === "owner") {
-    if (!Number.isSafeInteger(target.activeOwnerCount) || target.activeOwnerCount < 1) {
-      return decision(false, "INVALID_REQUEST", 422);
-    }
-    if (target.activeOwnerCount <= 1) {
-      return decision(false, "CONFLICT", 409);
-    }
-  }
-
   return ALLOW;
 }
 
-function authorizeLease({ actor, resource, target, evaluatedAtEpochSeconds }) {
+function authorizeLease({ actor, resource, target, requestedPairingId, evaluatedAtEpochSeconds }) {
   if (
     !Number.isSafeInteger(target?.requestedTtlSeconds) ||
     target.requestedTtlSeconds < 1 ||
@@ -141,6 +183,7 @@ function authorizeLease({ actor, resource, target, evaluatedAtEpochSeconds }) {
 
   if (
     target?.pairingState !== "confirmed" ||
+    target.pairingId !== requestedPairingId ||
     target?.pairingMembershipId !== actor.membershipId ||
     target?.pairingHostId !== resource.hostId ||
     target.pairingExpiresAtEpochSeconds <= evaluatedAtEpochSeconds
@@ -150,7 +193,7 @@ function authorizeLease({ actor, resource, target, evaluatedAtEpochSeconds }) {
 
   const entitlements = new Set(actor.entitlements ?? []);
   if (
-    !entitlements.has("terminal_access") ||
+    !entitlements.has(target.entitlementKey) ||
     target.entitlementState !== "active" ||
     target.entitlementStartsAtEpochSeconds > evaluatedAtEpochSeconds ||
     (target.entitlementEndsAtEpochSeconds !== null && target.entitlementEndsAtEpochSeconds <= evaluatedAtEpochSeconds)

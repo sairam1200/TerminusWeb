@@ -77,14 +77,14 @@
     }
   },
   "authorizationInvariants": [
-    "Every tenant object reference carries and matches tenant_id.",
+    "Every resolved tenant object carries validated tenant, membership, host, device-key, pairing, and entitlement identity as applicable; missing identity fails closed.",
     "Missing or mismatched tenant context fails closed and does not disclose object existence.",
     "An actor must have an active membership in the request tenant.",
     "Role assignment targets must be active memberships in the same tenant.",
     "Admins cannot grant or revoke owner or admin roles.",
-    "The final active owner role cannot be revoked.",
+    "The database atomically derives the tenant owner count from role mutations and rejects removal of the final active owner role without trusting a caller-supplied count.",
     "Roles never imply terminal_access, premium, staff, or quota entitlement.",
-    "Lease issuance requires an active pairing, active host and device key, terminal_access entitlement, and atomically reserved quota.",
+    "Lease issuance binds the requested pairing identifier to the exact resolved same-tenant pairing, membership, host, device key, and terminal_access entitlement before atomically reserved quota.",
     "Pairing, key, entitlement, and lease validity are evaluated against a trusted server clock, never a client-supplied timestamp.",
     "Subscription synchronization is a non-human provider-adapter action and cannot be authorized by a tenant role.",
     "No platform role can decrypt, relay, observe, or silently authorize a tenant terminal stream."
