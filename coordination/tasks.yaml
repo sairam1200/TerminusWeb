@@ -21,9 +21,9 @@ tasks:
 
   - id: S02-002
     owner: session_02
-    state: review
+    state: blocked
     title: Integrate browser terminal with protocol 0.1
-    depends_on: [S01-001, S02-001]
+    depends_on: [S01-001, S02-001, S03-003, S05-005]
     evidence: Shared fixtures pass and malformed frames fail closed.
 
   - id: S03-001
@@ -95,6 +95,20 @@ tasks:
     title: Re-review control-plane remediation and final-owner invariants
     depends_on: [S04-002]
     evidence: Independent exact-commit re-review reproduces no S05-003 fail-open findings and passes stale/concurrent owner-revocation checks.
+
+  - id: S03-003
+    owner: session_03
+    state: ready
+    title: Build runnable non-elevated integration host around private WSS library
+    depends_on: [S03-002]
+    evidence: Windows-protected credential storage, private-device resolution, mandatory local approval, loopback-only TLS listener, bounded lifecycle/reset/health commands, positive and denied endpoint paths, cleanup and secret-safe logs, exact product and reviewer commits.
+
+  - id: S05-005
+    owner: session_05
+    state: blocked
+    title: Review TLS/private publication design and prove private-only access
+    depends_on: [S03-003, S05-001]
+    evidence: Read-only exact-design review proving intended private access, denied LAN/public access, existing browser/OS certificate trust, Funnel disabled, and separation of Tailscale policy from application pairing/authentication; no live mutation.
 
   - id: S01-002
     owner: session_01

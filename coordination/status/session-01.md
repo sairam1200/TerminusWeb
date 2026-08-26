@@ -45,3 +45,15 @@
 - Session 04 branch tip `c81f96daf444f809f615e5bc2f6b0457fdbe0b21` records S04-002 `done`. Exact product `e281a1287d7d43aa0c29c1feb24455e0bc09c420` is an ancestor; named reviewer `s05_003_remediation_reviewer` independently reproduced Node, PostgreSQL/RLS/concurrency, scope, and cleanup checks with PASS. Queue transition: S04-002 `ready` -> `done`.
 - Session 05 branch tip `b1b6914397acca8c1fa31a540e3fe7cafbaa7756` records S05-003 done and its exact review product `f4bbcd01b7fd45fdf52622c94b8875a6ad3f3ce0`; S05-004 is now unlocked by S04-002. Queue transition: S05-004 `blocked` -> `ready`.
 - Dependency gate: S05-002 remains `blocked` because S02-002 is not done, despite S03-002 and S05-001 being done. No integration or product-branch changes were made.
+
+## Endpoint-wiring task assignment (2026-08-26)
+
+- Read exact queue commit `f004d2cc807ff3cf419e934c0dc3fc1101c4c4ce`, Session 02 status commit `2d8afe23abb039c37836c80c96ef555d1da6066b`, Session 02 product `aec63af0ce7512341555910e59f3617543869c4a`, Session 03 product `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc`, Session 03 handoff `715aac71205f3c97b23d825b75c8d2fddf806b8a`, and Session 03 response `de185692732b93afdc730b228be4475b43a3b0e1:coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`.
+- The response confirms no approved runnable real-WSS endpoint, certificate trust chain, protected credential store, private-device resolver, local approval UI, listener/process, or private-publication mapping exists. S02-002’s deterministic product/reviewer evidence remains valid but its real-path dependency is unmet.
+- Queue transition: S02-002 `review` -> `blocked`; existing implementation evidence is preserved. Added dependencies `[S01-001, S02-001, S03-003, S05-005]`.
+- Added `S03-003` (`ready`, owner Session 03, depends on S03-002): runnable non-elevated integration host around the completed library, with protected credentials, private-device resolution, local approval, loopback TLS, lifecycle/reset/health controls, and safe evidence boundaries.
+- Added `S05-005` (`blocked`, owner Session 05, depends on S03-003 and S05-001): read-only TLS/private-publication review covering allowed private access, denied LAN/public access, existing browser trust, Funnel disabled, and policy/application-boundary separation. Live tailnet mutation remains separately unauthorized.
+- Immutable relay request commit: `58fd33c`.
+  - Session 03 request: `coordination/requests/from-01-to-03-s03-003-runnable-integration-host.request.md` (blocking task S03-003/S02-002; requested response is exact product plus status-only handoff evidence).
+  - Session 05 request: `coordination/requests/from-01-to-05-s05-005-private-publication-review.request.md` (blocking task S05-005/S02-002; requested response is read-only design/access evidence and explicit blockers).
+- No Session 02, Session 03, Session 04, Session 05 implementation files, certificates, listeners, Tailscale policy, or live infrastructure were modified.
