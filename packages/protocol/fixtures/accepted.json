@@ -1,0 +1,71 @@
+{
+  "contractVersion": "0.1",
+  "handshakes": [
+    {
+      "id": "exact-allowed-origin",
+      "request": { "scheme": "wss", "origin": "https://preview.example.invalid", "subprotocol": "terminus.v0_1" },
+      "allowedOrigins": ["https://preview.example.invalid"],
+      "expect": "accept"
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "pair-auth-open-io-resize-heartbeat-detach",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.1"] } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "hello_ack", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "selectedVersion": "0.1", "agentId": "50000000-0000-4000-8000-000000000001" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "pairing_request", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 1, "payload": { "pairingCode": "AAECAwQFBgcICQoLDA0ODw" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "pairing_result", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 1, "payload": { "credentialId": "30000000-0000-4000-8000-000000000001", "credentialSecret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8", "credentialExpiresAt": "2026-09-25T12:00:00.000Z" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "auth_challenge", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 2, "payload": { "challengeId": "20000000-0000-4000-8000-000000000001", "challenge": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8", "expiresAt": "2026-08-26T12:00:10.000Z" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "auth_response", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 2, "payload": { "challengeId": "20000000-0000-4000-8000-000000000001", "credentialId": "30000000-0000-4000-8000-000000000001", "proof": "Lc7B_pWvNKrS7lyj12dhdOZOh4NHEmLDgR1Rgc4TVYE" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "auth_result", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 3, "payload": { "authenticated": true, "authorizationExpiresAt": "2026-08-27T00:00:00.000Z" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "open_session", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 3, "payload": { "shell": "powershell", "dimensions": { "columns": 1, "rows": 1 } } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "session_opened", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 4, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "terminal_input", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 4, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "data": "AP8" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "terminal_output", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 5, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "data": "AP8" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "resize", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 5, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "dimensions": { "columns": 1000, "rows": 1000 } } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "heartbeat", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 6, "payload": { "kind": "ping", "nonce": "AAECAwQFBgcICQoLDA0ODw" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "heartbeat", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 6, "payload": { "kind": "pong", "nonce": "AAECAwQFBgcICQoLDA0ODw" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "detach", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 7, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "session_detached", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 7, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "resumeGrant": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8", "expiresAt": "2026-08-26T12:02:00.000Z" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "DETACHED" }
+    },
+    {
+      "id": "resume-and-request-close",
+      "initial": { "connectionState": "READY", "sessionState": "DETACHED", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "resume_session", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "resumeGrant": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8", "dimensions": { "columns": 80, "rows": 24 } } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "session_resumed", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "close_session", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 1, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "reason": "user_request" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "session_closed", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 1, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "reason": "user_request" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "CLOSED" }
+    },
+    {
+      "id": "agent-process-exit",
+      "initial": { "connectionState": "READY", "sessionState": "OPEN", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [
+        { "direction": "agent_to_client", "frame": { "version": "0.1", "type": "session_closed", "connectionId": "10000000-0000-4000-8000-000000000003", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "reason": "process_exit" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "CLOSED" }
+    },
+    {
+      "id": "terminal-input-decoded-boundary",
+      "initial": { "connectionState": "READY", "sessionState": "OPEN", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [
+        { "direction": "client_to_agent", "generate": { "field": "payload.data", "decodedBytes": 16384 }, "frame": { "version": "0.1", "type": "terminal_input", "connectionId": "10000000-0000-4000-8000-000000000004", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "data": "AA" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "OPEN" }
+    },
+    {
+      "id": "terminal-output-decoded-boundary",
+      "initial": { "connectionState": "READY", "sessionState": "OPEN", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [
+        { "direction": "agent_to_client", "generate": { "field": "payload.data", "decodedBytes": 32768 }, "frame": { "version": "0.1", "type": "terminal_output", "connectionId": "10000000-0000-4000-8000-000000000005", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "data": "AA" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "OPEN" }
+    }
+  ]
+}

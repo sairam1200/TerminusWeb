@@ -1,0 +1,139 @@
+{
+  "contractVersion": "0.1",
+  "handshakes": [
+    {
+      "id": "origin-not-allowlisted",
+      "request": { "scheme": "wss", "origin": "https://attacker.example.invalid", "subprotocol": "terminus.v0_1" },
+      "allowedOrigins": ["https://preview.example.invalid"],
+      "expected": { "code": "ORIGIN_REJECTED", "httpStatus": 403 }
+    },
+    {
+      "id": "missing-origin",
+      "request": { "scheme": "wss", "subprotocol": "terminus.v0_1" },
+      "allowedOrigins": ["https://preview.example.invalid"],
+      "expected": { "code": "ORIGIN_REJECTED", "httpStatus": 403 }
+    },
+    {
+      "id": "wrong-subprotocol",
+      "request": { "scheme": "wss", "origin": "https://preview.example.invalid", "subprotocol": "other.v1" },
+      "allowedOrigins": ["https://preview.example.invalid"],
+      "expected": { "code": "UNSUPPORTED_VERSION", "httpStatus": 426 }
+    },
+    {
+      "id": "insecure-websocket",
+      "request": { "scheme": "ws", "origin": "https://preview.example.invalid", "subprotocol": "terminus.v0_1" },
+      "allowedOrigins": ["https://preview.example.invalid"],
+      "expected": { "code": "ORIGIN_REJECTED", "httpStatus": 403 }
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "malformed-json",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "raw": "{\"version\":\"0.1\"" }],
+      "expected": { "code": "INVALID_JSON", "closeCode": 1007, "atFrame": 0 }
+    },
+    {
+      "id": "duplicate-object-member",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "raw": "{\"version\":\"0.1\",\"version\":\"0.1\",\"type\":\"hello\",\"connectionId\":\"10000000-0000-4000-8000-000000000001\",\"sequence\":0,\"payload\":{\"clientInstanceId\":\"40000000-0000-4000-8000-000000000001\",\"supportedVersions\":[\"0.1\"]}}" }],
+      "expected": { "code": "INVALID_JSON", "closeCode": 1007, "atFrame": 0 }
+    },
+    {
+      "id": "wire-frame-too-large",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "generate": { "wireTrailingSpaces": 65536 }, "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.1"] } } }],
+      "expected": { "code": "FRAME_TOO_LARGE", "closeCode": 1009, "atFrame": 0 }
+    },
+    {
+      "id": "unsupported-envelope-version",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.2", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.2"] } } }],
+      "expected": { "code": "UNSUPPORTED_VERSION", "closeCode": 1002, "atFrame": 0 }
+    },
+    {
+      "id": "unsupported-negotiated-version",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.2"] } } }],
+      "expected": { "code": "UNSUPPORTED_VERSION", "closeCode": 1002, "atFrame": 0 }
+    },
+    {
+      "id": "unknown-message-type",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "clipboard", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": {} } }],
+      "expected": { "code": "UNKNOWN_TYPE", "closeCode": 1002, "atFrame": 0 }
+    },
+    {
+      "id": "unknown-envelope-field",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.1"] }, "extension": true } }],
+      "expected": { "code": "SCHEMA_INVALID", "closeCode": 1002, "atFrame": 0 }
+    },
+    {
+      "id": "dimension-over-boundary",
+      "initial": { "connectionState": "READY", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "open_session", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "shell": "powershell", "dimensions": { "columns": 1001, "rows": 24 } } } }],
+      "expected": { "code": "SCHEMA_INVALID", "closeCode": 1002, "atFrame": 0 }
+    },
+    {
+      "id": "noncanonical-base64url",
+      "initial": { "connectionState": "READY", "sessionState": "OPEN", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "terminal_input", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "data": "A" } } }],
+      "expected": { "code": "SCHEMA_INVALID", "closeCode": 1002, "atFrame": 0 }
+    },
+    {
+      "id": "terminal-input-over-decoded-limit",
+      "initial": { "connectionState": "READY", "sessionState": "OPEN", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "generate": { "field": "payload.data", "decodedBytes": 16385 }, "frame": { "version": "0.1", "type": "terminal_input", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "data": "AA" } } }],
+      "expected": { "code": "PAYLOAD_TOO_LARGE", "closeCode": 1009, "atFrame": 0 }
+    },
+    {
+      "id": "sequence-replay",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.1"] } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.1"] } } }
+      ],
+      "expected": { "code": "SEQUENCE_REPLAY", "closeCode": 1008, "atFrame": 1 }
+    },
+    {
+      "id": "sequence-gap",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 1, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.1"] } } }],
+      "expected": { "code": "SEQUENCE_GAP", "closeCode": 1008, "atFrame": 0 }
+    },
+    {
+      "id": "wrong-direction",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "agent_to_client", "frame": { "version": "0.1", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.1"] } } }],
+      "expected": { "code": "DIRECTION_VIOLATION", "closeCode": 1008, "atFrame": 0 }
+    },
+    {
+      "id": "open-before-authentication",
+      "initial": { "connectionState": "UNAUTHENTICATED", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "open_session", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "shell": "powershell", "dimensions": { "columns": 80, "rows": 24 } } } }],
+      "expected": { "code": "INVALID_STATE", "closeCode": 1008, "atFrame": 0 }
+    },
+    {
+      "id": "expired-authentication-challenge",
+      "initial": { "connectionState": "CHALLENGED", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "context": { "now": "2026-08-26T12:00:11.000Z", "challengeExpiresAt": "2026-08-26T12:00:10.000Z" },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "auth_response", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "challengeId": "20000000-0000-4000-8000-000000000001", "credentialId": "30000000-0000-4000-8000-000000000001", "proof": "Lc7B_pWvNKrS7lyj12dhdOZOh4NHEmLDgR1Rgc4TVYE" } } }],
+      "expected": { "code": "AUTHENTICATION_FAILED", "closeCode": 1008, "atFrame": 0 }
+    },
+    {
+      "id": "wrong-authentication-proof",
+      "initial": { "connectionState": "CHALLENGED", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "context": { "now": "2026-08-26T12:00:01.000Z", "challengeExpiresAt": "2026-08-26T12:00:10.000Z", "credentialSecret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8", "challenge": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8" },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "auth_response", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "challengeId": "20000000-0000-4000-8000-000000000001", "credentialId": "30000000-0000-4000-8000-000000000001", "proof": "Mc7B_pWvNKrS7lyj12dhdOZOh4NHEmLDgR1Rgc4TVYE" } } }],
+      "expected": { "code": "AUTHENTICATION_FAILED", "closeCode": 1008, "atFrame": 0 }
+    },
+    {
+      "id": "replayed-resume-grant",
+      "initial": { "connectionState": "READY", "sessionState": "DETACHED", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 } },
+      "context": { "consumedResumeGrants": ["QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"] },
+      "frames": [{ "direction": "client_to_agent", "frame": { "version": "0.1", "type": "resume_session", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "sessionId": "60000000-0000-4000-8000-000000000001", "resumeGrant": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8", "dimensions": { "columns": 80, "rows": 24 } } } }],
+      "expected": { "code": "RESUME_REJECTED", "closeCode": 1008, "atFrame": 0 }
+    }
+  ]
+}
