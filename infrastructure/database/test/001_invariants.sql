@@ -241,10 +241,15 @@ EXCEPTION WHEN object_not_in_prerequisite_state THEN
 END;
 $$;
 
-CREATE FUNCTION terminus_test.future_lease_rejected()
+CREATE FUNCTION terminus_test.lease_offset_accepted(offset_seconds integer)
 RETURNS boolean
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  candidate_id uuid := format(
+    '11111111-7000-4000-8000-%s',
+    lpad((offset_seconds + 1000)::text, 12, '0')
+  )::uuid;
 BEGIN
   INSERT INTO terminus_cp.leases (
     tenant_id,
@@ -261,20 +266,34 @@ BEGIN
     expires_at
   ) VALUES (
     '11111111-1111-4111-8111-111111111111',
-    '11111111-9004-4000-8000-111111111111',
+    candidate_id,
     '11111111-aaaa-4aaa-8aaa-111111111111',
     '11111111-1000-4000-8000-111111111111',
     '11111111-1002-4000-8000-111111111111',
     'terminal_access',
     1,
     'test-key-1',
-    decode(repeat('88', 32), 'hex'),
-    decode(repeat('99', 32), 'hex'),
-    transaction_timestamp() + interval '31 seconds',
-    transaction_timestamp() + interval '331 seconds'
+    decode(lpad(to_hex(offset_seconds + 1000), 64, '0'), 'hex'),
+    decode(lpad(to_hex(offset_seconds + 2000), 64, '0'), 'hex'),
+    transaction_timestamp() + make_interval(secs => offset_seconds),
+    transaction_timestamp() + make_interval(secs => offset_seconds + 300)
   );
-  RETURN false;
+  RETURN true;
 EXCEPTION WHEN check_violation THEN
+  RETURN false;
+END;
+$$;
+
+CREATE FUNCTION terminus_test.premature_quota_purge_rejected()
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM terminus_cp.quota_ledger
+    WHERE tenant_id = '11111111-1111-4111-8111-111111111111'
+      AND id = '11111111-1005-4000-8000-111111111111';
+  RETURN false;
+EXCEPTION WHEN object_not_in_prerequisite_state THEN
   RETURN true;
 END;
 $$;
@@ -387,10 +406,15 @@ SELECT terminus_test.assert_equal(
   'quota ledger is append-only'
 );
 
+SELECT terminus_test.assert_equal(terminus_test.lease_offset_accepted(-31)::integer, 0, 'lease at -31 seconds is rejected');
+SELECT terminus_test.assert_equal(terminus_test.lease_offset_accepted(-30)::integer, 1, 'lease at -30 seconds is accepted');
+SELECT terminus_test.assert_equal(terminus_test.lease_offset_accepted(30)::integer, 1, 'lease at +30 seconds is accepted');
+SELECT terminus_test.assert_equal(terminus_test.lease_offset_accepted(31)::integer, 0, 'lease at +31 seconds is rejected');
+
 SELECT terminus_test.assert_equal(
-  (SELECT terminus_test.future_lease_rejected()::integer),
+  terminus_test.premature_quota_purge_rejected()::integer,
   1,
-  'lease not-before above the clock-skew window is rejected'
+  'quota entry cannot be purged before retain_until'
 );
 
 SELECT terminus_test.assert_equal(
