@@ -21,21 +21,21 @@ tasks:
 
   - id: S02-002
     owner: session_02
-    state: ready
+    state: review
     title: Integrate browser terminal with protocol 0.1
     depends_on: [S01-001, S02-001]
     evidence: Shared fixtures pass and malformed frames fail closed.
 
   - id: S03-001
     owner: session_03
-    state: blocked
+    state: done
     title: Prove non-elevated local ConPTY lifecycle behind an internal adapter
     depends_on: []
     evidence: Windows test output for open, input/output, resize, close, timeout, and cleanup.
 
   - id: S03-002
     owner: session_03
-    state: blocked
+    state: ready
     title: Implement private WSS protocol 0.1 endpoint
     depends_on: [S01-001, S03-001]
     evidence: Contract fixtures, origin checks, auth rejection, and listener-scope proof.
@@ -63,7 +63,7 @@ tasks:
 
   - id: S05-003
     owner: session_05
-    state: ready
+    state: done
     title: Review control-plane tenancy and authorization contract
     depends_on: [S04-001]
     evidence: Cross-tenant and privilege-escalation contract findings with reproducible cases.
@@ -81,6 +81,20 @@ tasks:
     title: Verify first end-to-end private terminal vertical slice
     depends_on: [S01-001, S02-002, S03-002, S05-002, S06-001]
     evidence: Exact task commit SHAs, allowed and denied paths, browser matrix, logs, and pre-integration pass/fail report.
+
+  - id: S04-002
+    owner: session_04
+    state: ready
+    title: Remediate control-plane identity binding and final-owner invariants
+    depends_on: [S04-001, S05-003]
+    evidence: All seven S05-003 findings fixed with fail-closed authorization inputs, tenant-scoped pairing binding, transactional/database final-owner protection, and regression/concurrency tests.
+
+  - id: S05-004
+    owner: session_05
+    state: blocked
+    title: Re-review control-plane remediation and final-owner invariants
+    depends_on: [S04-002]
+    evidence: Independent exact-commit re-review reproduces no S05-003 fail-open findings and passes stale/concurrent owner-revocation checks.
 
   - id: S01-002
     owner: session_01

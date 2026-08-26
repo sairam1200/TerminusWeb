@@ -28,3 +28,12 @@
 - Session 03 exact branch ref `session/03-windows-agent` at `7e5e72bf09410a144a0c909877d9226af72e70f9` records S03-001 blocked after the safe-stopping threshold, with immutable blocker requests and no passing lifecycle evidence. Queue transition: stale S03-001 `ready` -> `blocked`.
 - Because S01-001 and S02-001 are done, S02-002 is now `ready`. S03-002 remains blocked on S03-001; S05-002 remains blocked on S02-002 and S03-002; S06-002 remains blocked on its full dependency set.
 - No Session 02/03 implementation files were changed.
+
+## New handoff audit (after queue commit `7422df6`, 2026-08-26)
+
+- Session 02 branch tip `097ddfa` records S02-002 `review-ready`: exact cumulative product tip `aec63af0ce7512341555910e59f3617543869c4a`, named reviewer `/root/s02_002_independent_review`, and passing deterministic owner checks. The status explicitly says no approved real private-WSS environment exists; queue transition is `ready` -> `review`, not `done`.
+- Session 03 branch tip `3655b18` records S03-001 `done`: exact cumulative product tip `637f1e99970ee543f3028a9e899bc8001a16a8e1`, named reviewer `/root/s03_001_readonly_review`, passing `go vet`, real Windows lifecycle tests, process-tree cleanup, and repeated concurrency checks. Queue transition is `blocked` -> `done`; S03-002 becomes `ready` because S01-001 and S03-001 are done.
+- Session 05 branch tip `b1b6914` records S05-003 `done`: product commit `f4bbcd01b7fd45fdf52622c94b8875a6ad3f3ce0`, named reviewer `/root/s05_003_reviewer`, exact-source tests reproducing six authorization fail-open cases and one database final-owner invariant gap. S04-001 dependency is recorded as product `83d110aa3f0bf582f811ce6922234f2183b2b93d`, Session 04 handoff `f1adc0afbb0b59b6c1a64b2cc1f9c49d90c74bb7`; both are done.
+- Review of all seven S05-003 findings against exact S04-001 authorization/migration artifacts confirms they are valid: missing tenant/resource/target identity checks (CP-AUTH-001/002), undefined host and membership equality (CP-AUTH-003/004), unconsumed pairing identity (CP-AUTH-005), missing role-target identity (CP-AUTH-006), and caller-supplied/non-transactional final-owner protection (CP-DB-001).
+- Queue transitions: S02-002 `ready` -> `review`; S03-001 `blocked` -> `done`; S03-002 `blocked` -> `ready`; S05-003 `ready` -> `done`. Added focused remediation tasks: S04-002 `ready` depends on S04-001 and S05-003; S05-004 `blocked` depends on S04-002.
+- No Session 02, Session 03, Session 04, or Session 05 implementation files were modified.
