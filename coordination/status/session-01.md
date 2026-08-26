@@ -104,3 +104,11 @@
 - A direct browser navigation to `https://sai.tailf8dcea.ts.net/` was read-only and did not bypass TLS; Chrome returned `ERR_CONNECTION_REFUSED`. No listener or private route is currently serving that hostname.
 - The exact browser Origin remains unavailable. Repository values such as `https://preview.example.invalid` are test fixtures only; no deployed Vercel Origin was configured or observed. Local CLI Serve/Funnel queries remain unreadable because the non-elevated user is denied the `tailscaled` local API pipe.
 - Requirements still missing: a browser/OS-trusted Server-Authentication certificate and matching `sai.tailf8dcea.ts.net` (or another approved private hostname), a client certificate/CA chain for device identity, exact approved HTTPS Origin and `/terminal` path, an approved private Serve mapping with independently readable Funnel-disabled state, and a runnable loopback host/listener. No certificate, listener, route, Serve/Funnel setting, deployment, or other live state was changed.
+
+## Cloudflare free-tier discovery (2026-08-26)
+
+- The connected Cloudflare dashboard is accessible on its Free account. Domains → Overview reports `No domains or subdomains found`; there is no Cloudflare-managed custom domain available for this project.
+- Workers & Pages reports `No projects found`. The account-level free `workers.dev` subdomain is `pubgs121201.workers.dev`; displayed usage is `0 / 100,000` requests, `0 ms` CPU, `0` observability events, `0` build minutes, and `$0.00` billable usage for the current period.
+- Cloudflare Tunnels reports an empty inventory and only the `Create Tunnel`/getting-started state. No tunnel or route exists.
+- These are read-only observations. A future static web project could use the free Workers/Pages surface only after an explicitly authorized deployment, but `workers.dev` is not a private Tailscale hostname and Cloudflare Workers/Tunnels must not proxy the Terminus terminal stream under the current architecture contract.
+- Cloudflare therefore supplies no missing private WSS input. Trusted server/client certificates, exact browser Origin, Tailscale-private Serve mapping, Funnel-disabled evidence, and a runnable loopback host remain unresolved. No domain, project, tunnel, DNS record, certificate, route, or deployment was created or changed.
