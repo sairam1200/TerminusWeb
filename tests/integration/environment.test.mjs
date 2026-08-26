@@ -36,7 +36,7 @@ test("real profile accepts exact SHAs, private-path classification, and safe URL
       TERMINUS_BROWSER_BASE_URL: "https://preview.example.invalid",
       TERMINUS_BROWSER_PROFILE_MODULE: "tests/integration/browser-profile.mjs",
       TERMINUS_AGENT_WSS_URL: "wss://agent.example.ts.net/terminal",
-      TERMINUS_EXPECTED_WSS_ORIGIN: "wss://agent.example.ts.net",
+      TERMINUS_EXPECTED_BROWSER_ORIGIN: "https://preview.example.invalid",
       TERMINUS_AGENT_VISIBILITY: "tailscale-private",
       TERMINUS_WINDOWS_VERSION: "recorded-by-real-run",
       TERMINUS_ALLOWED_SOURCE_LABEL: "allowed-test-node",
@@ -63,7 +63,7 @@ test("real profile rejects insecure or mismatched endpoint inputs", () => {
       TERMINUS_BROWSER_BASE_URL: "http://preview.example.invalid",
       TERMINUS_BROWSER_PROFILE_MODULE: "browser-profile.mjs",
       TERMINUS_AGENT_WSS_URL: "ws://agent.example.ts.net/terminal",
-      TERMINUS_EXPECTED_WSS_ORIGIN: "wss://different.example.ts.net",
+      TERMINUS_EXPECTED_BROWSER_ORIGIN: "http://different.example.invalid/path",
       TERMINUS_AGENT_VISIBILITY: "public",
       TERMINUS_WINDOWS_VERSION: "recorded-by-real-run",
       TERMINUS_ALLOWED_SOURCE_LABEL: "allowed-test-node",
@@ -84,6 +84,11 @@ test("real profile rejects insecure or mismatched endpoint inputs", () => {
       error.includes("TERMINUS_AGENT_WSS_URL must use wss:"),
     ),
   );
-  assert(result.errors.some((error) => error.includes("exactly match")));
+  assert(
+    result.errors.some((error) =>
+      error.includes("TERMINUS_EXPECTED_BROWSER_ORIGIN must use https:"),
+    ),
+  );
+  assert(result.errors.some((error) => error.includes("browser page origin")));
   assert(result.errors.some((error) => error.includes("tailscale-private")));
 });

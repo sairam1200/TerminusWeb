@@ -9,7 +9,7 @@ Evidence classes are separate:
 - `staging`: deployed test systems with no release claim.
 - `real-device`: an explicitly identified physical-device path.
 
-Real mode requires exact 40-character task commit SHAs for Sessions 01, 02, 03, and 05; an HTTPS browser URL; an exact private WSS origin; allowed and denied source labels; Windows version; log capture path; and ephemeral pairing material. It also requires `TERMINUS_AGENT_VISIBILITY=tailscale-private`. Validation reports variable names and classifications only, never values.
+Real mode requires exact 40-character task commit SHAs for Sessions 01, 02, 03, and 05; an HTTPS browser URL; the exact HTTPS page origin allowed in the agent's WebSocket handshake policy; a private WSS endpoint; allowed and denied source labels; Windows version; log capture path; and ephemeral pairing material. The browser page origin and WSS destination are deliberately separate inputs. Real mode also requires `TERMINUS_AGENT_VISIBILITY=tailscale-private`. Validation reports variable names and classifications only, never values.
 
 ```powershell
 npm test

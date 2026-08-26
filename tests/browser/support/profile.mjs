@@ -18,8 +18,11 @@ export const evidence = Object.freeze({ ...profile.metadata });
 export const selectors = Object.freeze({ ...profile.selectors });
 export const approvedDestination = profile.approvedDestination;
 export const rejectedDestination = profile.rejectedDestination;
+export const handshakeDestination = profile.handshakeDestination;
+export const alternateBrowserUrl = profile.alternateBrowserUrl;
 export const induceDisconnect = profile.induceDisconnect;
 export const readRecordedEvents = profile.readRecordedEvents;
+export const readCandidateSha = profile.readCandidateSha;
 
 function validateProfile(candidate) {
   const expectedClass =
@@ -51,12 +54,23 @@ function validateProfile(candidate) {
       throw new Error(`Browser profile is missing selector: ${selector}`);
     }
   }
+  for (const value of [
+    "approvedDestination",
+    "rejectedDestination",
+    "handshakeDestination",
+    "alternateBrowserUrl",
+  ]) {
+    if (typeof candidate[value] !== "string") {
+      throw new Error(`Browser profile is missing value: ${value}`);
+    }
+  }
   if (
     typeof candidate.induceDisconnect !== "function" ||
-    typeof candidate.readRecordedEvents !== "function"
+    typeof candidate.readRecordedEvents !== "function" ||
+    typeof candidate.readCandidateSha !== "function"
   ) {
     throw new Error(
-      "Browser profile must export induceDisconnect(page) and readRecordedEvents(page)",
+      "Browser profile must export induceDisconnect(page), readRecordedEvents(page), and readCandidateSha(page)",
     );
   }
 }

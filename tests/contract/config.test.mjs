@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readTargetConfig, validateAdapter } from "./harness/target.mjs";
+import {
+  assertCommitObject,
+  readTargetConfig,
+  validateAdapter,
+} from "./harness/target.mjs";
 
 test("default target is explicitly labelled as a test double", () => {
   const config = readTargetConfig({});
@@ -56,5 +60,12 @@ test("real adapter metadata must match the selected candidate", () => {
         config,
       ),
     /candidateSha does not match/,
+  );
+});
+
+test("real candidate SHA must resolve to a commit object", () => {
+  assert.throws(
+    () => assertCommitObject("0".repeat(40)),
+    /does not resolve to a local Git commit object/,
   );
 });

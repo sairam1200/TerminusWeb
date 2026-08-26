@@ -1,4 +1,5 @@
 const allowedDestination = "wss://agent.tailnet-example.ts.net";
+const localHandshakeDestination = "ws://127.0.0.1:4176/terminal";
 const terminal = document.querySelector("[data-testid='terminal-input']");
 const status = document.querySelector("[data-testid='connection-status']");
 const destination = document.querySelector("[data-testid='destination']");
@@ -6,6 +7,7 @@ const viewportSize = document.querySelector("[data-testid='viewport-size']");
 
 window.__terminusHarness = {
   evidenceClass: "labelled-test-double",
+  candidateSha: null,
   events: [],
 };
 
@@ -29,6 +31,13 @@ terminal.addEventListener("keydown", (event) => {
   });
 });
 
+terminal.addEventListener("paste", (event) => {
+  record("paste", {
+    plainText: event.clipboardData?.types.includes("text/plain") ?? false,
+    length: event.clipboardData?.getData("text/plain").length ?? 0,
+  });
+});
+
 document
   .querySelector("[data-testid='mobile-key-bar']")
   .addEventListener("click", (event) => {
@@ -48,14 +57,35 @@ document
       requestedOrigin = "invalid-url";
     }
 
-    if (requestedOrigin !== allowedDestination) {
+    if (
+      requestedOrigin !== allowedDestination &&
+      destination.value !== localHandshakeDestination
+    ) {
       status.textContent = "Rejected unapproved destination";
-      record("origin-rejected", { requestedOrigin });
+      record("destination-rejected", { requestedOrigin });
       return;
     }
 
-    status.textContent = "Connected";
-    record("origin-approved", { requestedOrigin });
+    if (destination.value === localHandshakeDestination) {
+      const socket = new WebSocket(localHandshakeDestination);
+      socket.addEventListener("open", () => {
+        status.textContent = "Connected";
+        record("handshake-origin-accepted", {
+          pageOrigin: window.location.origin,
+        });
+        terminal.focus();
+      });
+      socket.addEventListener("error", () => {
+        status.textContent = "Rejected browser origin";
+        record("handshake-origin-rejected", {
+          pageOrigin: window.location.origin,
+        });
+      });
+      return;
+    }
+
+    status.textContent = "Approved destination";
+    record("destination-approved", { requestedOrigin });
     terminal.focus();
   });
 

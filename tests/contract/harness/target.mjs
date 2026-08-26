@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -41,12 +42,32 @@ export function readTargetConfig(environment = process.env) {
 }
 
 export async function loadTarget(config) {
+  if (config.mode === "real") assertCommitObject(config.candidateSha);
   const adapter = await import(config.adapterPath.href);
   validateAdapter(adapter, config);
   return Object.freeze({
     metadata: Object.freeze({ ...adapter.metadata }),
     invoke: adapter.invoke,
   });
+}
+
+export function assertCommitObject(
+  candidateSha,
+  repositoryPath = process.cwd(),
+) {
+  const result = spawnSync(
+    "git",
+    ["cat-file", "-e", `${candidateSha}^{commit}`],
+    {
+      cwd: repositoryPath,
+      encoding: "utf8",
+    },
+  );
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      "TERMINUS_CONTRACT_CANDIDATE_SHA does not resolve to a local Git commit object",
+    );
+  }
 }
 
 export function validateAdapter(adapter, config) {

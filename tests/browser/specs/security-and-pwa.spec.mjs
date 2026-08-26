@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  alternateBrowserUrl,
   approvedDestination,
   evidence,
+  handshakeDestination,
+  readCandidateSha,
   readRecordedEvents,
   rejectedDestination,
   selectors,
@@ -28,7 +31,7 @@ test("CSP is restrictive and names the approved WSS destination", async ({
   expect(csp).not.toMatch(/connect-src[^;]*\*/);
 });
 
-test("unapproved WebSocket origin is rejected before a connection attempt", async ({
+test("unapproved WebSocket destination is rejected before a connection attempt", async ({
   page,
 }) => {
   await page.goto("/");
@@ -40,23 +43,52 @@ test("unapproved WebSocket origin is rejected before a connection attempt", asyn
 
   const events = await readRecordedEvents(page);
   expect(events).toContainEqual(
-    expect.objectContaining({ type: "origin-rejected" }),
+    expect.objectContaining({ type: "destination-rejected" }),
   );
   expect(events).not.toContainEqual(
-    expect.objectContaining({ type: "origin-approved" }),
+    expect.objectContaining({ type: "destination-approved" }),
   );
 });
 
-test("approved exact WebSocket destination is accepted", async ({ page }) => {
+test("approved exact WSS destination is allowlisted", async ({ page }) => {
   await page.goto("/");
   await page.locator(selectors.destination).fill(approvedDestination);
   await page.locator(selectors.connect).click();
-  await expect(page.locator(selectors.status)).toHaveText("Connected");
+  await expect(page.locator(selectors.status)).toHaveText(
+    "Approved destination",
+  );
 
   const events = await readRecordedEvents(page);
   expect(events).toContainEqual(
-    expect.objectContaining({ type: "origin-approved" }),
+    expect.objectContaining({ type: "destination-approved" }),
   );
+});
+
+test("WebSocket handshake accepts the approved page Origin and rejects a different page Origin", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator(selectors.destination).fill(handshakeDestination);
+  await page.locator(selectors.connect).click();
+  await expect(page.locator(selectors.status)).toHaveText("Connected");
+  expect(await readRecordedEvents(page)).toContainEqual(
+    expect.objectContaining({ type: "handshake-origin-accepted" }),
+  );
+
+  await page.goto(alternateBrowserUrl);
+  await page.locator(selectors.destination).fill(handshakeDestination);
+  await page.locator(selectors.connect).click();
+  await expect(page.locator(selectors.status)).toHaveText(
+    "Rejected browser origin",
+  );
+  expect(await readRecordedEvents(page)).toContainEqual(
+    expect.objectContaining({ type: "handshake-origin-rejected" }),
+  );
+});
+
+test("target reports the selected candidate identity", async ({ page }) => {
+  await page.goto("/");
+  expect(await readCandidateSha(page)).toBe(evidence.candidateSha);
 });
 
 test("PWA manifest declares a standalone launch surface", async ({
