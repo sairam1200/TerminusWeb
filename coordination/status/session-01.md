@@ -112,3 +112,9 @@
 - Cloudflare Tunnels reports an empty inventory and only the `Create Tunnel`/getting-started state. No tunnel or route exists.
 - These are read-only observations. A future static web project could use the free Workers/Pages surface only after an explicitly authorized deployment, but `workers.dev` is not a private Tailscale hostname and Cloudflare Workers/Tunnels must not proxy the Terminus terminal stream under the current architecture contract.
 - Cloudflare therefore supplies no missing private WSS input. Trusted server/client certificates, exact browser Origin, Tailscale-private Serve mapping, Funnel-disabled evidence, and a runnable loopback host remain unresolved. No domain, project, tunnel, DNS record, certificate, route, or deployment was created or changed.
+
+## Tailscale-only testing scope clarification (2026-08-26)
+
+- User clarified that no custom domain is available and Tailscale may be used only for personal-computer testing. The existing private MagicDNS hostname is `sai.tailf8dcea.ts.net`; a public Cloudflare domain is not required for a Tailscale-only design.
+- This clarification does not itself identify a trusted server certificate, enable Tailscale HTTPS certificates, create a Serve mapping, or authorize starting the Session 03 host. Current read-only evidence remains: HTTPS certificate provisioning is disabled, no advertised service or machine endpoint exists, and direct hostname access returns `ERR_CONNECTION_REFUSED`.
+- Narrow live-action decision still required before any operator mutation: explicitly authorize enabling Tailscale HTTPS for the tailnet and creating one private Serve route for `sai.tailf8dcea.ts.net` to a loopback-only test port, with Funnel/public/LAN exposure disabled and no policy broadening. Session 03 must own host startup; Session 05 must own allowed/denied-path proof. No live action was performed.
