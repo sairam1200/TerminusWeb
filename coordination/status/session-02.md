@@ -1,7 +1,7 @@
 # Session 02 Status
 
 - Current task: `S02-002` — Implement browser protocol client and private WSS behavior
-- State: review-ready; deterministic Session 02 owner gate passed, while approved live private-WSS integration evidence remains unavailable. Authoritative queue transitions remain Session 01-owned.
+- State: blocked on committed Session 03 endpoint/configuration response; deterministic Session 02 owner gate remains passed. Authoritative queue transitions remain Session 01-owned.
 - Branch: `session/02-web`
 - Authoritative queue: Session 01 commit `7422df6d827e20bf8c770d1ea0d0762229121f12`.
 - Protocol consumed: exact Session 01 product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`, wire version `0.1`, subprotocol `terminus.v0_1`.
@@ -72,3 +72,15 @@
 - Initial product commit (failed first review, retained for audit): `690274fe63ac596e5b36e34a4dd49b553c3abd88`.
 - Exact cumulative product/task tip after reviewed repairs: `aec63af0ce7512341555910e59f3617543869c4a`.
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit.
+
+## Real-WSS resume audit (latest attempt)
+
+- Latest Session 01 queue commit inspected: `a9ffbab08f843c46b2321a34b4fdd4d6cc872f31`. It records S02-002 `review` and S03-002 `ready`; Session 01 has not yet consumed the newer Session 03 handoff.
+- Exact completed Session 03 product inspected: `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc`.
+- Exact Session 03 status-only handoff inspected: `715aac71205f3c97b23d825b75c8d2fddf806b8a`. It records S03-002 owner/reviewer `done` while awaiting the Session 01 queue transition.
+- `git show 6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc:apps/windows-agent/README.md` confirms the product is an internal library, not an installed or running integration service. It requires caller-provided protected credential storage, private-device identity resolution, local pairing approval, TLS certificate, loopback listener, and separately approved private publication.
+- No exact private WSS URL, allowed browser Origin, already-trusted TLS chain, process startup command, pairing/approval procedure, or safe negative-path control was present in the product or handoff. Session 02 did not guess these values, weaken certificate validation, install a trust certificate, deploy, expose an endpoint, or edit Session 03-owned files.
+- Startup request scan covered every local branch ref. No committed request/response addressed to Session 02 was present.
+- Immutable source-owned request created and committed: `43a1b4d414818a18bf1515a9635cd08b1d74d56b`, path `coordination/requests/from-02-to-03-s02-002-real-wss-endpoint.request.md`.
+- Requested response path: `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`. Session 02 will consume it only by exact response commit SHA with `git show`.
+- Blocking evidence: the requested real browser WSS checks cannot start until Session 03 supplies an approved runnable endpoint/configuration or identifies the exact missing task and authorization. No new `apps/web/**` product change was made, so no new product tip or independent product review exists for this blocked attempt.
