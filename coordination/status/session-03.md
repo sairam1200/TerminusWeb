@@ -1,12 +1,44 @@
 # Session 03 Status
 
-- Current task: unassigned
-- State: not_started
+- Current task: S03-001 — Prove non-elevated local ConPTY lifecycle behind an internal adapter
+- State: blocked (safe-stopping rule reached after three equivalent Windows runtime failures)
 - Branch: `session/03-windows-agent`
-- Files changed: none
-- Commands/evidence: none
-- Independent reviewer/evidence: none
-- Assumptions: none
-- Blockers/requests: none
-- Product/task commit: none
+- Files changed:
+  - `apps/windows-agent/README.md`
+  - `apps/windows-agent/go.mod`
+  - `apps/windows-agent/go.sum`
+  - `apps/windows-agent/internal/terminal/adapter.go`
+  - `apps/windows-agent/internal/terminal/adapter_test.go`
+  - `apps/windows-agent/internal/terminal/conpty_unsupported.go`
+  - `apps/windows-agent/internal/terminal/conpty_windows.go`
+  - `apps/windows-agent/internal/terminal/conpty_windows_test.go`
+  - `coordination/requests/from-03-to-01-s03-001-conpty-startup-blocker.request.md`
+- Commands/evidence:
+  - Required repository, contract, Session 03, ownership, task queue, verified facts, and status files were read before edits.
+  - Primary API sources checked: Microsoft `CreatePseudoConsole`, pseudoconsole-session, `ResizePseudoConsole`, `ClosePseudoConsole`, Job Objects, `AssignProcessToJobObject`, `CreateJobObjectW`, `SetInformationJobObject`, and `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` documentation; Go `x/sys/windows` v0.47.0 source/API and module metadata.
+  - Official `go1.25.12.windows-amd64.zip` was downloaded to the temporary directory only and verified against SHA-256 `d5dc82da351b00e5eedd04f41356817d674cc4308131f0f638a5b14c5c3af4cb`; it was not installed system-wide.
+  - Host evidence: registry reports Windows 10 Home Single Language, display version 25H2, build 26200.9168; the test process reported `ElevatedAdministrator=False`.
+  - `gofmt -w` over all Go files: passed.
+  - `go test -short ./...`: passed (`ok terminus/windows-agent/internal/terminal 0.860s`); Windows integration tests are explicitly skipped in short mode.
+  - `go test ./...` attempt 1 (`-NoLogo -NoProfile`): failed; input/output, cancellation, timeout, and close cases observed an early clean PowerShell exit/closed ConPTY output.
+  - `go test ./...` attempt 2 (added `-NoExit`): failed with the same condition.
+  - `go test ./internal/terminal -run TestConPTYInputOutputResizeAndExit -count=1` attempt 3 (added `-NoExit -Command -`): failed after about 0.4 seconds with `read conpty-output: file already closed`.
+  - `go vet ./...`: failed at `conpty_windows.go:115` with `possible misuse of unsafe.Pointer` for the ConPTY process-attribute handle conversion.
+  - `go test -short -race ./...`: not run; Go reported `-race requires cgo; enable cgo by setting CGO_ENABLED=1`.
+  - `git diff --check`/`git show --check 0dd577f`: passed.
+  - Listener/secret scans found no listener, WebSocket server, service installation, logging path, credential, secret, or reusable pairing material; no protocol 0.1 shapes were added.
+- Independent reviewer/evidence:
+  - Read-only reviewer `/root/s03_001_readonly_review` inspected exact commit `0dd577f` and made no edits.
+  - Verdict: remain blocked/not done. Ownership, non-elevated rejection, local-only/no-listener boundary, suspended-create/job-assign/resume ordering, and absence of invented protocol 0.1 passed inspection.
+  - High finding: `-NoExit -Command -` is a plausible but unconfirmed mismatch for ConPTY interactive input; earlier variants also failed, so no root cause is claimed.
+  - Medium finding: if `TerminateJobObject` fails, supervision waits indefinitely before closing the kill-on-close job handle.
+  - Medium finding: timeout covers only the direct PowerShell PID, not a spawned process tree, and agent-failure/crash containment is untested.
+  - Low finding: elevated integration runs skip rather than fail, so an elevated `go test ./...` could misleadingly omit all Windows integration coverage.
+- Assumptions:
+  - No protocol or transport behavior is required or permitted for S03-001.
+  - The inbox Windows PowerShell executable inherits the verified non-elevated caller token; no alternate credentials or elevation mechanism are used.
+- Blockers/requests:
+  - Immutable request `coordination/requests/from-03-to-01-s03-001-conpty-startup-blocker.request.md` asks Session 01 to keep S03-001 blocked and S03-002 unavailable.
+  - S03-001 still requires a confirmed startup fix, a clean vet result, real input/output/resize evidence, timeout/cancellation/close/agent-failure process-tree cleanup proof, and an applicable race/concurrency check.
+- Product/task commit: `0dd577f` (`wip(S03-001): preserve blocked ConPTY lifecycle proof`)
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
