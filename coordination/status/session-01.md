@@ -76,3 +76,12 @@
 - Queue transition: S05-005 `ready` -> `blocked`. S02-002 remains `blocked`; its deterministic implementation evidence is preserved and not marked failed. User authorization and trusted live inputs remain absent.
 - Created immutable responses in response commit `cfcc38a`: `coordination/requests/from-01-to-02-s02-002-live-publication-blocker.response.md` and `coordination/requests/from-01-to-05-s05-005-private-publication-authorization.response.md`. Responses state the exact missing authorization, trusted certificate/hostname, client-CA (if applicable), Origin/path, host invocation, and approved private Serve/Funnel-inspection inputs without secrets.
 - Commands/evidence: exact `git show` audits above; `git merge-base --is-ancestor` passed for S03-003 product→handoff and S05-005 product→handoff; response `git diff --cached --check` passed. No certificates, listeners, Tailscale/Serve/Funnel changes, merges, pushes, deployments, or other live infrastructure actions occurred.
+
+## S05-004 handoff audit (2026-08-26)
+
+- Read Session 05 branch tip `7bfef01b14003b8cd13aa16282031456260b317d` and exact product `78f7b2ada23904862f406058685e9b90f9d02d3a`. The product-to-handoff ancestry check passed and `git show --check` passed for both commits.
+- Read the exact S04-002 dependency product `e281a1287d7d43aa0c29c1feb24455e0bc09c420` and immutable response `2bb9f0b10f2b77e3c9aa1c25facffd10002328cd`. S05-004's product records these exact inputs and reviews the remediated authorization and final-owner trigger invariants.
+- S05-004 product files are `docs/security/S05-004-control-plane-rereview.md` and `tests/security/S05-004-authorization-rereview.mjs`. Recorded probes pass: repaired authorization rejects eight identity/cross-tenant adversarial cases while preserving the positive lease control; the exact migration probe passes cross-tenant isolation and final-owner enforcement. The S04-002 handoff records 37/37 tests plus direct, stale, and concurrent PostgreSQL revocation checks as handoff evidence.
+- Independent reviewer `/root/s05_003_reviewer` recorded PASS against the exact product/response with no remaining findings or request. The review is metadata/control-plane-only and does not claim live infrastructure evidence.
+- Queue transition: S05-004 `ready` -> `done`. S02-002 and S05-005 remain `blocked`; S05-002 and S06-002 remain unchanged and blocked. No dependent task was unlocked.
+- No Session 05 or Session 04 implementation files were modified; no merge, push, deployment, listener, certificate, or Tailscale operation was performed.

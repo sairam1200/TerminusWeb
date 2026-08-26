@@ -91,7 +91,7 @@ tasks:
 
   - id: S05-004
     owner: session_05
-    state: ready
+    state: done
     title: Re-review control-plane remediation and final-owner invariants
     depends_on: [S04-002]
     evidence: Independent exact-commit re-review reproduces no S05-003 fail-open findings and passes stale/concurrent owner-revocation checks.
