@@ -86,6 +86,42 @@ describe("TerminalShell", () => {
       expect(screen.getByRole("log")).toHaveAttribute("data-rows", "8");
     });
   });
+
+  it("exposes an accessible transient pairing flow for the protocol client", async () => {
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter();
+    const pairSpy = vi.spyOn(adapter, "pair");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    await user.click(screen.getByRole("button", { name: "Connect privately" }));
+    const pairingInput = screen.getByLabelText("One-time pairing code");
+    expect(pairingInput).toHaveAttribute("autocomplete", "off");
+    await user.type(pairingInput, "AAECAwQFBgcICQoLDA0ODw");
+    await user.click(screen.getByRole("button", { name: "Pair locally" }));
+
+    expect(pairSpy).toHaveBeenCalledWith("AAECAwQFBgcICQoLDA0ODw");
+    expect(
+      screen.queryByLabelText("One-time pairing code"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("detaches on background and reconnects only after a valid detached state", async () => {
+    const adapter = new ProtocolUiAdapter("connected");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(adapter.detachCalls).toBe(1));
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(adapter.connectCalls).toBe(1));
+  });
 });
 
 class FailingAdapter implements TerminalAdapter {
@@ -121,5 +157,62 @@ class FailingAdapter implements TerminalAdapter {
 
   subscribeOutput(): () => void {
     return () => undefined;
+  }
+}
+
+class ProtocolUiAdapter implements TerminalAdapter {
+  readonly kind = "protocol-client" as const;
+  readonly label = "PRIVATE WSS · PROTOCOL 0.1 · agent.private.invalid";
+  readonly supportsPairing = true;
+  private readonly listeners = new Set<
+    (state: TerminalConnectionState) => void
+  >();
+  private state: TerminalConnectionState;
+  connectCalls = 0;
+  detachCalls = 0;
+
+  constructor(initialState: TerminalConnectionState = "disconnected") {
+    this.state = initialState;
+  }
+
+  async connect(): Promise<void> {
+    this.connectCalls += 1;
+    this.setState(this.state === "detached" ? "connected" : "pairing");
+  }
+
+  async detach(): Promise<void> {
+    this.detachCalls += 1;
+    this.setState("detached");
+  }
+
+  async disconnect(): Promise<void> {
+    this.setState("disconnected");
+  }
+
+  getState(): TerminalConnectionState {
+    return this.state;
+  }
+
+  async pair(pairingCode: string): Promise<void> {
+    void pairingCode;
+    this.setState("authenticating");
+  }
+
+  resize(): void {}
+
+  sendInput(): void {}
+
+  subscribe(listener: (state: TerminalConnectionState) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  subscribeOutput(): () => void {
+    return () => undefined;
+  }
+
+  private setState(state: TerminalConnectionState) {
+    this.state = state;
+    this.listeners.forEach((listener) => listener(state));
   }
 }
