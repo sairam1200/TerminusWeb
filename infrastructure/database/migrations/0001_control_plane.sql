@@ -225,7 +225,7 @@ CREATE TABLE terminus_cp.leases (
     REFERENCES terminus_cp.pairings (tenant_id, id, membership_id, host_id) ON DELETE RESTRICT,
   FOREIGN KEY (entitlement_key)
     REFERENCES terminus_cp.entitlement_catalog (entitlement_key) ON DELETE RESTRICT,
-  CHECK (not_before >= issued_at - interval '30 seconds'),
+  CHECK (not_before BETWEEN issued_at - interval '30 seconds' AND issued_at + interval '30 seconds'),
   CHECK (expires_at > not_before AND expires_at <= not_before + interval '5 minutes'),
   CHECK ((state = 'consumed') = (consumed_at IS NOT NULL)),
   CHECK ((state = 'released') = (released_at IS NOT NULL))
@@ -241,17 +241,19 @@ CREATE TABLE terminus_cp.quota_ledger (
   units_delta bigint NOT NULL CHECK (units_delta <> 0),
   idempotency_key uuid NOT NULL,
   occurred_at timestamptz NOT NULL DEFAULT transaction_timestamp(),
+  retain_until timestamptz NOT NULL,
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, idempotency_key),
   FOREIGN KEY (tenant_id) REFERENCES terminus_cp.tenants (id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, membership_id)
     REFERENCES terminus_cp.memberships (tenant_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, lease_id)
-    REFERENCES terminus_cp.leases (tenant_id, id) ON DELETE RESTRICT,
+    REFERENCES terminus_cp.leases (tenant_id, id) ON DELETE SET NULL (lease_id),
   FOREIGN KEY (entitlement_key)
     REFERENCES terminus_cp.entitlement_catalog (entitlement_key) ON DELETE RESTRICT,
-  CHECK ((entry_kind IN ('reserve', 'release', 'expire')) = (lease_id IS NOT NULL)),
-  CHECK ((entry_kind = 'reserve' AND units_delta < 0) OR (entry_kind <> 'reserve' AND units_delta > 0))
+  CHECK (entry_kind IN ('reserve', 'release', 'expire') OR lease_id IS NULL),
+  CHECK ((entry_kind = 'reserve' AND units_delta < 0) OR (entry_kind <> 'reserve' AND units_delta > 0)),
+  CHECK (retain_until > occurred_at)
 );
 
 CREATE FUNCTION terminus_cp.reject_quota_ledger_mutation()
@@ -259,12 +261,27 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.entry_kind IN ('reserve', 'release', 'expire') AND NEW.lease_id IS NULL THEN
+      RAISE EXCEPTION 'lease quota entries require a live lease reference at insertion' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'UPDATE'
+    AND OLD.lease_id IS NOT NULL
+    AND NEW.lease_id IS NULL
+    AND (to_jsonb(NEW) - 'lease_id') = (to_jsonb(OLD) - 'lease_id') THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'DELETE' AND OLD.retain_until <= transaction_timestamp() THEN
+    RETURN OLD;
+  END IF;
   RAISE EXCEPTION 'quota ledger is append-only' USING ERRCODE = '55000';
 END;
 $$;
 
 CREATE TRIGGER quota_ledger_append_only
-BEFORE UPDATE OR DELETE ON terminus_cp.quota_ledger
+BEFORE INSERT OR UPDATE OR DELETE ON terminus_cp.quota_ledger
 FOR EACH ROW EXECUTE FUNCTION terminus_cp.reject_quota_ledger_mutation();
 
 CREATE TABLE terminus_cp.audit_events (

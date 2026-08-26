@@ -114,6 +114,9 @@ test("migration defines one tenant RLS policy and composite tenant references", 
   assert.match(migration, /FOREIGN KEY \(tenant_id, host_id\)/);
   assert.match(migration, /FOREIGN KEY \(tenant_id, membership_id\)/);
   assert.match(migration, /FOREIGN KEY \(tenant_id, pairing_id, membership_id, host_id\)/);
+  assert.match(migration, /ON DELETE SET NULL \(lease_id\)/);
+  assert.match(migration, /retain_until timestamptz NOT NULL/);
+  assert.match(migration, /not_before BETWEEN issued_at - interval '30 seconds' AND issued_at \+ interval '30 seconds'/);
   assert.match(migration, /current_setting\('terminus\.tenant_id', true\)/);
 });
 

@@ -85,6 +85,7 @@
     "The final active owner role cannot be revoked.",
     "Roles never imply terminal_access, premium, staff, or quota entitlement.",
     "Lease issuance requires an active pairing, active host and device key, terminal_access entitlement, and atomically reserved quota.",
+    "Pairing, key, entitlement, and lease validity are evaluated against a trusted server clock, never a client-supplied timestamp.",
     "Subscription synchronization is a non-human provider-adapter action and cannot be authorized by a tenant role.",
     "No platform role can decrypt, relay, observe, or silently authorize a tenant terminal stream."
   ],
@@ -101,10 +102,11 @@
   },
   "retention": {
     "accounts": "Delete external subject and normalized email after all memberships close; retain only irreversible audit actor hash where legally required.",
-    "tenants": "Soft-close immediately; purge tenant metadata after configured 30-3650 day retention and legal holds.",
+    "tenants": "Soft-close immediately and pseudonymize direct fields after configured 30-3650 day retention. Retain an opaque tenant tombstone until child quota and audit retain_until boundaries pass, then purge it after all children.",
     "device_keys": "Retain revoked public-key fingerprint for 90 days, then purge key material.",
     "pairings": "Purge confirmation metadata 30 days after expiry, consumption, or revocation.",
-    "leases": "Purge token and nonce hashes 30 days after expiry; aggregated quota entries may outlive lease rows without session content.",
+    "leases": "Purge token and nonce hashes 30 days after expiry; retained quota entries detach their lease reference and outlive lease rows without session content.",
+    "quota_ledger": "Remain append-only until retain_until. After that boundary a maintenance role may purge entries; ordinary application roles receive no update or delete grant.",
     "subscriptions": "Retain hashed provider references only for the approved accounting period; no payment instrument data.",
     "audit_events": "Retain allowlisted fields until tenant retain_until; no free-form payload column."
   },

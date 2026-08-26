@@ -36,7 +36,7 @@ function decision(allowed, code, status) {
 
 const ALLOW = decision(true, "ALLOWED", 200);
 
-export function authorize({ actor, requestTenantId, action, resource, target, tenantState = "active" }) {
+export function authorize({ actor, requestTenantId, action, resource, target, tenantState = "active", evaluatedAtEpochSeconds }) {
   if (!actor?.authenticated) {
     return decision(false, "UNAUTHENTICATED", 401);
   }
@@ -72,7 +72,7 @@ export function authorize({ actor, requestTenantId, action, resource, target, te
   }
 
   if (action === "lease.issue") {
-    return authorizeLease({ actor, resource, target });
+    return authorizeLease({ actor, resource, target, evaluatedAtEpochSeconds });
   }
 
   return ALLOW;
@@ -88,15 +88,24 @@ function authorizeRoleMutation({ actorRoles, action, target }) {
     return decision(false, "FORBIDDEN", 403);
   }
 
-  if (action === "role.revoke" && target.role === "owner" && target.activeOwnerCount <= 1) {
-    return decision(false, "CONFLICT", 409);
+  if (action === "role.revoke" && target.role === "owner") {
+    if (!Number.isSafeInteger(target.activeOwnerCount) || target.activeOwnerCount < 1) {
+      return decision(false, "INVALID_REQUEST", 422);
+    }
+    if (target.activeOwnerCount <= 1) {
+      return decision(false, "CONFLICT", 409);
+    }
   }
 
   return ALLOW;
 }
 
-function authorizeLease({ actor, resource, target }) {
-  if (target?.requestedTtlSeconds < 1 || target?.requestedTtlSeconds > 300) {
+function authorizeLease({ actor, resource, target, evaluatedAtEpochSeconds }) {
+  if (
+    !Number.isSafeInteger(target?.requestedTtlSeconds) ||
+    target.requestedTtlSeconds < 1 ||
+    target.requestedTtlSeconds > 300
+  ) {
     return decision(false, "INVALID_REQUEST", 422);
   }
 
@@ -104,20 +113,48 @@ function authorizeLease({ actor, resource, target }) {
     return decision(false, "INVALID_REQUEST", 422);
   }
 
-  if (resource?.hostState !== "active" || resource?.deviceKeyState !== "active") {
+  const requiredTimes = [
+    evaluatedAtEpochSeconds,
+    target?.pairingExpiresAtEpochSeconds,
+    resource?.deviceKeyValidAfterEpochSeconds,
+    resource?.deviceKeyExpiresAtEpochSeconds,
+    target?.entitlementStartsAtEpochSeconds
+  ];
+  if (!requiredTimes.every(Number.isSafeInteger)) {
+    return decision(false, "INVALID_REQUEST", 422);
+  }
+  if (
+    target.entitlementEndsAtEpochSeconds !== null &&
+    !Number.isSafeInteger(target.entitlementEndsAtEpochSeconds)
+  ) {
+    return decision(false, "INVALID_REQUEST", 422);
+  }
+
+  if (
+    resource?.hostState !== "active" ||
+    resource?.deviceKeyState !== "active" ||
+    resource.deviceKeyValidAfterEpochSeconds > evaluatedAtEpochSeconds ||
+    resource.deviceKeyExpiresAtEpochSeconds <= evaluatedAtEpochSeconds
+  ) {
     return decision(false, "CONFLICT", 409);
   }
 
   if (
     target?.pairingState !== "confirmed" ||
     target?.pairingMembershipId !== actor.membershipId ||
-    target?.pairingHostId !== resource.hostId
+    target?.pairingHostId !== resource.hostId ||
+    target.pairingExpiresAtEpochSeconds <= evaluatedAtEpochSeconds
   ) {
     return decision(false, "FORBIDDEN", 403);
   }
 
   const entitlements = new Set(actor.entitlements ?? []);
-  if (!entitlements.has("terminal_access")) {
+  if (
+    !entitlements.has("terminal_access") ||
+    target.entitlementState !== "active" ||
+    target.entitlementStartsAtEpochSeconds > evaluatedAtEpochSeconds ||
+    (target.entitlementEndsAtEpochSeconds !== null && target.entitlementEndsAtEpochSeconds <= evaluatedAtEpochSeconds)
+  ) {
     return decision(false, "FORBIDDEN", 403);
   }
 

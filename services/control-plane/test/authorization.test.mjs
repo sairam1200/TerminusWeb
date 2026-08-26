@@ -7,6 +7,7 @@ const TENANT_A = "11111111-1111-4111-8111-111111111111";
 const TENANT_B = "22222222-2222-4222-8222-222222222222";
 const MEMBER_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const HOST_A = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const NOW = 2_000_000_000;
 
 function actor(overrides = {}) {
   return {
@@ -26,17 +27,24 @@ function leaseRequest(overrides = {}) {
     actor: actor(),
     requestTenantId: TENANT_A,
     action: "lease.issue",
+    evaluatedAtEpochSeconds: NOW,
     resource: {
       tenantId: TENANT_A,
       hostId: HOST_A,
       hostState: "active",
-      deviceKeyState: "active"
+      deviceKeyState: "active",
+      deviceKeyValidAfterEpochSeconds: NOW - 60,
+      deviceKeyExpiresAtEpochSeconds: NOW + 60
     },
     target: {
       tenantId: TENANT_A,
       pairingState: "confirmed",
       pairingMembershipId: MEMBER_A,
       pairingHostId: HOST_A,
+      pairingExpiresAtEpochSeconds: NOW + 60,
+      entitlementState: "active",
+      entitlementStartsAtEpochSeconds: NOW - 60,
+      entitlementEndsAtEpochSeconds: null,
       requestedQuotaUnits: 1,
       requestedTtlSeconds: 300
     },
@@ -107,6 +115,9 @@ test("boundary: lease lifetime is one through 300 seconds", () => {
   assert.equal(authorize(leaseRequest({ target: { ...leaseRequest().target, requestedTtlSeconds: 300 } })).allowed, true);
   assert.equal(authorize(leaseRequest({ target: { ...leaseRequest().target, requestedTtlSeconds: 0 } })).code, "INVALID_REQUEST");
   assert.equal(authorize(leaseRequest({ target: { ...leaseRequest().target, requestedTtlSeconds: 301 } })).code, "INVALID_REQUEST");
+  for (const requestedTtlSeconds of [undefined, "300", Number.NaN]) {
+    assert.equal(authorize(leaseRequest({ target: { ...leaseRequest().target, requestedTtlSeconds } })).code, "INVALID_REQUEST");
+  }
   assert.equal(policy.maximumLeaseLifetimeSeconds, 300);
 });
 
@@ -166,6 +177,73 @@ test("privilege escalation: final owner cannot be revoked", () => {
     target: { tenantId: TENANT_A, membershipState: "active", role: "owner", activeOwnerCount: 1 }
   });
   assert.deepEqual(result, { allowed: false, code: "CONFLICT", status: 409 });
+});
+
+test("positive: owner can revoke one owner when another active owner remains", () => {
+  const result = authorize({
+    actor: actor({ roles: ["owner"] }),
+    requestTenantId: TENANT_A,
+    action: "role.revoke",
+    target: { tenantId: TENANT_A, membershipState: "active", role: "owner", activeOwnerCount: 2 }
+  });
+  assert.equal(result.allowed, true);
+});
+
+test("privilege escalation: final-owner count must be a positive safe integer", () => {
+  for (const activeOwnerCount of [undefined, Number.NaN, 0, 1.5]) {
+    const result = authorize({
+      actor: actor({ roles: ["owner"] }),
+      requestTenantId: TENANT_A,
+      action: "role.revoke",
+      target: { tenantId: TENANT_A, membershipState: "active", role: "owner", activeOwnerCount }
+    });
+    assert.deepEqual(result, { allowed: false, code: "INVALID_REQUEST", status: 422 });
+  }
+});
+
+test("expired or not-yet-valid lease prerequisites fail closed", () => {
+  const cases = [
+    leaseRequest({ target: { ...leaseRequest().target, pairingExpiresAtEpochSeconds: NOW } }),
+    leaseRequest({ resource: { ...leaseRequest().resource, deviceKeyValidAfterEpochSeconds: NOW + 1 } }),
+    leaseRequest({ resource: { ...leaseRequest().resource, deviceKeyExpiresAtEpochSeconds: NOW } }),
+    leaseRequest({ target: { ...leaseRequest().target, entitlementState: "expired" } }),
+    leaseRequest({ target: { ...leaseRequest().target, entitlementStartsAtEpochSeconds: NOW + 1 } }),
+    leaseRequest({ target: { ...leaseRequest().target, entitlementEndsAtEpochSeconds: NOW } })
+  ];
+  for (const request of cases) {
+    assert.equal(authorize(request).allowed, false);
+  }
+});
+
+test("boundary: lease prerequisites are valid at inclusive starts and before exclusive expiries", () => {
+  const request = leaseRequest({
+    resource: {
+      ...leaseRequest().resource,
+      deviceKeyValidAfterEpochSeconds: NOW,
+      deviceKeyExpiresAtEpochSeconds: NOW + 1
+    },
+    target: {
+      ...leaseRequest().target,
+      pairingExpiresAtEpochSeconds: NOW + 1,
+      entitlementStartsAtEpochSeconds: NOW,
+      entitlementEndsAtEpochSeconds: NOW + 1
+    }
+  });
+  assert.equal(authorize(request).allowed, true);
+});
+
+test("missing or malformed lease prerequisite timestamps fail closed", () => {
+  const cases = [
+    leaseRequest({ evaluatedAtEpochSeconds: undefined }),
+    leaseRequest({ target: { ...leaseRequest().target, pairingExpiresAtEpochSeconds: "later" } }),
+    leaseRequest({ resource: { ...leaseRequest().resource, deviceKeyValidAfterEpochSeconds: Number.NaN } }),
+    leaseRequest({ resource: { ...leaseRequest().resource, deviceKeyExpiresAtEpochSeconds: undefined } }),
+    leaseRequest({ target: { ...leaseRequest().target, entitlementStartsAtEpochSeconds: undefined } }),
+    leaseRequest({ target: { ...leaseRequest().target, entitlementEndsAtEpochSeconds: "never" } })
+  ];
+  for (const request of cases) {
+    assert.deepEqual(authorize(request), { allowed: false, code: "INVALID_REQUEST", status: 422 });
+  }
 });
 
 test("privilege escalation: inactive or unknown role target is invalid", () => {
