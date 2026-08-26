@@ -213,6 +213,68 @@ describe("ProtocolTerminalAdapter", () => {
     expect(sockets).toHaveLength(0);
   });
 
+  it.each([
+    {
+      label: "a mismatched session",
+      resumedSessionId: "60000000-0000-4000-8000-000000000002",
+      monotonicAtResponse: 0,
+    },
+    {
+      label: "an expired grant",
+      resumedSessionId: sessionId,
+      monotonicAtResponse: 120_001,
+    },
+  ])("rejects session_resumed for $label", async (testCase) => {
+    const monotonic = { value: 0 };
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets, () => monotonic.value);
+    await driveToDetached(adapter, sockets);
+
+    const reconnection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const socket = sockets[1] as MockWebSocket;
+    socket.open();
+    await reconnection;
+    const connectionId = await authenticate(socket, "resume_session");
+
+    monotonic.value = testCase.monotonicAtResponse;
+    await socket.receive(
+      agentFrame(connectionId, 3, "session_resumed", {
+        sessionId: testCase.resumedSessionId,
+      }),
+    );
+    await waitFor(() => expect(adapter.getErrorCode()).toBe("RESUME_REJECTED"));
+    await waitFor(() => expect(socket.closeCode).toBe(1008));
+  });
+
+  it("closes with BACKPRESSURE_LIMIT before the outbound buffer can grow unbounded", async () => {
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(
+      new MemoryCredentialStore(cryptoProvider),
+      sockets,
+    );
+    const connection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = sockets[0] as MockWebSocket;
+    socket.bufferedAmount = 65_536;
+    socket.open();
+
+    await expect(connection).rejects.toMatchObject({
+      code: "BACKPRESSURE_LIMIT",
+    });
+    await waitFor(() =>
+      expect(adapter.getErrorCode()).toBe("BACKPRESSURE_LIMIT"),
+    );
+    await waitFor(() => expect(socket.closeCode).toBe(1008));
+    expect(socket.sent).toHaveLength(0);
+  });
+
   it("fails closed on malformed, binary, replayed, and wrong-subprotocol input", async () => {
     const cases: Array<{
       input: string | ArrayBuffer;
@@ -284,13 +346,18 @@ describe("ProtocolTerminalAdapter", () => {
   });
 });
 
-function createAdapter(store: MemoryCredentialStore, sockets: MockWebSocket[]) {
+function createAdapter(
+  store: MemoryCredentialStore,
+  sockets: MockWebSocket[],
+  monotonicNow?: () => number,
+) {
   return new ProtocolTerminalAdapter({
     endpoint,
     expectedWebOrigin: webOrigin,
     credentialStore: store,
     cryptoProvider,
     getCurrentOrigin: () => webOrigin,
+    monotonicNow,
     now: () => now,
     webSocketFactory: (url, subprotocol) => {
       const socket = new MockWebSocket(url, subprotocol);
@@ -298,6 +365,62 @@ function createAdapter(store: MemoryCredentialStore, sockets: MockWebSocket[]) {
       return socket;
     },
   });
+}
+
+async function authenticate(
+  socket: MockWebSocket,
+  expectedSessionAction: "open_session" | "resume_session",
+): Promise<string> {
+  const hello = socket.sentFrame(0);
+  await socket.receive(
+    agentFrame(hello.connectionId, 0, "hello_ack", {
+      selectedVersion: "0.1",
+      agentId: "50000000-0000-4000-8000-000000000001",
+    }),
+  );
+  await socket.receive(
+    agentFrame(hello.connectionId, 1, "auth_challenge", {
+      challengeId,
+      challenge,
+      expiresAt: "2026-08-26T12:00:10.000Z",
+    }),
+  );
+  await waitFor(() => expect(socket.sentFrame(1).type).toBe("auth_response"));
+  await socket.receive(
+    agentFrame(hello.connectionId, 2, "auth_result", {
+      authenticated: true,
+      authorizationExpiresAt: "2026-08-27T00:00:00.000Z",
+    }),
+  );
+  await waitFor(() =>
+    expect(socket.sentFrame(2).type).toBe(expectedSessionAction),
+  );
+  return hello.connectionId;
+}
+
+async function driveToDetached(
+  adapter: ProtocolTerminalAdapter,
+  sockets: MockWebSocket[],
+): Promise<void> {
+  const connection = adapter.connect();
+  await waitFor(() => expect(sockets).toHaveLength(1));
+  const socket = sockets[0] as MockWebSocket;
+  socket.open();
+  await connection;
+  const connectionId = await authenticate(socket, "open_session");
+  await socket.receive(
+    agentFrame(connectionId, 3, "session_opened", { sessionId }),
+  );
+  await waitFor(() => expect(adapter.getState()).toBe("connected"));
+  await adapter.detach();
+  await socket.receive(
+    agentFrame(connectionId, 4, "session_detached", {
+      sessionId,
+      resumeGrant: "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+      expiresAt: "2026-08-26T12:02:00.000Z",
+    }),
+  );
+  await waitFor(() => expect(adapter.getState()).toBe("detached"));
 }
 
 function agentFrame(
@@ -311,6 +434,7 @@ function agentFrame(
 
 class MockWebSocket implements WebSocketPort {
   binaryType: BinaryType = "blob";
+  bufferedAmount = 0;
   protocol = "terminus.v0_1";
   readyState = 0;
   onclose: ((event: { code: number }) => void) | null = null;
