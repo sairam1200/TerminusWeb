@@ -1,31 +1,15 @@
 # Session 05 Status
 
-- Current task: S05-003 — Independently review S04-001 control-plane isolation
-- State: done (owner checks and named independent review complete; Session 06 verification not yet performed)
+- Current task: S05-005 — Review TLS/private publication design and prove private-only access
+- State: done for static/read-only review; live publication remains authorization-blocked
 - Branch: `session/05-security-network`
-- Authoritative queue: Session 01 commit `7422df6d827e20bf8c770d1ea0d0762229121f12`; S05-003 was ready and depended on S04-001.
-- Dependency reviewed: S04-001 product commit `83d110aa3f0bf582f811ce6922234f2183b2b93d`; Session 04 handoff branch tip `f1adc0afbb0b59b6c1a64b2cc1f9c49d90c74bb7`.
-- Files changed in product/task commit:
-  - `docs/security/S05-003-control-plane-review.md`
-  - `tests/security/S05-003-authorization-review.mjs`
-  - `tests/security/Test-S05-003-migration-review.ps1`
-  - `coordination/requests/from-05-to-04-s05-003-control-plane-findings.request.md` (immutable cross-session request)
-- Findings reproduced from exact S04-001 source:
-  - CP-AUTH-001..004: missing tenant, host, or membership identity fields fail open.
-  - CP-AUTH-005: pairing identity is not consumed/required by authorization.
-  - CP-AUTH-006: owner role assignment target without tenant/membership identity is allowed.
-  - CP-DB-001: migration lacks a database-level final-owner guard; stale/racy revocation can remove the final owner.
-- Commands/evidence:
-  - `git show 83d110aa3f0bf582f811ce6922234f2183b2b93d:services/control-plane/src/authorization.mjs | node tests/security/S05-003-authorization-review.mjs` — exit 1 as expected; six findings reproduced, while explicit cross-tenant mismatch controls were denied.
-  - `git show 83d110aa3f0bf582f811ce6922234f2183b2b93d:infrastructure/database/migrations/0001_control_plane.sql | powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-003-migration-review.ps1` — exit 1 as expected; CP-DB-001 reproduced; RLS/composite-tenant-FK controls confirmed.
-  - `node --check tests/security/S05-003-authorization-review.mjs` — PASS.
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-001.ps1` — PASS regression.
-  - `git diff --check` and exact-commit diff checks — PASS.
-  - No Session 04 product files or live infrastructure were modified or accessed.
-- Independent reviewer/evidence:
-  - Reviewer: `/root/s05_003_reviewer` (read-only Codex reviewer).
-  - Post-commit PASS against exact product commit `f4bbcd01b7fd45fdf52622c94b8875a6ad3f3ce0`; intended paths and hashes matched, syntax and diff checks passed, exact-source tests reproduced the expected findings, and worktree was clean. Reviewer performed no edits or live access.
-- Assumptions: findings are proposed remediation inputs; no live policy, service, or database state was inferred. Existing explicit mismatch denials and metadata-only boundaries remain intact.
-- Blockers/requests: remediation requires Session 04 source ownership; immutable request `coordination/requests/from-05-to-04-s05-003-control-plane-findings.request.md` records the seven findings. Session 06 verification remains pending.
-- Product/task commit: `f4bbcd01b7fd45fdf52622c94b8875a6ad3f3ce0`
-- Handoff commit: resolve from branch HEAD after the status-only handoff commit.
+- Authoritative queue: Session 01 `bfb431a7694152e8d5caf124f58076d78443bd32`; S05-005 ready after S03-003 done.
+- Exact dependency: Session 03 S03-003 product `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c`; handoff `662e376094c631890dd22d23391ff6a7e62d8a30`.
+- Product files: `docs/security/S05-005-private-publication-review.md`, `tests/security/Test-S05-005-publication-review.ps1`, and immutable request `coordination/requests/from-05-to-01-s05-005-private-publication-authorization.request.md`.
+- Evidence: static checks PASS for loopback-only origin, TLS 1.3, system-root/server-name verification, mTLS device identity, exact Origin, `/terminal`, and narrow private policy. Live hostname, trusted certificate, Serve mapping, Funnel state, listener, expiry, and network paths are explicitly untested because no approved mapping or trusted inputs exist.
+- Test command: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-005-publication-review.ps1` — PASS; reports live checks untested. `git diff --check` — PASS.
+- Matrix: intended browser→private Serve→loopback `/terminal` flow is documented; LAN/public, wrong-Origin, wrong-device, wildcard/LAN/public listener, and Funnel/public flows are denied by static design/tests or remain live-unverified. `tailscale ping` is not endpoint proof.
+- Independent reviewer: `/root/s05_003_reviewer` PASS against exact product/handoff; syntax and diff checks PASS; no edits or live access.
+- Blocker/request: no existing approved private Serve mapping, exact hostname, browser Origin, or trusted certificate chain is evidenced. Immutable authorization request is in product commit and must be answered before live validation.
+- Product/task commit: `d95841e`
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
