@@ -7,6 +7,8 @@ const TENANT_A = "11111111-1111-4111-8111-111111111111";
 const TENANT_B = "22222222-2222-4222-8222-222222222222";
 const MEMBER_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const HOST_A = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const DEVICE_KEY_A = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const PAIRING_A = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const NOW = 2_000_000_000;
 
 function actor(overrides = {}) {
@@ -27,10 +29,12 @@ function leaseRequest(overrides = {}) {
     actor: actor(),
     requestTenantId: TENANT_A,
     action: "lease.issue",
+    requestedPairingId: PAIRING_A,
     evaluatedAtEpochSeconds: NOW,
     resource: {
       tenantId: TENANT_A,
       hostId: HOST_A,
+      deviceKeyId: DEVICE_KEY_A,
       hostState: "active",
       deviceKeyState: "active",
       deviceKeyValidAfterEpochSeconds: NOW - 60,
@@ -38,10 +42,12 @@ function leaseRequest(overrides = {}) {
     },
     target: {
       tenantId: TENANT_A,
+      pairingId: PAIRING_A,
       pairingState: "confirmed",
       pairingMembershipId: MEMBER_A,
       pairingHostId: HOST_A,
       pairingExpiresAtEpochSeconds: NOW + 60,
+      entitlementKey: "terminal_access",
       entitlementState: "active",
       entitlementStartsAtEpochSeconds: NOW - 60,
       entitlementEndsAtEpochSeconds: null,
@@ -68,7 +74,7 @@ test("negative: actor tenant mismatch is hidden as not found", () => {
 
 test("negative: cross-tenant host reference is hidden as not found", () => {
   const request = leaseRequest({
-    resource: { tenantId: TENANT_B, hostId: HOST_A, hostState: "active", deviceKeyState: "active" }
+    resource: { ...leaseRequest().resource, tenantId: TENANT_B }
   });
   assert.deepEqual(authorize(request), { allowed: false, code: "NOT_FOUND", status: 404 });
 });
@@ -136,7 +142,7 @@ test("positive: owner can assign owner to an active same-tenant member", () => {
     actor: actor({ roles: ["owner"] }),
     requestTenantId: TENANT_A,
     action: "role.assign",
-    target: { tenantId: TENANT_A, membershipState: "active", role: "owner" }
+    target: { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "active", role: "owner" }
   });
   assert.equal(result.allowed, true);
 });
@@ -148,7 +154,7 @@ test("privilege escalation: admin cannot grant or revoke owner/admin", () => {
         actor: actor({ roles: ["admin"] }),
         requestTenantId: TENANT_A,
         action,
-        target: { tenantId: TENANT_A, membershipState: "active", role, activeOwnerCount: 2 }
+        target: { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "active", role }
       });
       assert.deepEqual(result, { allowed: false, code: "FORBIDDEN", status: 403 });
     }
@@ -162,42 +168,77 @@ test("positive: admin can manage operator and auditor roles only", () => {
         actor: actor({ roles: ["admin"] }),
         requestTenantId: TENANT_A,
         action,
-        target: { tenantId: TENANT_A, membershipState: "active", role, activeOwnerCount: 2 }
+        target: { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "active", role }
       });
       assert.equal(result.allowed, true);
     }
   }
 });
 
-test("privilege escalation: final owner cannot be revoked", () => {
+test("role policy delegates final-owner state to the transactional database invariant", () => {
   const result = authorize({
     actor: actor({ roles: ["owner"] }),
     requestTenantId: TENANT_A,
     action: "role.revoke",
-    target: { tenantId: TENANT_A, membershipState: "active", role: "owner", activeOwnerCount: 1 }
-  });
-  assert.deepEqual(result, { allowed: false, code: "CONFLICT", status: 409 });
-});
-
-test("positive: owner can revoke one owner when another active owner remains", () => {
-  const result = authorize({
-    actor: actor({ roles: ["owner"] }),
-    requestTenantId: TENANT_A,
-    action: "role.revoke",
-    target: { tenantId: TENANT_A, membershipState: "active", role: "owner", activeOwnerCount: 2 }
+    target: { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "active", role: "owner" }
   });
   assert.equal(result.allowed, true);
 });
 
-test("privilege escalation: final-owner count must be a positive safe integer", () => {
-  for (const activeOwnerCount of [undefined, Number.NaN, 0, 1.5]) {
-    const result = authorize({
+test("caller-supplied owner counts are not authoritative", () => {
+  const withoutCount = authorize({
+    actor: actor({ roles: ["owner"] }),
+    requestTenantId: TENANT_A,
+    action: "role.revoke",
+    target: { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "active", role: "owner" }
+  });
+  const staleCount = authorize({
+    actor: actor({ roles: ["owner"] }),
+    requestTenantId: TENANT_A,
+    action: "role.revoke",
+    target: { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "active", role: "owner", activeOwnerCount: 99 }
+  });
+  assert.deepEqual(staleCount, withoutCount);
+});
+
+test("missing tenant-scoped authorization identities fail closed", () => {
+  const cases = [
+    leaseRequest({ resource: { ...leaseRequest().resource, tenantId: undefined } }),
+    leaseRequest({ target: { ...leaseRequest().target, tenantId: undefined } }),
+    leaseRequest({ resource: { ...leaseRequest().resource, hostId: undefined } }),
+    leaseRequest({ actor: actor({ membershipId: undefined }) }),
+    leaseRequest({ resource: { ...leaseRequest().resource, deviceKeyId: undefined } }),
+    leaseRequest({ target: { ...leaseRequest().target, pairingId: undefined } }),
+    leaseRequest({ requestedPairingId: undefined }),
+    leaseRequest({ target: { ...leaseRequest().target, entitlementKey: undefined } }),
+    {
       actor: actor({ roles: ["owner"] }),
       requestTenantId: TENANT_A,
-      action: "role.revoke",
-      target: { tenantId: TENANT_A, membershipState: "active", role: "owner", activeOwnerCount }
-    });
-    assert.deepEqual(result, { allowed: false, code: "INVALID_REQUEST", status: 422 });
+      action: "role.assign",
+      target: { membershipState: "active", role: "operator" }
+    }
+  ];
+  for (const request of cases) {
+    assert.deepEqual(authorize(request), { allowed: false, code: "INVALID_REQUEST", status: 422 });
+  }
+});
+
+test("lease policy binds the requested pairing to the resolved pairing row", () => {
+  const otherPairingId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  assert.deepEqual(
+    authorize(leaseRequest({ requestedPairingId: otherPairingId })),
+    { allowed: false, code: "INVALID_REQUEST", status: 422 }
+  );
+});
+
+test("malformed authorization identifiers fail closed", () => {
+  const cases = [
+    leaseRequest({ actor: actor({ membershipId: "not-a-uuid" }) }),
+    leaseRequest({ resource: { ...leaseRequest().resource, hostId: "not-a-uuid" } }),
+    leaseRequest({ target: { ...leaseRequest().target, pairingId: "not-a-uuid" } })
+  ];
+  for (const request of cases) {
+    assert.equal(authorize(request).allowed, false);
   }
 });
 
@@ -248,8 +289,8 @@ test("missing or malformed lease prerequisite timestamps fail closed", () => {
 
 test("privilege escalation: inactive or unknown role target is invalid", () => {
   for (const target of [
-    { tenantId: TENANT_A, membershipState: "suspended", role: "operator" },
-    { tenantId: TENANT_A, membershipState: "active", role: "superadmin" }
+    { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "suspended", role: "operator" },
+    { tenantId: TENANT_A, membershipId: MEMBER_A, membershipState: "active", role: "superadmin" }
   ]) {
     const result = authorize({
       actor: actor({ roles: ["owner"] }),

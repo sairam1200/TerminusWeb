@@ -114,10 +114,20 @@ test("migration defines one tenant RLS policy and composite tenant references", 
   assert.match(migration, /FOREIGN KEY \(tenant_id, host_id\)/);
   assert.match(migration, /FOREIGN KEY \(tenant_id, membership_id\)/);
   assert.match(migration, /FOREIGN KEY \(tenant_id, pairing_id, membership_id, host_id\)/);
+  assert.match(migration, /active_owner_count integer NOT NULL DEFAULT 0/);
+  assert.match(migration, /CREATE FUNCTION terminus_cp\.preserve_final_owner\(\)/);
+  assert.match(migration, /CREATE TRIGGER preserve_final_owner/);
   assert.match(migration, /ON DELETE SET NULL \(lease_id\)/);
   assert.match(migration, /retain_until timestamptz NOT NULL/);
   assert.match(migration, /not_before BETWEEN issued_at - interval '30 seconds' AND issued_at \+ interval '30 seconds'/);
   assert.match(migration, /current_setting\('terminus\.tenant_id', true\)/);
+});
+
+test("lease API binds the requested pairing to resolved tenant metadata", () => {
+  const operation = openapi.paths["/v1/tenants/{tenantId}/hosts/{hostId}/leases"].post;
+  assert.match(operation["x-terminus-resolution-invariant"], /pairing_id/);
+  assert.match(operation["x-terminus-resolution-invariant"], /device key/);
+  assert.match(operation["x-terminus-resolution-invariant"], /terminal_access/);
 });
 
 test("migration has no free-form audit payload or terminal-content columns", () => {

@@ -28,15 +28,20 @@ GRANT INSERT ON terminus_cp.hosts TO terminus_cp_test_app;
 
 INSERT INTO terminus_cp.accounts (id, identity_provider, provider_subject, email_normalized) VALUES
   ('aaaaaaaa-0000-4000-8000-000000000001', 'test', 'subject-a', 'a@example.invalid'),
-  ('aaaaaaaa-0000-4000-8000-000000000002', 'test', 'subject-b', 'b@example.invalid');
+  ('aaaaaaaa-0000-4000-8000-000000000002', 'test', 'subject-b', 'b@example.invalid'),
+  ('aaaaaaaa-0000-4000-8000-000000000003', 'test', 'subject-c1', 'c1@example.invalid'),
+  ('aaaaaaaa-0000-4000-8000-000000000004', 'test', 'subject-c2', 'c2@example.invalid');
 
 INSERT INTO terminus_cp.tenants (id, display_name) VALUES
   ('11111111-1111-4111-8111-111111111111', 'Tenant A'),
-  ('22222222-2222-4222-8222-222222222222', 'Tenant B');
+  ('22222222-2222-4222-8222-222222222222', 'Tenant B'),
+  ('33333333-3333-4333-8333-333333333333', 'Tenant C');
 
 INSERT INTO terminus_cp.memberships (tenant_id, id, account_id, state) VALUES
   ('11111111-1111-4111-8111-111111111111', '11111111-aaaa-4aaa-8aaa-111111111111', 'aaaaaaaa-0000-4000-8000-000000000001', 'active'),
-  ('22222222-2222-4222-8222-222222222222', '22222222-bbbb-4bbb-8bbb-222222222222', 'aaaaaaaa-0000-4000-8000-000000000002', 'active');
+  ('22222222-2222-4222-8222-222222222222', '22222222-bbbb-4bbb-8bbb-222222222222', 'aaaaaaaa-0000-4000-8000-000000000002', 'active'),
+  ('33333333-3333-4333-8333-333333333333', '33333333-aaaa-4aaa-8aaa-333333333331', 'aaaaaaaa-0000-4000-8000-000000000003', 'active'),
+  ('33333333-3333-4333-8333-333333333333', '33333333-bbbb-4bbb-8bbb-333333333332', 'aaaaaaaa-0000-4000-8000-000000000004', 'active');
 
 INSERT INTO terminus_cp.role_assignments (
   tenant_id,
@@ -46,7 +51,9 @@ INSERT INTO terminus_cp.role_assignments (
   assignment_source
 ) VALUES
   ('11111111-1111-4111-8111-111111111111', '11111111-0001-4000-8000-111111111111', '11111111-aaaa-4aaa-8aaa-111111111111', 'owner', 'tenant_bootstrap'),
-  ('22222222-2222-4222-8222-222222222222', '22222222-0001-4000-8000-222222222222', '22222222-bbbb-4bbb-8bbb-222222222222', 'owner', 'tenant_bootstrap');
+  ('22222222-2222-4222-8222-222222222222', '22222222-0001-4000-8000-222222222222', '22222222-bbbb-4bbb-8bbb-222222222222', 'owner', 'tenant_bootstrap'),
+  ('33333333-3333-4333-8333-333333333333', '33333333-0001-4000-8000-333333333331', '33333333-aaaa-4aaa-8aaa-333333333331', 'owner', 'tenant_bootstrap'),
+  ('33333333-3333-4333-8333-333333333333', '33333333-0002-4000-8000-333333333332', '33333333-bbbb-4bbb-8bbb-333333333332', 'owner', 'tenant_bootstrap');
 
 INSERT INTO terminus_cp.hosts (tenant_id, id, label, tailnet_dns_name) VALUES
   ('11111111-1111-4111-8111-111111111111', '11111111-1000-4000-8000-111111111111', 'Host A', 'host-a.example.ts.net'),
@@ -241,6 +248,21 @@ EXCEPTION WHEN object_not_in_prerequisite_state THEN
 END;
 $$;
 
+CREATE FUNCTION terminus_test.final_owner_revocation_rejected()
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  UPDATE terminus_cp.role_assignments
+    SET revoked_at = transaction_timestamp()
+    WHERE tenant_id = '22222222-2222-4222-8222-222222222222'
+      AND id = '22222222-0001-4000-8000-222222222222';
+  RETURN false;
+EXCEPTION WHEN check_violation THEN
+  RETURN true;
+END;
+$$;
+
 CREATE FUNCTION terminus_test.lease_offset_accepted(offset_seconds integer)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -386,6 +408,35 @@ SELECT terminus_test.assert_equal(
   has_table_privilege('terminus_cp_test_app', 'terminus_cp.quota_ledger', 'UPDATE, DELETE')::integer,
   0,
   'application role has no quota update or delete privilege'
+);
+
+SELECT terminus_test.assert_equal(
+  (SELECT count(*) FROM pg_trigger
+   WHERE tgrelid = 'terminus_cp.role_assignments'::regclass
+     AND tgname = 'preserve_final_owner'
+     AND NOT tgisinternal),
+  1,
+  'role assignments have one database final-owner trigger'
+);
+
+SELECT terminus_test.assert_equal(
+  (SELECT active_owner_count FROM terminus_cp.tenants
+   WHERE id = '11111111-1111-4111-8111-111111111111'),
+  1,
+  'tenant A owner count is derived from role assignments'
+);
+
+SELECT terminus_test.assert_equal(
+  (SELECT active_owner_count FROM terminus_cp.tenants
+   WHERE id = '33333333-3333-4333-8333-333333333333'),
+  2,
+  'tenant C has two owners for the concurrent revocation test'
+);
+
+SELECT terminus_test.assert_equal(
+  terminus_test.final_owner_revocation_rejected()::integer,
+  1,
+  'database rejects direct revocation of the final owner'
 );
 
 SELECT terminus_test.assert_equal(
