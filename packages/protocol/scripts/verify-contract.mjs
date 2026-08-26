@@ -16,6 +16,35 @@ const canonicalB64 = (s, bytes) => B64.test(s) && !s.includes('=') && b64(s).len
 const fail = (code) => ({ code });
 const ok = () => null;
 
+function schemaValid(value, rule, root = schema) {
+  if (rule.$ref) return schemaValid(value, rule.$ref.split('/').slice(1).reduce((x, k) => x[k], root), root);
+  if (rule.oneOf) return rule.oneOf.filter((candidate) => schemaValid(value, candidate, root)).length === 1;
+  if (rule.allOf && !rule.allOf.every((candidate) => schemaValid(value, candidate, root))) return false;
+  if (rule.const !== undefined && value !== rule.const) return false;
+  if (rule.enum && !rule.enum.some((candidate) => JSON.stringify(candidate) === JSON.stringify(value))) return false;
+  if (rule.type === 'object') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    if (rule.required && !rule.required.every((key) => Object.prototype.hasOwnProperty.call(value, key))) return false;
+    if (rule.additionalProperties === false && rule.properties && Object.keys(value).some((key) => !Object.prototype.hasOwnProperty.call(rule.properties, key))) return false;
+    if (rule.properties && !Object.entries(rule.properties).every(([key, child]) => value[key] === undefined || schemaValid(value[key], child, root))) return false;
+  }
+  if (rule.type === 'array') {
+    if (!Array.isArray(value)) return false;
+    if (rule.minItems !== undefined && value.length < rule.minItems) return false;
+    if (rule.maxItems !== undefined && value.length > rule.maxItems) return false;
+    if (rule.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) return false;
+    if (rule.items && !value.every((item) => schemaValid(item, rule.items, root))) return false;
+  }
+  if (rule.type === 'string' && typeof value !== 'string') return false;
+  if (rule.type === 'integer' && (!Number.isInteger(value))) return false;
+  if (rule.pattern && (typeof value !== 'string' || !(new RegExp(rule.pattern).test(value)))) return false;
+  if (rule.minLength !== undefined && value.length < rule.minLength) return false;
+  if (rule.maxLength !== undefined && value.length > rule.maxLength) return false;
+  if (rule.minimum !== undefined && value < rule.minimum) return false;
+  if (rule.maximum !== undefined && value > rule.maximum) return false;
+  return true;
+}
+
 function validateTimestamp(value) {
   if (!TIMESTAMP.test(value)) return false;
   const d = new Date(value);
@@ -40,7 +69,7 @@ function validatePayload(type, p) {
   const uuid = (v) => typeof v === 'string' && UUID.test(v);
   const fixed = (v, n) => typeof v === 'string' && canonicalB64(v, n);
   switch (type) {
-    case 'hello': return exactObject(p, ['clientInstanceId', 'supportedVersions'], ['credentialId']) && uuid(p.clientInstanceId) && (!p.credentialId || uuid(p.credentialId)) && Array.isArray(p.supportedVersions) && p.supportedVersions.length >= 1 && p.supportedVersions.length <= 8 && new Set(p.supportedVersions).size === p.supportedVersions.length && p.supportedVersions.every((v) => /^\d+\.\d+$/.test(v));
+    case 'hello': return exactObject(p, ['clientInstanceId', 'supportedVersions'], ['credentialId']) && uuid(p.clientInstanceId) && (p.credentialId === undefined || uuid(p.credentialId)) && Array.isArray(p.supportedVersions) && p.supportedVersions.length >= 1 && p.supportedVersions.length <= 8 && new Set(p.supportedVersions).size === p.supportedVersions.length && p.supportedVersions.every((v) => /^\d+\.\d+$/.test(v));
     case 'hello_ack': return exactObject(p, ['selectedVersion', 'agentId']) && p.selectedVersion === '0.1' && uuid(p.agentId);
     case 'pairing_request': return exactObject(p, ['pairingCode']) && fixed(p.pairingCode, 16);
     case 'pairing_result': return exactObject(p, ['credentialId', 'credentialSecret', 'credentialExpiresAt']) && uuid(p.credentialId) && fixed(p.credentialSecret, 32) && validateTimestamp(p.credentialExpiresAt);
@@ -56,7 +85,7 @@ function validatePayload(type, p) {
     case 'session_detached': return exactObject(p, ['sessionId', 'resumeGrant', 'expiresAt']) && uuid(p.sessionId) && fixed(p.resumeGrant, 32) && validateTimestamp(p.expiresAt);
     case 'close_session': return exactObject(p, ['sessionId', 'reason']) && uuid(p.sessionId) && p.reason === 'user_request';
     case 'session_closed': return exactObject(p, ['sessionId', 'reason']) && uuid(p.sessionId) && ['user_request', 'idle_timeout', 'agent_shutdown', 'process_exit', 'protocol_error', 'backpressure_limit'].includes(p.reason);
-    case 'error': return exactObject(p, ['code', 'fatal']) && p.fatal === true;
+    case 'error': return exactObject(p, ['code', 'fatal']) && ['INVALID_JSON', 'SCHEMA_INVALID', 'UNSUPPORTED_VERSION', 'UNKNOWN_TYPE', 'FRAME_TOO_LARGE', 'PAYLOAD_TOO_LARGE', 'SEQUENCE_REPLAY', 'SEQUENCE_GAP', 'INVALID_STATE', 'DIRECTION_VIOLATION', 'ORIGIN_REJECTED', 'PAIRING_FAILED', 'AUTHENTICATION_FAILED', 'AUTHORIZATION_EXPIRED', 'RESUME_REJECTED', 'HELLO_TIMEOUT', 'HEARTBEAT_TIMEOUT', 'SESSION_OPEN_FAILED', 'BACKPRESSURE_LIMIT'].includes(p.code) && p.fatal === true;
     default: return false;
   }
 }
@@ -66,6 +95,8 @@ function validateFrame(frame) {
   if (!exactObject(frame, ['version', 'type', 'connectionId', 'sequence', 'payload'])) return fail('SCHEMA_INVALID');
   if (frame.version !== '0.1') return fail('UNSUPPORTED_VERSION');
   if (!TYPES.has(frame.type)) return fail('UNKNOWN_TYPE');
+  const frameDef = `${frame.type.split('_').map((part, index) => index === 0 ? part : part[0].toUpperCase() + part.slice(1)).join('')}Frame`;
+  if (!schema.$defs[frameDef] || !schemaValid(frame, schema.$defs[frameDef])) return fail('SCHEMA_INVALID');
   if (!UUID.test(frame.connectionId) || !Number.isInteger(frame.sequence) || frame.sequence < 0 || frame.sequence > Number.MAX_SAFE_INTEGER || !validatePayload(frame.type, frame.payload)) return fail('SCHEMA_INVALID');
   return ok();
 }
@@ -94,14 +125,16 @@ function duplicateTopLevel(raw) {
 function validateHandshake(caseData) {
   const { request, allowedOrigins } = caseData;
   const actual = request.scheme === 'wss' && request.subprotocol === 'terminus.v0_1' && typeof request.origin === 'string' && allowedOrigins.includes(request.origin);
-  if (caseData.expect === 'accept') return actual ? ok() : fail('ORIGIN_REJECTED');
-  return actual ? fail('HANDSHAKE_UNEXPECTED_ACCEPT') : ok();
+  const result = actual ? { code: 'ACCEPT', httpStatus: 101 } : (request.subprotocol !== 'terminus.v0_1' ? { code: 'UNSUPPORTED_VERSION', httpStatus: 426 } : { code: 'ORIGIN_REJECTED', httpStatus: 403 });
+  if (caseData.expect === 'accept') return result.code === 'ACCEPT' ? ok() : fail(result.code);
+  return result.code === caseData.expected.code && result.httpStatus === caseData.expected.httpStatus ? ok() : fail('HANDSHAKE_EXPECTATION_MISMATCH');
 }
 
 function validateTranscript(t) {
   let connection = t.initial.connectionState;
   let session = t.initial.sessionState;
   const next = { ...t.initial.nextSequence };
+  let connectionId;
   for (let i = 0; i < t.frames.length; i += 1) {
     const spec = t.frames[i];
     if (spec.raw !== undefined) {
@@ -110,9 +143,11 @@ function validateTranscript(t) {
       return { code: 'INVALID_JSON', atFrame: i };
     }
     const { frame, wire } = applyGenerate(spec);
-    if (wire.length > 65536) return { code: 'FRAME_TOO_LARGE', atFrame: i };
+    if (Buffer.byteLength(wire, 'utf8') > 65536) return { code: 'FRAME_TOO_LARGE', atFrame: i };
     const schemaError = validateFrame(frame);
     if (schemaError) return { ...schemaError, atFrame: i };
+    if (connectionId === undefined) connectionId = frame.connectionId;
+    if (frame.connectionId !== connectionId) return { code: 'SCHEMA_INVALID', atFrame: i };
     if (frame.type === 'hello' && !frame.payload.supportedVersions.includes('0.1')) return { code: 'UNSUPPORTED_VERSION', atFrame: i };
     const direction = spec.direction;
     const expected = next[direction];
@@ -155,6 +190,14 @@ for (const c of rejected.transcripts) {
 for (const v of vectors.vectors) {
   const proof = crypto.createHmac('sha256', b64(v.credentialSecret)).update(Buffer.from(v.messageHex, 'hex')).digest('base64url');
   if (proof !== v.proof) throw new Error(`auth vector mismatch: ${v.id}`);
-  for (const mutation of vectors.negativeMutations) if (mutation.expected !== 'AUTHENTICATION_FAILED') throw new Error(`unexpected mutation expectation: ${mutation.id}`);
+  const authMessage = (connectionId, challengeId, challenge) => Buffer.concat([Buffer.from('Terminus/0.1/auth\0'), Buffer.from(connectionId), Buffer.from('\0'), Buffer.from(challengeId), Buffer.from('\0'), b64(challenge)]);
+  for (const mutation of vectors.negativeMutations) {
+    if (mutation.expected !== 'AUTHENTICATION_FAILED') throw new Error(`unexpected mutation expectation: ${mutation.id}`);
+    const connectionId = mutation.field === 'connectionId' ? mutation.value : v.connectionId;
+    const challengeId = mutation.field === 'challengeId' ? mutation.value : v.challengeId;
+    const challenge = mutation.field === 'challenge' ? mutation.value : v.challenge;
+    const candidate = mutation.field === 'proof' ? mutation.value : crypto.createHmac('sha256', b64(v.credentialSecret)).update(authMessage(connectionId, challengeId, challenge)).digest('base64url');
+    if (candidate === v.proof) throw new Error(`negative mutation did not change proof: ${mutation.id}`);
+  }
 }
 console.log(`protocol 0.1 verified: schema semantics, ${accepted.transcripts.length + rejected.transcripts.length} transcripts, ${ids.size} fixtures, ${vectors.vectors.length} positive auth vector(s), ${vectors.negativeMutations.length} negative auth mutations`);
