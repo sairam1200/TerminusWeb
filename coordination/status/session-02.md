@@ -1,9 +1,9 @@
 # Session 02 Status
 
 - Current task: `S02-002` — Implement browser protocol client and private WSS behavior
-- State: blocked on committed Session 03 endpoint/configuration response; deterministic Session 02 owner gate remains passed. Authoritative queue transitions remain Session 01-owned.
+- State: blocked after the committed Session 03 response confirmed no approved runnable endpoint exists; a new Session 01 task and explicit user authorization are required. Deterministic Session 02 owner gate remains passed.
 - Branch: `session/02-web`
-- Authoritative queue: Session 01 commit `7422df6d827e20bf8c770d1ea0d0762229121f12`.
+- Authoritative queue: latest Session 01 commit `f004d2cc807ff3cf419e934c0dc3fc1101c4c4ce`.
 - Protocol consumed: exact Session 01 product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`, wire version `0.1`, subprotocol `terminus.v0_1`.
 
 ## Dependency verification
@@ -84,3 +84,14 @@
 - Immutable source-owned request created and committed: `43a1b4d414818a18bf1515a9635cd08b1d74d56b`, path `coordination/requests/from-02-to-03-s02-002-real-wss-endpoint.request.md`.
 - Requested response path: `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`. Session 02 will consume it only by exact response commit SHA with `git show`.
 - Blocking evidence: the requested real browser WSS checks cannot start until Session 03 supplies an approved runnable endpoint/configuration or identifies the exact missing task and authorization. No new `apps/web/**` product change was made, so no new product tip or independent product review exists for this blocked attempt.
+
+## Session 03 response consumed
+
+- Startup scan found the target-owned response on `session/03-windows-agent`. Exact response commit: `de185692732b93afdc730b228be4475b43a3b0e1`; path: `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`.
+- The response was read only with `git show de185692732b93afdc730b228be4475b43a3b0e1:coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`; Session 02 did not edit or copy the target-owned response.
+- Latest Session 01 queue `f004d2cc807ff3cf419e934c0dc3fc1101c4c4ce` now records S03-002 `done` and S02-002 `review`.
+- Session 03 explicitly confirms no approved runnable private WSS endpoint exists: no URL, listener/process, certificate or trusted chain, private-publication mapping, protected credential store, device resolver, or local approval UI is configured or live. Its `httptest.NewTLSServer` paths and synthetic `https://preview.example.invalid` Origin are test-only and are not approved browser integration evidence.
+- Session 03 identifies the prerequisite as a new Session 01-assigned, explicitly user-authorized follow-up task for consumer/host wiring plus independently approved certificate-backed Tailscale-private publication. No such task or authorization is currently recorded.
+- Therefore exact destination, real browser Origin header, negotiated subprotocol, pairing/authentication, open/input/output/resize, heartbeat, detach/resume, expiry, malformed/replayed/oversized rejection, close, and configured CSP could not be exercised against a real endpoint. Desktop/iPhone real-path browser checks and a new final-tip independent review were not run.
+- Existing cumulative web product tip remains `aec63af0ce7512341555910e59f3617543869c4a`, with its prior deterministic reviewer PASS unchanged. No `apps/web/**` files changed in this attempt, so there is no repair/product commit to review.
+- Session 02 did not weaken certificate validation, install a certificate, create or expose a listener, alter Tailscale, deploy, modify Session 03 files, merge, or push.
