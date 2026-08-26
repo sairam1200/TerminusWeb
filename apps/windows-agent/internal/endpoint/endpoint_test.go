@@ -3,10 +3,16 @@ package endpoint
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -55,6 +61,12 @@ func (s *memoryCredentialStore) Get(_ context.Context, id string) (Credential, e
 		return Credential{}, errors.New("credential not found")
 	}
 	return credential, nil
+}
+func (s *memoryCredentialStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.credentials, id)
+	return nil
 }
 
 type fakeSession struct {
@@ -233,6 +245,10 @@ func TestPrivateWSSLifecycleDetachResumeAndCleanup(t *testing.T) {
 	}
 	client.send("detach", protocol.SessionIDPayload{SessionID: sessionID})
 	detached := client.read("session_detached").Value.(*protocol.SessionDetachedPayload)
+	client.send("resume_session", protocol.ResumeSessionPayload{SessionID: sessionID, ResumeGrant: detached.ResumeGrant, Dimensions: protocol.Dimensions{Columns: 90, Rows: 30}})
+	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.ResumeRejected {
+		t.Fatalf("same-connection resume code = %s", got)
+	}
 	_ = client.ws.Close()
 	session.output <- []byte("pending-marker")
 	resumed := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000002")
@@ -322,6 +338,109 @@ func TestAuthorizationExpiryClosesConnection(t *testing.T) {
 	nanos.Store(base.Add(13 * time.Hour).UnixNano())
 	client.send("heartbeat", protocol.HeartbeatPayload{Kind: "ping", Nonce: protocol.EncodeBase64(make([]byte, 16))})
 	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthorizationExpired {
+		t.Fatalf("code = %s", got)
+	}
+}
+
+func TestAuthorizationDeadlineProactivelyCloses(t *testing.T) {
+	endpoint, adapter, store := newTestEndpoint(t)
+	credential := Credential{ID: "30000000-0000-4000-8000-000000000050", ExpiresAt: time.Now().Add(time.Second)}
+	for index := range credential.Secret {
+		credential.Secret[index] = byte(index)
+	}
+	if err := store.Put(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	client := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000050")
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	client.read("session_opened")
+	_ = client.ws.SetReadDeadline(time.Now().Add(time.Second))
+	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthorizationExpired {
+		t.Fatalf("code = %s", got)
+	}
+	adapter.mu.Lock()
+	session := adapter.sessions[0]
+	adapter.mu.Unlock()
+	select {
+	case <-session.closed:
+	case <-time.After(time.Second):
+		t.Fatal("expired authorization left terminal open")
+	}
+}
+
+func TestConcurrentRateLimitReservations(t *testing.T) {
+	limiter := newRateLimiter()
+	now := time.Now()
+	var admitted atomic.Int64
+	var wait sync.WaitGroup
+	start := make(chan struct{})
+	for range 20 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			if limiter.begin("device", now) {
+				admitted.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wait.Wait()
+	if admitted.Load() != 5 {
+		t.Fatalf("admitted = %d", admitted.Load())
+	}
+	for range 5 {
+		limiter.finish("device", now, false)
+	}
+	if limiter.allowed("device", now) {
+		t.Fatal("cooldown was not enforced")
+	}
+	if !limiter.allowed("device", now.Add(5*time.Minute+time.Millisecond)) {
+		t.Fatal("expired cooldown was not released")
+	}
+}
+
+func TestConnectionIDCannotBeReused(t *testing.T) {
+	endpoint, _, _ := newTestEndpoint(t)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	id := "10000000-0000-4000-8000-000000000060"
+	firstWS, _, _ := dial(t, server, testOrigin, protocol.Subprotocol)
+	first := &testClient{t: t, ws: firstWS, id: id}
+	first.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	first.read("hello_ack")
+	secondWS, _, _ := dial(t, server, testOrigin, protocol.Subprotocol)
+	second := &testClient{t: t, ws: secondWS, id: id}
+	second.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	if got := second.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.InvalidState {
+		t.Fatalf("code = %s", got)
+	}
+	firstWS.Close()
+	secondWS.Close()
+}
+
+func TestCredentialRevocationClosesAuthorizationAndSession(t *testing.T) {
+	endpoint, adapter, _ := newTestEndpoint(t)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	client, credential := pairAndAuthorize(t, endpoint, server)
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	client.read("session_opened")
+	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	session := adapter.sessions[0]
+	adapter.mu.Unlock()
+	select {
+	case <-session.closed:
+	case <-time.After(time.Second):
+		t.Fatal("revocation left terminal open")
+	}
+	client.read("session_closed")
+	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
 		t.Fatalf("code = %s", got)
 	}
 }
@@ -538,6 +657,53 @@ func TestServeTLSRejectsNonLoopbackListener(t *testing.T) {
 	if err := ServeTLS(listener, &tls.Config{Certificates: []tls.Certificate{{}}}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})); err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+func TestServeTLSAcceptsLoopbackHTTPS(t *testing.T) {
+	certificate := testCertificate(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- ServeTLS(listener, &tls.Config{Certificates: []tls.Certificate{certificate}}, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) }))
+	}()
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	response, err := client.Get("https://" + listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	listener.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("TLS server did not stop")
+	}
+}
+
+func testCertificate(t *testing.T) tls.Certificate {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "127.0.0.1"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	certificate, err := tls.X509KeyPair(certificatePEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certificate
 }
 
 func TestLoggerReceivesNoSecretsOrTerminalPlaintext(t *testing.T) {

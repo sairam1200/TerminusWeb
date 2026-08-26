@@ -37,7 +37,7 @@ func (m *Machine) Apply(direction Direction, frame DecodedFrame) error {
 		exhausted = &m.clientExhausted
 	}
 	if *exhausted {
-		return protocolError(SequenceGap, 1008, nil)
+		return protocolError(SequenceReplay, 1008, nil)
 	}
 	if frame.Sequence < *expected {
 		return protocolError(SequenceReplay, 1008, nil)

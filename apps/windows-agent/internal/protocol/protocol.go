@@ -245,6 +245,9 @@ func Decode(data []byte) (DecodedFrame, error) {
 	if !json.Valid(data) {
 		return DecodedFrame{}, protocolError(InvalidJSON, 1007, errors.New("malformed JSON"))
 	}
+	if err := validateEnvelopeMembers(data); err != nil {
+		return DecodedFrame{}, protocolError(SchemaInvalid, 1002, err)
+	}
 
 	var frame Frame
 	if err := decodeExact(data, &frame); err != nil {
@@ -354,6 +357,18 @@ func decodePayload(messageType string, raw json.RawMessage) (any, error) {
 	}
 	if err := decodeExact(raw, target); err != nil {
 		return nil, err
+	}
+	if messageType == "hello" {
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &members); err != nil {
+			return nil, err
+		}
+		if encoded, present := members["credentialId"]; present {
+			var credentialID string
+			if string(encoded) == "null" || json.Unmarshal(encoded, &credentialID) != nil || !ValidUUID(credentialID) {
+				return nil, protocolError(SchemaInvalid, 1002, nil)
+			}
+		}
 	}
 	if err := validatePayload(messageType, target); err != nil {
 		return nil, err
@@ -467,6 +482,33 @@ func decodeExact(data []byte, target any) error {
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("trailing JSON value")
+	}
+	return nil
+}
+
+func validateEnvelopeMembers(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	for _, name := range []string{"version", "type", "connectionId", "sequence", "payload"} {
+		if _, present := members[name]; !present {
+			return fmt.Errorf("missing envelope member %q", name)
+		}
+	}
+	var text string
+	for _, name := range []string{"version", "type", "connectionId"} {
+		if string(members[name]) == "null" || json.Unmarshal(members[name], &text) != nil {
+			return fmt.Errorf("envelope member %q must be a string", name)
+		}
+	}
+	var sequence uint64
+	if string(members["sequence"]) == "null" || json.Unmarshal(members["sequence"], &sequence) != nil {
+		return errors.New("sequence must be an unsigned integer")
+	}
+	payload := bytes.TrimSpace(members["payload"])
+	if len(payload) < 2 || payload[0] != '{' {
+		return errors.New("payload must be an object")
 	}
 	return nil
 }

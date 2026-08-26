@@ -34,6 +34,7 @@ type Credential struct {
 type CredentialStore interface {
 	Put(context.Context, Credential) error
 	Get(context.Context, string) (Credential, error)
+	Delete(context.Context, string) error
 }
 
 type PairingApproval struct {
@@ -117,6 +118,7 @@ func authProof(secret []byte, connectionID, challengeID string, challengeValue [
 type failureWindow struct {
 	started       time.Time
 	count         int
+	pending       int
 	cooldownUntil time.Time
 }
 
@@ -131,19 +133,51 @@ func (r *rateLimiter) allowed(identity string, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w := r.windows[identity]
-	return !now.Before(w.cooldownUntil)
+	if !w.cooldownUntil.IsZero() {
+		if now.Before(w.cooldownUntil) {
+			return false
+		}
+		w = failureWindow{started: now}
+	} else if !w.started.IsZero() && now.Sub(w.started) >= 5*time.Minute {
+		w = failureWindow{started: now}
+	}
+	r.windows[identity] = w
+	return w.count+w.pending < 5
 }
 
-func (r *rateLimiter) failure(identity string, now time.Time) {
+func (r *rateLimiter) begin(identity string, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w := r.windows[identity]
-	if w.started.IsZero() || now.Sub(w.started) >= 5*time.Minute {
+	if !w.cooldownUntil.IsZero() {
+		if now.Before(w.cooldownUntil) {
+			return false
+		}
+		w = failureWindow{started: now}
+	} else if w.started.IsZero() || now.Sub(w.started) >= 5*time.Minute {
 		w = failureWindow{started: now}
 	}
-	w.count++
-	if w.count >= 5 {
-		w.cooldownUntil = now.Add(5 * time.Minute)
+	if w.count+w.pending >= 5 {
+		r.windows[identity] = w
+		return false
+	}
+	w.pending++
+	r.windows[identity] = w
+	return true
+}
+
+func (r *rateLimiter) finish(identity string, now time.Time, success bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w := r.windows[identity]
+	if w.pending > 0 {
+		w.pending--
+	}
+	if !success {
+		w.count++
+		if w.count >= 5 {
+			w.cooldownUntil = now.Add(5 * time.Minute)
+		}
 	}
 	r.windows[identity] = w
 }
