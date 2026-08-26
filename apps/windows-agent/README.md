@@ -31,6 +31,37 @@ no plaintext credential-store implementation. Store deletion is part of the
 interface so local revocation atomically closes matching authorizations and
 active or detached terminal sessions.
 
+## Temporary integration host
+
+`cmd/integration-host` is a Windows-only, non-elevated local harness around the
+endpoint library. It refuses to start unless the caller supplies one exact
+HTTPS Origin, a certificate/key pair, a certificate hostname, and a device
+identity. The certificate must already chain to the current Windows user's
+trusted roots and cover the hostname; the host never generates, installs, or
+trusts a self-signed certificate. The listener default is `127.0.0.1:0` and
+non-loopback binds are rejected by both the host and `ServeTLS`.
+
+The host encrypts its temporary credential map with DPAPI `CurrentUser`, so
+records are bound to the non-elevated integration identity. The default store
+is removed after clean shutdown. Use an explicit path only when its lifecycle
+is managed by the operator. The pairing approval prompt is bounded by the
+endpoint's 60-second limit and prints no client or credential data.
+
+Safe commands (run from this directory, with an externally supplied already
+trusted certificate) are:
+
+```powershell
+go run ./cmd/integration-host -mode serve -listen 127.0.0.1:0 -origin <exact-https-origin> -server-name <certificate-hostname> -cert <existing-cert.pem> -key <existing-key.pem> -device-id local-integration-device -print-pairing-code
+Invoke-WebRequest https://<certificate-hostname>/healthz
+go run ./cmd/integration-host -mode revoke -store <protected-store-path> -revoke-id <credential-id>
+go run ./cmd/integration-host -mode reset -store <protected-store-path>
+```
+
+The pairing-code flag is explicit operator-console output only; never redirect
+it, log it, or commit it. Do not use the synthetic `httptest` certificates in
+the tests for browser integration. Until an already-trusted certificate and
+approved private publication mapping are supplied, no real WSS URL exists.
+
 ## Development checks
 
 Run these from this directory on a non-elevated Windows 10 version 1809 or
