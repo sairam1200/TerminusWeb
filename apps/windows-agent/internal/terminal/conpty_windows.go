@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	forcedExitCode     uint32 = 0x5445524d // "TERM"; local lifecycle only.
-	shutdownWaitPeriod        = 5 * time.Second
+	forcedExitCode        uint32 = 0x5445524d // "TERM"; local lifecycle only.
+	processWaitPollPeriod        = 50 * time.Millisecond
+	shutdownWaitPeriod           = 5 * time.Second
 )
 
 var (
@@ -253,8 +254,9 @@ func (s *conPTYSession) requestStop(cause error) {
 func (s *conPTYSession) supervise(ctx context.Context, cancel context.CancelFunc) {
 	defer cancel()
 	processDone := make(chan processResult, 1)
+	abandonProcessWait := make(chan struct{})
 	go func() {
-		processDone <- waitForProcess(s.process)
+		processDone <- waitForProcess(s.process, abandonProcessWait)
 	}()
 
 	var result processResult
@@ -265,11 +267,11 @@ func (s *conPTYSession) supervise(ctx context.Context, cancel context.CancelFunc
 	case request := <-s.stop:
 		cause = request.cause
 		terminateErr = s.terminateJob()
-		result = waitForShutdown(processDone)
+		result = waitForShutdown(processDone, abandonProcessWait, shutdownWaitPeriod)
 	case <-ctx.Done():
 		cause = ctx.Err()
 		terminateErr = s.terminateJob()
-		result = waitForShutdown(processDone)
+		result = waitForShutdown(processDone, abandonProcessWait, shutdownWaitPeriod)
 	}
 
 	cleanupErr := s.releaseHandles()
@@ -309,14 +311,19 @@ func (s *conPTYSession) terminateJob() error {
 	return errors.Join(terminateErr, closeErr)
 }
 
-func waitForShutdown(processDone <-chan processResult) processResult {
-	timer := time.NewTimer(shutdownWaitPeriod)
+func waitForShutdown(processDone <-chan processResult, abandonProcessWait chan<- struct{}, timeout time.Duration) processResult {
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case result := <-processDone:
 		return result
 	case <-timer.C:
-		return processResult{err: fmt.Errorf("wait for PowerShell shutdown: exceeded %s", shutdownWaitPeriod)}
+		// Wait until the finite Windows wait has observed this signal before
+		// releaseHandles closes the process handle. Closing a handle while a
+		// WaitForSingleObject call is pending has undefined Windows behavior.
+		close(abandonProcessWait)
+		<-processDone
+		return processResult{err: fmt.Errorf("wait for PowerShell shutdown: exceeded %s", timeout)}
 	}
 }
 
@@ -354,19 +361,29 @@ func (s *conPTYSession) releaseHandles() error {
 	return errors.Join(errs...)
 }
 
-func waitForProcess(process windows.Handle) processResult {
-	status, err := windows.WaitForSingleObject(process, windows.INFINITE)
-	if err != nil {
-		return processResult{err: fmt.Errorf("wait for PowerShell: %w", err)}
+func waitForProcess(process windows.Handle, abandon <-chan struct{}) processResult {
+	for {
+		status, err := windows.WaitForSingleObject(process, uint32(processWaitPollPeriod/time.Millisecond))
+		if err != nil {
+			return processResult{err: fmt.Errorf("wait for PowerShell: %w", err)}
+		}
+		switch status {
+		case windows.WAIT_OBJECT_0:
+			var exitCode uint32
+			if err := windows.GetExitCodeProcess(process, &exitCode); err != nil {
+				return processResult{err: fmt.Errorf("read PowerShell exit code: %w", err)}
+			}
+			return processResult{exitCode: exitCode}
+		case uint32(windows.WAIT_TIMEOUT):
+			select {
+			case <-abandon:
+				return processResult{err: errors.New("PowerShell process wait abandoned before handle cleanup")}
+			default:
+			}
+		default:
+			return processResult{err: fmt.Errorf("wait for PowerShell: unexpected wait status %d", status)}
+		}
 	}
-	if status != windows.WAIT_OBJECT_0 {
-		return processResult{err: fmt.Errorf("wait for PowerShell: unexpected wait status %d", status)}
-	}
-	var exitCode uint32
-	if err := windows.GetExitCodeProcess(process, &exitCode); err != nil {
-		return processResult{err: fmt.Errorf("read PowerShell exit code: %w", err)}
-	}
-	return processResult{exitCode: exitCode}
 }
 
 func newKillOnCloseJob() (windows.Handle, error) {
