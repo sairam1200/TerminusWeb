@@ -1,12 +1,30 @@
 # Session 04 Status
 
-- Current task: unassigned
-- State: not_started
+- Current task: `S04-001` — Define control-plane domain model and API contract without terminal relay
+- State: done
 - Branch: `session/04-control-plane`
-- Files changed: none
-- Commands/evidence: none
-- Independent reviewer/evidence: none
-- Assumptions: none
+- Files changed:
+  - `services/control-plane/**`: inactive metadata-only domain, OpenAPI, lease-claims, reference authorization policy, and contract/abuse tests
+  - `infrastructure/database/**`: single PostgreSQL migration history, tenant-isolation/retention tests, and disposable validation harness
+- Commands/evidence:
+  - `npm run format:check` from `services/control-plane` — PASS, 1/1 formatting test
+  - `npm run lint` from `services/control-plane` — PASS, all JavaScript syntax checks
+  - `npm run typecheck` from `services/control-plane` — PASS, reference policy syntax/type parse
+  - `npm test` from `services/control-plane` — PASS, 34/34 authorization, cross-tenant, privilege-escalation, temporal, contract, data-boundary, and formatting tests
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\run-isolated-tests.ps1` from `infrastructure/database` — PASS against disposable `postgres:17.11-alpine3.24@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73`; migration committed and SQL assertions/RLS checks reported `S04-001 isolated PostgreSQL invariants: PASS`; exact disposable container removed
+  - `git diff 4b420c1..83d110a --check` — PASS; changed paths confined to `services/control-plane/**` and `infrastructure/database/**`
+  - Known-secret-pattern scan at `83d110a` — PASS, no matches
+  - Dependency/API sources checked 2026-08-26: PostgreSQL current constraint and row-security documentation, plus Docker Official Images PostgreSQL source-of-truth; direct links recorded in owned README files
+  - Initial sandboxed Node test attempt was inconclusive (`spawn EPERM`); the same commands were rerun with worker-spawn permission and passed as recorded above
+- Independent reviewer/evidence:
+  - `s04_001_reviewer` reviewed exact product tip `83d110a` read-only — PASS
+  - Independently reran `npm test` (34/34), the isolated PostgreSQL harness (PASS), diff whitespace/scope checks (PASS), and disposable-container cleanup (PASS)
+  - Confirmed pre/post-retention deletion behavior; `-31/-30/+30/+31` lease clock-skew matrix; cross-tenant, privilege, expiry, commercial-gate, terminal-data, and deployment boundaries; no remaining findings
+- Assumptions:
+  - This is a proposed inactive contract; the personal Vercel Hobby prototype does not call it and no commercial feature is activated
+  - `evaluatedAtEpochSeconds` is supplied by a trusted future server clock, not by the client request
+  - A future implementation uses a non-owner, non-`BYPASSRLS` database role and transaction-local `terminus.tenant_id`
+  - Atomic quota reservation and concurrency tests are deferred until a lease-issuance implementation exists, as required by the Session 04 brief; S04-001 adds no handler
 - Blockers/requests: none
-- Product/task commit: none
+- Product/task commit: `83d110a` (includes initial product commit `464ad31` and review-fix commit `e8ee4eb`)
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
