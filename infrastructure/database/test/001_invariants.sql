@@ -144,7 +144,8 @@ INSERT INTO terminus_cp.quota_ledger (
   entitlement_key,
   entry_kind,
   units_delta,
-  idempotency_key
+  idempotency_key,
+  retain_until
 ) VALUES (
   '11111111-1111-4111-8111-111111111111',
   '11111111-1005-4000-8000-111111111111',
@@ -153,7 +154,8 @@ INSERT INTO terminus_cp.quota_ledger (
   'terminal_access',
   'reserve',
   -1,
-  '11111111-1006-4000-8000-111111111111'
+  '11111111-1006-4000-8000-111111111111',
+  transaction_timestamp() + interval '365 days'
 );
 
 CREATE FUNCTION terminus_test.cross_tenant_foreign_key_rejected()
@@ -239,6 +241,98 @@ EXCEPTION WHEN object_not_in_prerequisite_state THEN
 END;
 $$;
 
+CREATE FUNCTION terminus_test.future_lease_rejected()
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO terminus_cp.leases (
+    tenant_id,
+    id,
+    membership_id,
+    host_id,
+    pairing_id,
+    entitlement_key,
+    quota_units,
+    signing_key_id,
+    nonce_hash,
+    token_hash,
+    not_before,
+    expires_at
+  ) VALUES (
+    '11111111-1111-4111-8111-111111111111',
+    '11111111-9004-4000-8000-111111111111',
+    '11111111-aaaa-4aaa-8aaa-111111111111',
+    '11111111-1000-4000-8000-111111111111',
+    '11111111-1002-4000-8000-111111111111',
+    'terminal_access',
+    1,
+    'test-key-1',
+    decode(repeat('88', 32), 'hex'),
+    decode(repeat('99', 32), 'hex'),
+    transaction_timestamp() + interval '31 seconds',
+    transaction_timestamp() + interval '331 seconds'
+  );
+  RETURN false;
+EXCEPTION WHEN check_violation THEN
+  RETURN true;
+END;
+$$;
+
+CREATE FUNCTION terminus_test.lease_purge_detaches_quota_reference()
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM terminus_cp.leases
+    WHERE tenant_id = '11111111-1111-4111-8111-111111111111'
+      AND id = '11111111-1004-4000-8000-111111111111';
+  RETURN EXISTS (
+    SELECT 1 FROM terminus_cp.quota_ledger
+    WHERE tenant_id = '11111111-1111-4111-8111-111111111111'
+      AND id = '11111111-1005-4000-8000-111111111111'
+      AND lease_id IS NULL
+  );
+END;
+$$;
+
+CREATE FUNCTION terminus_test.expired_quota_purge_allowed()
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  expired_entry_id constant uuid := '11111111-9005-4000-8000-111111111111';
+BEGIN
+  INSERT INTO terminus_cp.quota_ledger (
+    tenant_id,
+    id,
+    entitlement_key,
+    entry_kind,
+    units_delta,
+    idempotency_key,
+    occurred_at,
+    retain_until
+  ) VALUES (
+    '11111111-1111-4111-8111-111111111111',
+    expired_entry_id,
+    'terminal_access',
+    'grant',
+    1,
+    '11111111-9006-4000-8000-111111111111',
+    transaction_timestamp() - interval '2 days',
+    transaction_timestamp() - interval '1 day'
+  );
+  DELETE FROM terminus_cp.quota_ledger
+    WHERE tenant_id = '11111111-1111-4111-8111-111111111111'
+      AND id = expired_entry_id;
+  RETURN NOT EXISTS (
+    SELECT 1 FROM terminus_cp.quota_ledger
+    WHERE tenant_id = '11111111-1111-4111-8111-111111111111'
+      AND id = expired_entry_id
+  );
+END;
+$$;
+
 CREATE FUNCTION terminus_test.cross_tenant_rls_write_rejected()
 RETURNS boolean
 LANGUAGE plpgsql
@@ -270,6 +364,12 @@ SELECT terminus_test.assert_equal(
 );
 
 SELECT terminus_test.assert_equal(
+  has_table_privilege('terminus_cp_test_app', 'terminus_cp.quota_ledger', 'UPDATE, DELETE')::integer,
+  0,
+  'application role has no quota update or delete privilege'
+);
+
+SELECT terminus_test.assert_equal(
   (SELECT terminus_test.cross_tenant_foreign_key_rejected()::integer),
   1,
   'composite foreign key rejects cross-tenant host reference'
@@ -285,6 +385,24 @@ SELECT terminus_test.assert_equal(
   (SELECT terminus_test.quota_mutation_rejected()::integer),
   1,
   'quota ledger is append-only'
+);
+
+SELECT terminus_test.assert_equal(
+  (SELECT terminus_test.future_lease_rejected()::integer),
+  1,
+  'lease not-before above the clock-skew window is rejected'
+);
+
+SELECT terminus_test.assert_equal(
+  (SELECT terminus_test.lease_purge_detaches_quota_reference()::integer),
+  1,
+  'lease purge detaches its retained quota reference'
+);
+
+SELECT terminus_test.assert_equal(
+  (SELECT terminus_test.expired_quota_purge_allowed()::integer),
+  1,
+  'quota entry can be purged only after retain_until'
 );
 
 BEGIN;

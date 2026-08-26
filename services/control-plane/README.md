@@ -28,7 +28,9 @@ transport. The personal Vercel Hobby prototype does not call this contract.
 - `contracts/lease-claims.schema.json` defines a signed lease payload with a
   maximum five-minute lifetime and a single tenant/member/host audience.
 - `src/authorization.mjs` is an executable reference policy, not a network
-  handler. API and abuse tests exercise it before any handler is added.
+  handler. API and abuse tests exercise it before any handler is added. Its
+  `evaluatedAtEpochSeconds` input represents a trusted server clock and is not
+  part of the client request contract.
 - `../../infrastructure/database/migrations/0001_control_plane.sql` is the sole
   migration history for this task. Tenant-owned foreign keys include
   `tenant_id`, and row-level policies fail closed without transaction-local
