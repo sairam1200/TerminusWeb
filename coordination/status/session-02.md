@@ -1,64 +1,74 @@
 # Session 02 Status
 
-- Current task: `S02-001` — Scaffold responsive Next.js PWA and terminal adapter boundary
-- State: done (owner Definition of Done; queue transition remains Session 01-owned)
+- Current task: `S02-002` — Implement browser protocol client and private WSS behavior
+- State: review-ready; deterministic Session 02 owner gate passed, while approved live private-WSS integration evidence remains unavailable. Authoritative queue transitions remain Session 01-owned.
 - Branch: `session/02-web`
-- Files changed:
-  - `apps/web/app/**`: Next.js App Router shell, responsive styles, metadata, and web manifest.
-  - `apps/web/components/**`: accessible terminal shell, PWA registration, and component tests.
-  - `apps/web/terminal/**`: UI-facing adapter boundary and explicitly labelled, socket-free test double.
-  - `apps/web/public/**`: SVG app icon and non-caching service worker.
-  - `apps/web/{package.json,package-lock.json,tsconfig.json,next.config.ts,eslint.config.mjs,vitest.config.ts,vitest.setup.ts,securityHeaders.test.ts}` plus local formatting/ignore files.
-- Dependency verification:
-  - `node --version` => `v24.15.0`; `npm --version` => `11.14.1`.
-  - `npm view next version; npm view react version; npm view vitest version; npm view @playwright/test version` => `next 16.3.3`, `react 19.2.8`, `vitest 4.1.11`, `@playwright/test 1.62.1` (the Playwright test package was not added; browser evidence used the CLI).
-  - `npm view eslint-config-next@16.3.3 peerDependencies --json; npm view vitest@4.1.11 engines --json; npm view next@16.3.3 engines --json` => ESLint `>=9`, Vitest supports Node 24, Next requires Node `>=20.9.0`.
-  - `npm view typescript@6 version --json` => latest supported TypeScript 6 release `6.0.3`; TypeScript 7.0.2 was rejected after the installed `typescript-eslint` reported that it does not support TypeScript 7.
-  - `npm install --ignore-scripts` and subsequent lock updates => 442 packages audited, 0 vulnerabilities. `package-lock.json` locks every dependency.
-  - `npm ls --depth=0` => exact direct graph: Next 16.3.3, React/React DOM 19.2.8, TypeScript 6.0.3, ESLint 9.39.5, eslint-config-next 16.3.3, Vitest 4.1.11, jsdom 30.0.1, Testing Library packages, Prettier 3.9.6, and matching React/Node types; exit 0.
-- Deterministic commands/evidence (final run):
-  - `npm run format:check` => pass; all matched files use Prettier style.
-  - `npm run lint` => pass; 0 errors and 0 warnings.
-  - `npm run typecheck` => pass; `tsc --noEmit` exit 0.
-  - `npm test` => pass outside the filesystem sandbox after the sandboxed Vite config loader received `spawn EPERM`; 3 files and 9 tests passed. Coverage includes successful simulated lifecycle, destination rejection, disconnected input, resize boundaries, keyboard submit, paste, focus, mobile keys, disconnect, connection failure/retry, orientation, and CSP.
-  - `npm run build` => pass; Next.js 16.3.3 production build compiled, typechecked, and statically prerendered `/`, `/_not-found`, and `/manifest.webmanifest`.
-  - `git diff --cached --check` before the product commit => pass with no output; staged scope contained only `apps/web/**`.
-- Browser evidence (real Chromium browser against the built app; terminal behavior remains mock-backed):
-  - Server command: `npx next start -H 127.0.0.1 -p 3212` => both Local and Network URLs reported `http://127.0.0.1:3212`; no deployment.
-  - Playwright CLI entry: `npx --yes --package @playwright/cli playwright-cli -s=terminus-s02-final open http://127.0.0.1:3212`.
-  - `... resize 1440 900` then `... snapshot` => accessible desktop shell; disconnected state, disabled input, labelled simulation, and computed viewport `134 × 23`.
-  - `... click e16`, `... resize 390 844`, then `... snapshot` => connected simulated state, focused input, portrait state `43 × 17`, and seven accessible mobile-key buttons.
-  - `... resize 844 390` then `... snapshot` => landscape state `90 × 8`; mobile key bar remains accessible after the browser-discovered responsive correction.
-  - `... eval "() => ({ innerWidth: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, activeElement: document.activeElement?.id })"` => `{ innerWidth: 844, scrollWidth: 844, activeElement: "terminal-input" }` (no horizontal overflow; focus retained).
-  - `... requests --static` => exactly 9 requests, all `GET http://127.0.0.1:3212/...`; no external, WSS, agent, or control-plane request.
-  - `... console error` => 0 errors and 0 warnings.
-  - `... eval "async () => (await navigator.serviceWorker.getRegistrations()).map((registration) => registration.scope)"` => `http://127.0.0.1:3212/` registered.
-  - `(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3212/).Headers.'Content-Security-Policy'` => CSP present with `connect-src 'self'`, `frame-ancestors 'none'`, and `object-src 'none'`.
-  - `[System.Text.Encoding]::UTF8.GetString((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3212/manifest.webmanifest).Content)` => valid standalone manifest with `any` and `maskable` icon declarations.
-- Mock-backed versus real-path evidence:
-  - Mock-backed: connection lifecycle, input acknowledgement, paste, mobile key sequences, resize calls, disconnect, and failure/retry. The adapter is visibly labelled `SIMULATED UI — NO TERMINAL CONNECTION`, never opens a socket, never executes or retains input, and rejects every supplied destination.
-  - Real browser: responsive layout, accessible roles/names/states, focus, orientation/resize display, no overflow, CSP response header, local-only network request list, manifest, and service-worker registration.
-  - Real terminal/private WSS path: not implemented or tested in S02-001; explicitly deferred to S02-002 after the approved protocol 0.1 contract.
-- Independent reviewer/evidence:
-  - Reviewer: read-only agent `/root/s02_001_independent_review`.
-  - Verdict: PASS against `agents/session-02-web.md`, `docs/DEFINITION_OF_DONE.md`, and applicable `AGENTS.md` boundaries for exact product commit `055692f46ac61228f0592af96f06a99e55e431ce`.
-  - `git diff --quiet 055692f46ac61228f0592af96f06a99e55e431ce -- apps/web` => exit 0; reviewed working tree exactly matched the immutable product commit.
-  - Commit scope inspection => all 24 product files are under Session 02-owned `apps/web/**`; `git diff --check 055692f46ac61228f0592af96f06a99e55e431ce~1 055692f46ac61228f0592af96f06a99e55e431ce` passed.
-  - Independently reproduced `npm ls --depth=0`, `npm run format:check`, `npm run lint`, and `npm run typecheck` => pass with the locked direct graph and no lint/type errors.
-  - Sandboxed test/build attempt received environmental `spawn EPERM`; approved outside-sandbox reruns passed: `npm test` => 3 files and 9 tests passed; `npm run build` => production build passed and statically prerendered `/`, `/_not-found`, and `/manifest.webmanifest`.
-  - Code review confirmed the visibly labelled test double opens no socket, executes/retains no input, rejects every destination, and implements no guessed frames or real WSS path. CSP keeps `connect-src 'self'`; positive, negative, boundary, and failure tests cover the applicable scaffold behavior; no secrets, terminal plaintext logging, browser persistence, or relay path were found.
-  - Reviewer inspected but did not independently reproduce the previously recorded Chromium viewport/browser evidence. Physical iPhone Safari, real terminal/private WSS, deployment, and Session 06 verification remain explicitly out of scope.
-  - Final reviewer `git status --short` => clean. Reviewer concluded the commit satisfies owner-level `done`, not Session 06 `verified`.
-- Assumptions:
-  - S02-001 may proceed because it has no dependency in `coordination/tasks.yaml`.
-  - S01-001 remains incomplete (`review` when the authoritative queue was re-read), so no frame shape, protocol state machine, authentication, destination format, or private WSS behavior was inferred.
-- Blockers/requests:
-  - S02-001: none; owner-level implementation and independent review are complete. Session 01 owns the authoritative queue transition.
-  - S02-002: remains blocked on S01-001 and S02-001 per the queue; Session 02 made no queue edit.
-- Limitations:
-  - Browser evidence is Chromium at desktop and iPhone-sized viewports, not physical iPhone Safari evidence or end-to-end terminal proof.
-  - The service worker intentionally performs no caching so terminal/user data cannot be persisted by this scaffold; offline shell support remains future work.
-  - CSP uses Next-compatible inline script/style allowances for the static scaffold; nonce-based hardening remains unresolved future work, while `connect-src` is restricted to `'self'`.
-  - ESLint 9.39.5 is deprecated upstream but is the current peer-compatible major for eslint-config-next 16.3.3's bundled plugins; upgrading to ESLint 10 must wait for those peer ranges.
-- Product/task commit: `055692f46ac61228f0592af96f06a99e55e431ce`
-- Handoff commit: resolve from branch HEAD after the status-only handoff commit
+- Authoritative queue: Session 01 commit `7422df6d827e20bf8c770d1ea0d0762229121f12`.
+- Protocol consumed: exact Session 01 product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`, wire version `0.1`, subprotocol `terminus.v0_1`.
+
+## Dependency verification
+
+- `S01-001`: owner `session-01`; authoritative state `done`; exact product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`. Its status records an independent PASS and the frozen schema, state machine, accepted/rejected fixtures, security contract, and HMAC vectors consumed here.
+- `S02-001`: owner `session-02`; authoritative state `done`; exact product commit `055692f46ac61228f0592af96f06a99e55e431ce`; status handoff commit `0ded9446187327ade915401bfc053cf51dff829c`. Its status records independent reviewer PASS.
+- `S02-002`: authoritative state `ready` at queue commit `7422df6d827e20bf8c770d1ea0d0762229121f12`; both dependencies were therefore satisfied before implementation began.
+- Queue, shared contracts, governance, or other sessions' paths were not modified.
+
+## Product implementation
+
+- `apps/web/protocol/**`: strict protocol 0.1 types, duplicate-key-aware JSON codec, exact schema/payload validation, canonical fixture runner, transition machine, HMAC proof, credential storage, and endpoint/origin policy.
+- `apps/web/terminal/protocolTerminalAdapter.ts`: exact `wss:` endpoint and HTTPS Origin enforcement, `terminus.v0_1` negotiation, independent sequence handling, pairing/authentication, open/input/output/resize, heartbeat/liveness, detach/resume, authorization expiry, clean close, and fail-closed error handling.
+- Resume acceptance requires the exact unexpired in-memory detached grant and matching session ID. Outbound frames enforce `bufferedAmount + UTF-8 frame bytes <= 65,536`, otherwise `BACKPRESSURE_LIMIT`/1008. Paired credentials accept expiry only in `(now, now + 30 days]`.
+- `apps/web/protocol/credentialStore.ts`: imports raw pairing material directly into a non-extractable HMAC `CryptoKey`; IndexedDB persists only that protected key plus non-secret identifiers/expiry. Resume grants remain memory-only. No local/session storage, cookie, service-worker cache, console logging, terminal plaintext logging, or secret logging was added.
+- `apps/web/components/TerminalShell.tsx` and `app/page.tsx`: select the real protocol adapter only when both exact public endpoint/origin settings are supplied; otherwise preserve the visibly labelled socket-free simulation. Pairing input is transient and cleared before the await boundary. Background visibility detaches and foreground visibility resumes only from detached state.
+- `apps/web/next.config.ts`: `connect-src` defaults to `'self'` and adds only the exact configured `wss://host[:port]` source after policy validation.
+- Added failure coverage for malformed/binary/oversized/duplicate/unknown frames, replay/gap/direction/state errors, wrong subprotocol, insecure or credential-bearing destinations, query-bearing destinations, wrong/non-HTTPS origins, HMAC mutations, expired credentials, over-30-day credentials, resume mismatch/expiry, and outbound backpressure.
+- Locked test-only dependency added: `fake-indexeddb@6.2.5`; final `npm ls --depth=0` passed with the existing locked application/test graph.
+
+## Exact commands and deterministic evidence
+
+- Required-source reads used `Get-Content` for `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/SHARED_CONTRACTS.md`, `docs/DEFINITION_OF_DONE.md`, `agents/session-02-web.md`, `coordination/ownership.yaml`, and this status file.
+- Exact authoritative reads used `git show 7422df6d827e20bf8c770d1ea0d0762229121f12:coordination/tasks.yaml`, the dependency status files at that commit, and `git show`/`git ls-tree -r` against `910b69e24f464bb3e89152f3e5881beb9b706b76` for every protocol/schema/state/fixture/security/auth-vector artifact.
+- `npm run format` => pass; all files formatted or unchanged.
+- `npm run format:check` => pass; all matched files use Prettier style.
+- `npm run lint` => pass; exit 0 with no reported warnings/errors.
+- `npm run typecheck` => pass; `tsc --noEmit` exit 0.
+- `npx vitest run --reporter=verbose` => pass after final repairs: 7 files, 32 tests. The canonical test reads fixtures directly from exact Git commit `910b69e...`; all 27 canonical handshake/transcript fixtures passed, as did the positive HMAC vector and all four negative mutations.
+- `npm test` => sandboxed attempt failed only because Vite could not spawn its config child process (`spawn EPERM`); approved outside-sandbox rerun passed before repairs with 7 files/28 tests, and the final verbose run after repairs passed 7 files/32 tests.
+- `npm run build` => pass after final repairs; Next.js 16.3.3 compiled, typechecked, and statically prerendered `/`, `/_not-found`, and `/manifest.webmanifest`.
+- `$env:NEXT_PUBLIC_TERMINUS_WSS_ENDPOINT='wss://agent.private.invalid/terminal'; $env:NEXT_PUBLIC_TERMINUS_WEB_ORIGIN='https://preview.example.invalid'; npm run build` => pass after final repairs with the protocol-client configuration and exact CSP source.
+- `npm ls --depth=0` => pass; all direct dependencies resolved, including `fake-indexeddb@6.2.5`.
+- `rg -n "console\\.|localStorage|sessionStorage|document\\.cookie|ws://|https?://|Authorization|Cookie|Sec-WebSocket-Protocol" app components protocol terminal next.config.ts securityHeaders.test.ts` => only expected tests/constants and authorization method names; no browser secret/plaintext logging or prohibited persistence path.
+- `git diff --cached --check` before each product commit => pass with no output. Product and repair scopes contained only `apps/web/**`.
+
+## Browser evidence
+
+- `npx next start -H 127.0.0.1 -p 3212` => local production server ready at `http://127.0.0.1:3212`; no deployment.
+- `npx --yes --package @playwright/cli playwright-cli -s=s02-002-browser open http://127.0.0.1:3212` => Chromium opened the built unconfigured application; title `Terminus`.
+- `... resize 1440 900` then `... snapshot` => accessible desktop shell, visibly labelled `SIMULATED UI — NO TERMINAL CONNECTION`, disconnected state, disabled input, and computed viewport `134 × 23`.
+- `... resize 390 844` then `... snapshot` => accessible portrait shell, `43 × 17` viewport, and seven disabled accessible mobile terminal-key controls while disconnected.
+- `... console` => 0 errors and 0 warnings.
+- This browser run intentionally verifies the unconfigured safe fallback and responsive regression only. It does not prove the configured WSS handshake.
+- Attempting a configured local HTTPS browser run with Next's `--experimental-https` first failed in the sandbox on certificate-process permissions, then the approved retry reached a self-signed certificate trust prompt. It was terminated rather than mutating the host trust store; the empty generated `apps/web/certificates` directory was removed. This attempt is not counted as successful evidence.
+
+## Independent review
+
+- Reviewer: read-only agent `/root/s02_002_independent_review`.
+- Initial verdict: FAIL for exact commit `690274fe63ac596e5b36e34a4dd49b553c3abd88`. Findings were missing resume-session identity/expiry enforcement, missing outbound buffer bound, and missing 30-day credential-expiry cap. The reviewer made no edits.
+- Repairs were committed separately at `aec63af0ce7512341555910e59f3617543869c4a`, preserving the failed-review SHA for audit history. The exact cumulative product tip for integration/review is `aec63af0ce7512341555910e59f3617543869c4a`.
+- Final verdict: PASS for exact cumulative product tip `aec63af0ce7512341555910e59f3617543869c4a` at the Session 02 code/deterministic owner gate.
+- Reviewer independently reproduced `npm run format:check`, `npm run lint`, `npm run typecheck`, `npx vitest run --reporter=verbose` (7 files/32 tests), default `npm run build`, configured WSS/origin `npm run build`, cumulative and repair-only `git diff --check`, and clean exact-SHA worktree/scope checks.
+- Reviewer confirmed the three repairs, exact `910b69e...` fixture/HMAC coverage, and Session 02-only cumulative scope.
+- Reviewer limitation: no approved real private WSS integration environment exists. The PASS does not establish a real terminal path, browser Origin-header acceptance by an agent, end-to-end behavior, Session 06 `verified`, integration, deployment, or release.
+
+## Evidence classification and limitations
+
+- Deterministic real code: strict codec/state/crypto/endpoint/storage behavior, exact commit-backed fixtures, production builds, CSP generation, and failure paths.
+- Test-double backed: WebSocket lifecycle, Origin/subprotocol expectations, pairing/auth/open/IO/resize/heartbeat/detach/resume/close, backpressure, and IndexedDB behavior use explicit mock WebSocket/fake IndexedDB boundaries.
+- Real browser: only the unconfigured local responsive/safety fallback was exercised. No approved private agent, exact real WSS destination, or agent Origin allowlist was available, so no live connection or end-to-end claim is made.
+- No physical iPhone Safari run, Session 06 independent verification, merge, push, deployment, DNS/Tailscale mutation, public exposure, or release occurred.
+
+## Commits
+
+- Initial product commit (failed first review, retained for audit): `690274fe63ac596e5b36e34a4dd49b553c3abd88`.
+- Exact cumulative product/task tip after reviewed repairs: `aec63af0ce7512341555910e59f3617543869c4a`.
+- Handoff commit: resolve from branch HEAD after the status-only handoff commit.
