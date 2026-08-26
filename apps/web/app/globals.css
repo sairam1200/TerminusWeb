@@ -193,6 +193,13 @@ h2 {
   background: var(--danger);
 }
 
+.errorCode {
+  margin: 0;
+  color: var(--danger);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.68rem;
+}
+
 .primaryButton,
 .secondaryButton {
   padding: 0.68rem 0.95rem;
@@ -281,6 +288,40 @@ h2 {
   padding: 1rem 1.1rem 1.15rem;
 }
 
+.pairingForm {
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 211, 125, 0.05);
+}
+
+.pairingForm label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 750;
+}
+
+.pairingForm p {
+  margin-bottom: 0.75rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.pairingForm > div {
+  display: flex;
+  gap: 0.65rem;
+}
+
+.pairingForm input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.72rem 0.82rem;
+  color: var(--text);
+  background: rgba(3, 12, 9, 0.82);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .inputComposer label {
   display: block;
   margin-bottom: 0.55rem;
@@ -352,6 +393,11 @@ footer p {
     align-items: flex-end;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  .pairingForm > div {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .terminalViewport {

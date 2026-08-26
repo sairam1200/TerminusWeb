@@ -11,6 +11,10 @@ import {
 } from "react";
 import type { TerminalAdapter, TerminalViewport } from "../terminal/adapter";
 import { MockTerminalAdapter } from "../terminal/mockTerminalAdapter";
+import {
+  ProtocolTerminalAdapter,
+  type ProtocolTerminalAdapterConfig,
+} from "../terminal/protocolTerminalAdapter";
 
 const MOBILE_KEYS = [
   { label: "Escape", value: "\u001b" },
@@ -35,15 +39,27 @@ function measureViewport(element: HTMLElement): TerminalViewport {
 
 export interface TerminalShellProps {
   adapterFactory?: () => TerminalAdapter;
+  protocolConfig?: Pick<
+    ProtocolTerminalAdapterConfig,
+    "endpoint" | "expectedWebOrigin"
+  >;
 }
 
 export function TerminalShell({
-  adapterFactory = () => new MockTerminalAdapter(),
+  adapterFactory,
+  protocolConfig,
 }: TerminalShellProps) {
-  const [adapter] = useState(adapterFactory);
+  const [adapter] = useState<TerminalAdapter>(() =>
+    adapterFactory !== undefined
+      ? adapterFactory()
+      : protocolConfig !== undefined
+        ? new ProtocolTerminalAdapter(protocolConfig)
+        : new MockTerminalAdapter(),
+  );
   const [connectionState, setConnectionState] = useState(adapter.getState());
   const [markers, setMarkers] = useState<string[]>([]);
   const [input, setInput] = useState("");
+  const [pairingCode, setPairingCode] = useState("");
   const [viewport, setViewport] = useState<TerminalViewport>({
     columns: MIN_COLUMNS,
     rows: MIN_ROWS,
@@ -65,6 +81,28 @@ export function TerminalShell({
       unsubscribeOutput();
       void adapter.disconnect();
     };
+  }, [adapter]);
+
+  useEffect(() => {
+    if (adapter.kind !== "protocol-client" || adapter.detach === undefined)
+      return;
+    const detach = adapter.detach.bind(adapter);
+    const visibilityChanged = () => {
+      if (
+        document.visibilityState === "hidden" &&
+        adapter.getState() === "connected"
+      ) {
+        void detach();
+      } else if (
+        document.visibilityState === "visible" &&
+        adapter.getState() === "detached"
+      ) {
+        void adapter.connect();
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
+    return () =>
+      document.removeEventListener("visibilitychange", visibilityChanged);
   }, [adapter]);
 
   useEffect(() => {
@@ -120,6 +158,18 @@ export function TerminalShell({
     }
   };
 
+  const pair = async (event: FormEvent) => {
+    event.preventDefault();
+    if (adapter.pair === undefined || pairingCode.length === 0) return;
+    const transientCode = pairingCode;
+    setPairingCode("");
+    try {
+      await adapter.pair(transientCode);
+    } catch {
+      setConnectionState("error");
+    }
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     send(input);
@@ -138,6 +188,15 @@ export function TerminalShell({
   };
 
   const connected = connectionState === "connected";
+  const protocolClient = adapter.kind === "protocol-client";
+  const busy = [
+    "connecting",
+    "authenticating",
+    "opening",
+    "reconnecting",
+    "detaching",
+    "closing",
+  ].includes(connectionState);
 
   return (
     <main className="workspace">
@@ -164,24 +223,52 @@ export function TerminalShell({
               <span aria-hidden="true" />
               {connectionState}
             </p>
+            {adapter.getErrorCode?.() !== undefined && (
+              <p className="errorCode">{adapter.getErrorCode()}</p>
+            )}
             {connected ? (
+              <>
+                {adapter.detach !== undefined && (
+                  <button
+                    className="secondaryButton"
+                    type="button"
+                    onClick={() => void adapter.detach?.()}
+                  >
+                    Detach
+                  </button>
+                )}
+                <button
+                  className="secondaryButton"
+                  type="button"
+                  onClick={() => void adapter.disconnect()}
+                >
+                  Disconnect
+                </button>
+              </>
+            ) : connectionState === "pairing" ? (
               <button
                 className="secondaryButton"
                 type="button"
                 onClick={() => void adapter.disconnect()}
               >
-                Disconnect
+                Cancel
               </button>
             ) : (
               <button
                 className="primaryButton"
                 type="button"
-                disabled={connectionState === "connecting"}
+                disabled={busy}
                 onClick={() => void connect()}
               >
-                {connectionState === "error"
-                  ? "Retry simulation"
-                  : "Start simulation"}
+                {connectionState === "detached"
+                  ? "Reconnect"
+                  : connectionState === "error"
+                    ? protocolClient
+                      ? "Retry private connection"
+                      : "Retry simulation"
+                    : protocolClient
+                      ? "Connect privately"
+                      : "Start simulation"}
               </button>
             )}
           </div>
@@ -191,27 +278,64 @@ export function TerminalShell({
           ref={terminalRef}
           className="terminalViewport"
           role="log"
-          aria-label="Simulated terminal output"
+          aria-label={
+            protocolClient
+              ? "Private terminal output"
+              : "Simulated terminal output"
+          }
           aria-live="polite"
           data-columns={viewport.columns}
           data-rows={viewport.rows}
           tabIndex={0}
           onClick={() => inputRef.current?.focus()}
         >
-          <p className="safetyNotice">
-            No agent, shell, protocol, or network destination is connected.
-          </p>
+          {!protocolClient && (
+            <p className="safetyNotice">
+              No agent, shell, protocol, or network destination is connected.
+            </p>
+          )}
           {markers.map((marker, index) => (
             <p className="marker" key={`${marker}-${index}`}>
               {marker}
             </p>
           ))}
-          {!connected && (
+          {!connected && !protocolClient && (
             <p className="terminalHint">
               Start the local simulation to exercise the interface.
             </p>
           )}
         </div>
+
+        {connectionState === "pairing" && adapter.pair !== undefined && (
+          <form className="pairingForm" onSubmit={pair}>
+            <label htmlFor="pairing-code">One-time pairing code</label>
+            <p>
+              Confirm this browser locally on the Windows agent. The code is
+              never stored.
+            </p>
+            <div>
+              <input
+                id="pairing-code"
+                type="password"
+                inputMode="text"
+                autoComplete="off"
+                spellCheck={false}
+                minLength={22}
+                maxLength={22}
+                required
+                value={pairingCode}
+                onChange={(event) => setPairingCode(event.target.value)}
+              />
+              <button
+                className="primaryButton"
+                type="submit"
+                disabled={pairingCode.length !== 22}
+              >
+                Pair locally
+              </button>
+            </div>
+          </form>
+        )}
 
         <div
           className="viewportMeta"
@@ -242,7 +366,9 @@ export function TerminalShell({
         </div>
 
         <form className="inputComposer" onSubmit={submit}>
-          <label htmlFor="terminal-input">Simulation input</label>
+          <label htmlFor="terminal-input">
+            {protocolClient ? "Terminal input" : "Simulation input"}
+          </label>
           <div>
             <textarea
               id="terminal-input"
@@ -252,8 +378,12 @@ export function TerminalShell({
               disabled={!connected}
               placeholder={
                 connected
-                  ? "Input is acknowledged, never executed"
-                  : "Simulation is disconnected"
+                  ? protocolClient
+                    ? "Send input directly to the private agent"
+                    : "Input is acknowledged, never executed"
+                  : protocolClient
+                    ? "Private terminal is disconnected"
+                    : "Simulation is disconnected"
               }
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={keyDown}
@@ -271,7 +401,11 @@ export function TerminalShell({
       </section>
 
       <footer>
-        <p>Terminal traffic is not routed through this web scaffold.</p>
+        <p>
+          {protocolClient
+            ? "Terminal traffic connects directly to the configured private agent."
+            : "Terminal traffic is not routed through this web scaffold."}
+        </p>
       </footer>
     </main>
   );
