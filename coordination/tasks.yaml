@@ -35,7 +35,7 @@ tasks:
 
   - id: S03-002
     owner: session_03
-    state: ready
+    state: done
     title: Implement private WSS protocol 0.1 endpoint
     depends_on: [S01-001, S03-001]
     evidence: Contract fixtures, origin checks, auth rejection, and listener-scope proof.
@@ -84,14 +84,14 @@ tasks:
 
   - id: S04-002
     owner: session_04
-    state: ready
+    state: done
     title: Remediate control-plane identity binding and final-owner invariants
     depends_on: [S04-001, S05-003]
     evidence: All seven S05-003 findings fixed with fail-closed authorization inputs, tenant-scoped pairing binding, transactional/database final-owner protection, and regression/concurrency tests.
 
   - id: S05-004
     owner: session_05
-    state: blocked
+    state: ready
     title: Re-review control-plane remediation and final-owner invariants
     depends_on: [S04-002]
     evidence: Independent exact-commit re-review reproduces no S05-003 fail-open findings and passes stale/concurrent owner-revocation checks.
