@@ -7,6 +7,8 @@ import {
 import {
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_LIVENESS_MS,
+  MAX_FRAME_BYTES,
+  MAX_OUTBOUND_BUFFERED_BYTES,
   MAX_TERMINAL_INPUT_BYTES,
   PROTOCOL_SUBPROTOCOL,
   PROTOCOL_VERSION,
@@ -40,6 +42,7 @@ interface SocketCloseEvent {
 
 export interface WebSocketPort {
   binaryType: BinaryType;
+  readonly bufferedAmount: number;
   readonly protocol: string;
   readonly readyState: number;
   onclose: ((event: SocketCloseEvent) => void) | null;
@@ -182,7 +185,11 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           supportedVersions: [PROTOCOL_VERSION],
         })
           .then(resolve)
-          .catch(reject);
+          .catch((error: unknown) => {
+            const violation = asProtocolViolation(error);
+            this.fail(violation);
+            reject(violation);
+          });
       };
       socket.onerror = () => {
         const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
@@ -337,6 +344,14 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         break;
       case "session_opened":
       case "session_resumed":
+        if (
+          frame.type === "session_resumed" &&
+          (this.resumeGrant === undefined ||
+            this.resumeGrant.monotonicDeadline <= this.monotonicNow() ||
+            frame.payload.sessionId !== this.resumeGrant.sessionId)
+        ) {
+          throw new ProtocolViolation("RESUME_REJECTED", 1008);
+        }
         this.sessionId = String(frame.payload.sessionId);
         if (frame.type === "session_resumed") this.resumeGrant = undefined;
         this.setState("connected");
@@ -466,8 +481,16 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       sequence: this.machine.getSnapshot().nextSequence.client_to_agent,
       payload,
     };
+    const serialized = JSON.stringify(frame);
+    const frameBytes = new TextEncoder().encode(serialized).length;
+    if (frameBytes > MAX_FRAME_BYTES) {
+      throw new ProtocolViolation("FRAME_TOO_LARGE", 1009);
+    }
+    if (this.socket.bufferedAmount + frameBytes > MAX_OUTBOUND_BUFFERED_BYTES) {
+      throw new ProtocolViolation("BACKPRESSURE_LIMIT", 1008);
+    }
     await this.machine.apply("client_to_agent", frame);
-    this.socket.send(JSON.stringify(frame));
+    this.socket.send(serialized);
   }
 
   private startHeartbeat(): void {

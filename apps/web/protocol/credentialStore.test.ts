@@ -48,4 +48,29 @@ describe("IndexedDbCredentialStore", () => {
     expect(await store.loadCredential()).toBeUndefined();
     expect(await store.getClientInstanceId()).toBe(clientInstanceId);
   });
+
+  it("accepts the exact 30-day limit and rejects an overlong credential", async () => {
+    const store = new IndexedDbCredentialStore(
+      new IDBFactory(),
+      cryptoProvider,
+      () => Date.parse("2026-08-26T12:00:00.000Z"),
+    );
+
+    await expect(
+      store.saveCredential(
+        "30000000-0000-4000-8000-000000000001",
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "2026-09-25T12:00:00.000Z",
+      ),
+    ).resolves.toMatchObject({
+      credentialId: "30000000-0000-4000-8000-000000000001",
+    });
+    await expect(
+      store.saveCredential(
+        "30000000-0000-4000-8000-000000000001",
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "2026-09-25T12:00:00.001Z",
+      ),
+    ).rejects.toThrow("Credential metadata is invalid or expired.");
+  });
 });

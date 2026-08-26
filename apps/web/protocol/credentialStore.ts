@@ -1,5 +1,6 @@
 import { importCredentialKey } from "./auth";
 import { isUuidV4 } from "./codec";
+import { MAX_CREDENTIAL_LIFETIME_MS } from "./constants";
 
 const DATABASE_NAME = "terminus-private-credentials-v0_1";
 const DATABASE_VERSION = 1;
@@ -109,10 +110,12 @@ export class IndexedDbCredentialStore implements CredentialStore {
     expiresAt: string,
   ): Promise<StoredCredential> {
     const expiry = new Date(expiresAt).valueOf();
+    const issuedAt = this.now();
     if (
       !isUuidV4(credentialId) ||
       !Number.isFinite(expiry) ||
-      expiry <= this.now()
+      expiry <= issuedAt ||
+      expiry - issuedAt > MAX_CREDENTIAL_LIFETIME_MS
     ) {
       throw new Error("Credential metadata is invalid or expired.");
     }
@@ -190,6 +193,16 @@ export class MemoryCredentialStore implements CredentialStore {
     credentialSecret: string,
     expiresAt: string,
   ): Promise<StoredCredential> {
+    const expiry = new Date(expiresAt).valueOf();
+    const issuedAt = this.now();
+    if (
+      !isUuidV4(credentialId) ||
+      !Number.isFinite(expiry) ||
+      expiry <= issuedAt ||
+      expiry - issuedAt > MAX_CREDENTIAL_LIFETIME_MS
+    ) {
+      throw new Error("Credential metadata is invalid or expired.");
+    }
     const key = await importCredentialKey(
       credentialSecret,
       this.cryptoProvider,
