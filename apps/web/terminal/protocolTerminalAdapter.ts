@@ -5,6 +5,7 @@ import {
   protocolErrorCode,
 } from "../protocol/codec";
 import {
+  AUTH_CHALLENGE_LIFETIME_MS,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_LIVENESS_MS,
   MAX_FRAME_BYTES,
@@ -419,12 +420,13 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   }
 
   private async answerChallenge(frame: ProtocolFrame): Promise<void> {
-    if (
-      this.credential === undefined ||
-      new Date(String(frame.payload.expiresAt)).valueOf() <= this.now()
-    ) {
+    if (this.credential === undefined) {
       throw new ProtocolViolation("AUTHENTICATION_FAILED", 1008);
     }
+    // Protocol timeouts use a local monotonic clock. The wire timestamp is
+    // schema-validated metadata, but comparing it to the browser wall clock
+    // makes a valid fresh challenge fail when the phone and agent clocks differ.
+    const monotonicDeadline = this.monotonicNow() + AUTH_CHALLENGE_LIFETIME_MS;
     const proof = await computeAuthenticationProof(
       this.credential.key,
       frame.connectionId,
@@ -432,7 +434,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       String(frame.payload.challenge),
       this.cryptoProvider,
     );
-    if (new Date(String(frame.payload.expiresAt)).valueOf() <= this.now()) {
+    if (this.monotonicNow() >= monotonicDeadline) {
       throw new ProtocolViolation("AUTHENTICATION_FAILED", 1008);
     }
     await this.sendFrame("auth_response", {

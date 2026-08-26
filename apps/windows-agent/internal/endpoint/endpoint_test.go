@@ -746,6 +746,21 @@ func TestCanonicalAuthenticationProof(t *testing.T) {
 	}
 }
 
+func TestGeneratedCredentialExpiresInsideThirtyDayClientBoundary(t *testing.T) {
+	now := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
+	credential, err := generateCredential(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := now.Add(30*24*time.Hour - 5*time.Minute)
+	if !credential.ExpiresAt.Equal(want) {
+		t.Fatalf("expiry = %s, want %s", credential.ExpiresAt, want)
+	}
+	if !credential.ExpiresAt.Before(now.Add(30 * 24 * time.Hour)) {
+		t.Fatal("credential expiry must leave client clock-skew headroom")
+	}
+}
+
 func TestServeTLSRejectsNonLoopbackListener(t *testing.T) {
 	listener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {

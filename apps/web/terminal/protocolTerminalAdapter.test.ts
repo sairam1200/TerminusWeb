@@ -164,6 +164,46 @@ describe("ProtocolTerminalAdapter", () => {
     await waitFor(() => expect(adapter.getState()).toBe("disconnected"));
   });
 
+  it("answers a fresh challenge when the browser wall clock is ahead", async () => {
+    const clientNow = now + 5 * 60 * 1000;
+    const store = new MemoryCredentialStore(cryptoProvider, () => clientNow);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(
+      store,
+      sockets,
+      () => 0,
+      () => clientNow,
+    );
+
+    const connection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = sockets[0] as MockWebSocket;
+    socket.open();
+    await connection;
+    const hello = socket.sentFrame(0);
+    await socket.receive(
+      agentFrame(hello.connectionId, 0, "hello_ack", {
+        selectedVersion: "0.1",
+        agentId: "50000000-0000-4000-8000-000000000001",
+      }),
+    );
+    await socket.receive(
+      agentFrame(hello.connectionId, 1, "auth_challenge", {
+        challengeId,
+        challenge,
+        expiresAt: "2026-08-26T12:00:10.000Z",
+      }),
+    );
+
+    await waitFor(() => expect(socket.sentFrame(1).type).toBe("auth_response"));
+    expect(adapter.getErrorCode()).toBeUndefined();
+  });
+
   it("uses a transient pairing code and stores the returned credential as a key", async () => {
     const store = new MemoryCredentialStore(cryptoProvider, () => now);
     const sockets: MockWebSocket[] = [];
@@ -350,6 +390,7 @@ function createAdapter(
   store: MemoryCredentialStore,
   sockets: MockWebSocket[],
   monotonicNow?: () => number,
+  wallNow: () => number = () => now,
 ) {
   return new ProtocolTerminalAdapter({
     endpoint,
@@ -358,7 +399,7 @@ function createAdapter(
     cryptoProvider,
     getCurrentOrigin: () => webOrigin,
     monotonicNow,
-    now: () => now,
+    now: wallNow,
     webSocketFactory: (url, subprotocol) => {
       const socket = new MockWebSocket(url, subprotocol);
       sockets.push(socket);
