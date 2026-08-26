@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/sys/windows"
 	"terminus/windows-agent/internal/endpoint"
+	"terminus/windows-agent/internal/protocol"
 	"terminus/windows-agent/internal/terminal"
 )
 
@@ -133,14 +134,19 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- endpoint.ServeTLS(listener, tlsConfig, healthAndEndpoint(endpointInstance)) }()
 	revocationCtx, cancelRevocation := context.WithCancel(context.Background())
-	defer cancelRevocation()
-	go revocationLoop(revocationCtx, endpointInstance, store)
+	revocationDone := make(chan struct{})
+	go func() { defer close(revocationDone); revocationLoop(revocationCtx, endpointInstance, store) }()
 	var cleanupOnce sync.Once
 	var cleanupErr error
 	var serveResult error
 	var serveResultReady bool
 	cleanup := func() error {
 		cleanupOnce.Do(func() {
+			cancelRevocation()
+			select {
+			case <-revocationDone:
+			case <-time.After(2 * time.Second):
+			}
 			closeErr := endpointInstance.Close()
 			listenerErr := listener.Close()
 			var serveErr error
@@ -164,9 +170,11 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 				errs = append(errs, serveErr)
 			}
 			if ephemeralStore {
-				if err := store.Reset(context.Background()); err != nil {
+				resetCtx, cancelReset := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := store.Reset(resetCtx); err != nil {
 					errs = append(errs, err)
 				}
+				cancelReset()
 			}
 			cleanupErr = errors.Join(errs...)
 		})
@@ -253,10 +261,11 @@ func boundedLocalApproval(ctx context.Context, approval endpoint.PairingApproval
 		return false
 	}
 	result := make(chan bool, 1)
-	request := approvalRequest{ctx: ctx, result: result}
+	request := approvalRequest{ctx: ctx, approval: approval, result: result}
 	select {
 	case approvalConsoleInstance.requests <- request:
 	case <-ctx.Done():
+		approvalConsoleInstance.abort()
 		return false
 	}
 	select {
@@ -268,12 +277,18 @@ func boundedLocalApproval(ctx context.Context, approval endpoint.PairingApproval
 }
 
 type approvalRequest struct {
-	ctx    context.Context
-	result chan bool
+	ctx      context.Context
+	approval endpoint.PairingApproval
+	result   chan bool
 }
 
 type approvalConsole struct {
-	requests chan approvalRequest
+	requests  chan approvalRequest
+	abortOnce sync.Once
+}
+
+func (c *approvalConsole) abort() {
+	c.abortOnce.Do(func() { _ = os.Stdin.Close() })
 }
 
 var approvalConsoleInstance = newApprovalConsole()
@@ -290,7 +305,7 @@ func (c *approvalConsole) run() {
 		if request.ctx.Err() != nil {
 			continue
 		}
-		fmt.Fprint(os.Stderr, "pairing request received; approve? [y/N] ")
+		fmt.Fprintf(os.Stderr, "pairing request origin=%s client=%s device=%s; approve? [y/N] ", request.approval.Origin, request.approval.ClientInstanceID, request.approval.DeviceIdentity)
 		line, err := reader.ReadString('\n')
 		approved := err == nil && strings.EqualFold(strings.TrimSpace(line), "y")
 		if request.ctx.Err() == nil {
@@ -303,7 +318,14 @@ func requestRevocation(storePath, credentialID string) error {
 	if storePath == "" || credentialID == "" {
 		return errors.New("store path and credential ID are required")
 	}
-	marker := storePath + ".revoke." + credentialID
+	if !protocol.ValidUUID(credentialID) {
+		return errors.New("credential ID must be a lowercase UUIDv4")
+	}
+	directory := filepath.Join(filepath.Dir(storePath), ".terminus-revocations")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return fmt.Errorf("create revocation request directory: %w", err)
+	}
+	marker := filepath.Join(directory, credentialID+".request")
 	file, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil && !errors.Is(err, os.ErrExist) {
 		return fmt.Errorf("create revocation request: %w", err)
@@ -322,15 +344,21 @@ func revocationLoop(ctx context.Context, ep *endpoint.Endpoint, store *dpapiStor
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			markers, err := filepath.Glob(store.path + ".revoke.*")
+			directory := filepath.Join(filepath.Dir(store.path), ".terminus-revocations")
+			entries, err := os.ReadDir(directory)
 			if err != nil {
 				continue
 			}
-			for _, marker := range markers {
-				credentialID := strings.TrimPrefix(marker, store.path+".revoke.")
-				if credentialID == "" {
+			for _, entry := range entries {
+				name := entry.Name()
+				if entry.IsDir() || !strings.HasSuffix(name, ".request") {
 					continue
 				}
+				credentialID := strings.TrimSuffix(name, ".request")
+				if !protocol.ValidUUID(credentialID) {
+					continue
+				}
+				marker := filepath.Join(directory, name)
 				if err := ep.RevokeCredential(ctx, credentialID); err == nil {
 					_ = os.Remove(marker)
 				}
