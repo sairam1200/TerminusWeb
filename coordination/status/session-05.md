@@ -1,29 +1,31 @@
 # Session 05 Status
 
-- Current task: S05-001 — Produce threat model and proposed deny-by-default Tailscale policy
+- Current task: S05-003 — Independently review S04-001 control-plane isolation
 - State: done (owner checks and named independent review complete; Session 06 verification not yet performed)
 - Branch: `session/05-security-network`
+- Authoritative queue: Session 01 commit `7422df6d827e20bf8c770d1ea0d0762229121f12`; S05-003 was ready and depended on S04-001.
+- Dependency reviewed: S04-001 product commit `83d110aa3f0bf582f811ce6922234f2183b2b93d`; Session 04 handoff branch tip `f1adc0afbb0b59b6c1a64b2cc1f9c49d90c74bb7`.
 - Files changed in product/task commit:
-  - `docs/security/S05-001-threat-model.md`
-  - `infrastructure/tailscale/README.md`
-  - `infrastructure/tailscale/policy.fragment.template.hujson`
-  - `tests/security/Test-S05-001.ps1`
+  - `docs/security/S05-003-control-plane-review.md`
+  - `tests/security/S05-003-authorization-review.mjs`
+  - `tests/security/Test-S05-003-migration-review.ps1`
+  - `coordination/requests/from-05-to-04-s05-003-control-plane-findings.request.md` (immutable cross-session request)
+- Findings reproduced from exact S04-001 source:
+  - CP-AUTH-001..004: missing tenant, host, or membership identity fields fail open.
+  - CP-AUTH-005: pairing identity is not consumed/required by authorization.
+  - CP-AUTH-006: owner role assignment target without tenant/membership identity is allowed.
+  - CP-DB-001: migration lacks a database-level final-owner guard; stale/racy revocation can remove the final owner.
 - Commands/evidence:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-001.ps1` — PASS before and after the product commit; confirmed the proposal has one narrow grant, unresolved live tokens, no SSH/ACL/node-attribute/auto-approver section, and the required allow/deny policy assertions. This was a static local check, not Tailscale compilation or service proof.
-  - `git diff --cached --check` — PASS before the product commit.
-  - `git diff --check HEAD^ HEAD` — PASS after the product commit.
-  - `git show --stat --oneline --decorate --no-renames HEAD` — product commit contains four Session 05-owned files and 465 inserted lines.
-  - `git status --short --branch` — clean after the product commit on `session/05-security-network`.
-  - Primary Tailscale sources checked on 2026-08-26: grants syntax, tailnet policy/test syntax, targets/tags, Serve, Funnel, and policy-management documentation at `https://tailscale.com/docs/reference/syntax/grants`, `https://tailscale.com/docs/reference/syntax/policy-file`, `https://tailscale.com/docs/reference/targets-and-selectors`, `https://tailscale.com/docs/features/tags`, `https://tailscale.com/docs/reference/examples/serve`, `https://tailscale.com/docs/features/tailscale-funnel`, and `https://tailscale.com/docs/features/tailnet-policy-file/manage-tailnet-policies`.
-  - No tailnet sign-in, live inspection, policy compilation, policy mutation, device/tag change, Serve/Funnel change, DNS change, or service access was performed.
+  - `git show 83d110aa3f0bf582f811ce6922234f2183b2b93d:services/control-plane/src/authorization.mjs | node tests/security/S05-003-authorization-review.mjs` — exit 1 as expected; six findings reproduced, while explicit cross-tenant mismatch controls were denied.
+  - `git show 83d110aa3f0bf582f811ce6922234f2183b2b93d:infrastructure/database/migrations/0001_control_plane.sql | powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-003-migration-review.ps1` — exit 1 as expected; CP-DB-001 reproduced; RLS/composite-tenant-FK controls confirmed.
+  - `node --check tests/security/S05-003-authorization-review.mjs` — PASS.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-001.ps1` — PASS regression.
+  - `git diff --check` and exact-commit diff checks — PASS.
+  - No Session 04 product files or live infrastructure were modified or accessed.
 - Independent reviewer/evidence:
-  - Reviewer: `/root/s05_001_reviewer` (read-only Codex reviewer).
-  - Post-commit PASS against exact commit `ccc6a11c97b26223e8aa8d7d9c0b4fda5eba9a3e`; exact expected-path and Session 05 ownership assertions passed, all four pre-review SHA-256 values matched, `git diff --check ccc6a11^ ccc6a11` passed, `tests/security/Test-S05-001.ps1` passed, working copies matched the commit, and `git status --short` was clean.
-  - Reviewer reported no findings and performed no edits or live tailnet/service access.
-- Assumptions:
-  - The proposal uses `group:terminus-terminal-operators` as the exact source selector and `tag:terminus-windows-agent` as the exact destination selector, but every real identity and the private Serve HTTPS port remain unresolved until separately authorized live verification.
-  - Tailscale grants are additive; the complete current policy must be audited for broader matching ACLs/grants before this fragment can be considered deny-by-default in a real tailnet.
-  - A Windows service node tag and the browser private-network compatibility path remain subject to explicit validation; the proposal does not claim either exists.
-- Blockers/requests: none for S05-001. Live substitution, compilation, application, and endpoint testing intentionally require separate explicit authorization. S05-002 remains dependency-blocked by the task queue.
-- Product/task commit: `ccc6a11c97b26223e8aa8d7d9c0b4fda5eba9a3e`
-- Handoff commit: resolve from branch HEAD after the status-only handoff commit
+  - Reviewer: `/root/s05_003_reviewer` (read-only Codex reviewer).
+  - Post-commit PASS against exact product commit `f4bbcd01b7fd45fdf52622c94b8875a6ad3f3ce0`; intended paths and hashes matched, syntax and diff checks passed, exact-source tests reproduced the expected findings, and worktree was clean. Reviewer performed no edits or live access.
+- Assumptions: findings are proposed remediation inputs; no live policy, service, or database state was inferred. Existing explicit mismatch denials and metadata-only boundaries remain intact.
+- Blockers/requests: remediation requires Session 04 source ownership; immutable request `coordination/requests/from-05-to-04-s05-003-control-plane-findings.request.md` records the seven findings. Session 06 verification remains pending.
+- Product/task commit: `f4bbcd01b7fd45fdf52622c94b8875a6ad3f3ce0`
+- Handoff commit: resolve from branch HEAD after the status-only handoff commit.
