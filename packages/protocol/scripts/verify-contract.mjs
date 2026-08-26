@@ -174,6 +174,13 @@ function validateTranscript(t) {
   return { connectionState: connection, sessionState: session };
 }
 
+function authenticateResponse(response, vector) {
+  if (response.connectionId !== vector.connectionId || response.challengeId !== vector.challengeId || !canonicalB64(response.proof, 32)) return 'AUTHENTICATION_FAILED';
+  const expected = crypto.createHmac('sha256', b64(vector.credentialSecret)).update(Buffer.from(vector.messageHex, 'hex')).digest();
+  const actual = b64(response.proof);
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected) ? 'AUTHENTICATED' : 'AUTHENTICATION_FAILED';
+}
+
 if (schema.$schema !== 'https://json-schema.org/draft/2020-12/schema' || machine.contractVersion !== '0.1' || accepted.contractVersion !== '0.1' || rejected.contractVersion !== '0.1' || vectors.contractVersion !== '0.1') throw new Error('contract version/schema mismatch');
 const ids = new Set();
 for (const group of [accepted.handshakes, accepted.transcripts, rejected.handshakes, rejected.transcripts]) for (const c of group) { if (!c.id || ids.has(c.id)) throw new Error(`duplicate fixture id: ${c.id}`); ids.add(c.id); }
@@ -190,6 +197,7 @@ for (const c of rejected.transcripts) {
 for (const v of vectors.vectors) {
   const proof = crypto.createHmac('sha256', b64(v.credentialSecret)).update(Buffer.from(v.messageHex, 'hex')).digest('base64url');
   if (proof !== v.proof) throw new Error(`auth vector mismatch: ${v.id}`);
+  if (authenticateResponse({ connectionId: v.connectionId, challengeId: v.challengeId, proof: v.proof }, v) !== 'AUTHENTICATED') throw new Error(`positive auth rejected: ${v.id}`);
   const authMessage = (connectionId, challengeId, challenge) => Buffer.concat([Buffer.from('Terminus/0.1/auth\0'), Buffer.from(connectionId), Buffer.from('\0'), Buffer.from(challengeId), Buffer.from('\0'), b64(challenge)]);
   for (const mutation of vectors.negativeMutations) {
     if (mutation.expected !== 'AUTHENTICATION_FAILED') throw new Error(`unexpected mutation expectation: ${mutation.id}`);
@@ -198,6 +206,9 @@ for (const v of vectors.vectors) {
     const challenge = mutation.field === 'challenge' ? mutation.value : v.challenge;
     const candidate = mutation.field === 'proof' ? mutation.value : crypto.createHmac('sha256', b64(v.credentialSecret)).update(authMessage(connectionId, challengeId, challenge)).digest('base64url');
     if (candidate === v.proof) throw new Error(`negative mutation did not change proof: ${mutation.id}`);
+    const response = { connectionId, challengeId, proof: candidate };
+    if (mutation.field === 'challenge') response.challengeId = v.challengeId;
+    if (authenticateResponse(response, v) !== 'AUTHENTICATION_FAILED') throw new Error(`negative mutation accepted: ${mutation.id}`);
   }
 }
 console.log(`protocol 0.1 verified: schema semantics, ${accepted.transcripts.length + rejected.transcripts.length} transcripts, ${ids.size} fixtures, ${vectors.vectors.length} positive auth vector(s), ${vectors.negativeMutations.length} negative auth mutations`);
