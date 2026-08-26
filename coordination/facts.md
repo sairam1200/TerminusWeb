@@ -38,3 +38,9 @@ Session 01 owns this file. Other sessions submit proposed corrections through `c
   `1.3.6.1.5.5.7.3.2` before live verification. Session 03 owns host startup,
   Session 05 owns Serve/private-path controls, and Session 06 owns independent
   verification.
+- Session 02 confirmed the exact branch tip on GitHub, but Vercel's first
+  deployment of the newly created empty project was automatically classified
+  as Production and was deleted. The current authorization does not permit a
+  temporary Production-classified bootstrap; an already-initialized Preview
+  project or a separately authorized platform decision is required before an
+  exact HTTPS Origin can be frozen.

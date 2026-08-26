@@ -120,7 +120,7 @@ tasks:
 
   - id: S02-003
     owner: session_02
-    state: ready
+    state: review
     title: Publish the authorized Session 02 source branch for Preview bootstrap
     depends_on: [S02-001]
     requires_user_authorization: true
@@ -133,6 +133,7 @@ tasks:
     depends_on: [S02-003, S06-001]
     requires_user_authorization: true
     evidence: Preview-only deployment of the exact Session 02 source with Root Directory apps/web; initial WSS endpoint unset; exact final serialized HTTPS Origin recorded, NEXT_PUBLIC_TERMINUS_WEB_ORIGIN set to that origin, and redeployment metadata captured; no production promotion, DNS change, or terminal proxy.
+    blocker: The first deployment of the empty Vercel project was automatically classified Production and deleted; current authorization does not permit retrying or temporarily accepting that classification.
 
   - id: S05-006
     owner: session_05
