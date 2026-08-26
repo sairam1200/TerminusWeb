@@ -6,8 +6,9 @@ listener, implement a wire protocol, install a service, or publish an endpoint.
 The adapter starts the inbox Windows PowerShell executable with the caller's
 token only after proving that the token is not elevated. The process is created
 suspended, assigned to a kill-on-close Job Object, and then resumed. Closing,
-context cancellation, and timeouts terminate the complete job before releasing
-ConPTY and pipe handles.
+normal shell exit, explicit close, context cancellation, timeouts, and agent
+failure all release or terminate the complete job before ConPTY and pipe
+handles are discarded.
 
 ## Development checks
 
@@ -28,6 +29,9 @@ output, and must not be run from an elevated shell.
 
 - Microsoft, Creating a Pseudoconsole session:
   <https://learn.microsoft.com/windows/console/creating-a-pseudoconsole-session>
+- Microsoft Terminal discussion, redirected parent standard handles with
+  ConPTY (`STARTF_USESTDHANDLES` with null handles):
+  <https://github.com/microsoft/terminal/discussions/15814>
 - Microsoft, ClosePseudoConsole:
   <https://learn.microsoft.com/windows/console/closepseudoconsole>
 - Microsoft, Job Objects:
