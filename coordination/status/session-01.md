@@ -152,3 +152,48 @@
   - Session 06: `coordination/requests/from-01-to-06-s06-002-verification-inputs.request.md` — prepare the exact-SHA S06-002 preflight and refuse to claim verified from labelled doubles.
 - Vercel Preview bootstrap remains a coordination prerequisite, not a deployment performed by Session 01. No Vercel configuration, push, merge, cherry-pick, listener, certificate installation, Tailscale/Serve/Funnel change, or public exposure was performed.
 - S01-002 remains blocked until Session 06 independently verifies the exact producer commits and records the required real Origin/private-path evidence. Once that handoff exists, Session 01 will create the manifest from product commits only, in the declared dependency order.
+
+## Authorized private bootstrap coordination (2026-08-26)
+
+- The user explicitly authorized a Preview-only push/deployment and one private
+  raw-TCP Serve route for personal testing, while excluding `main` integration,
+  production promotion, public exposure, Funnel, DNS changes, grant
+  broadening, SSH/RDP, LAN/public binds, and terminal proxying through Vercel.
+  This authorization is recorded in `coordination/facts.md`.
+- Exact Session 05 recommendation product `54625e729437c0271b117b4eb79cf19e59d07cb8`
+  and status `d459d8b1fba86d452efc446f75bc2e8a62c9ae0f` were consumed with
+  `git show`. The recommendation selects raw TCP Serve because HTTPS Serve
+  termination would consume the browser client certificate; it remains a
+  recommendation only until live evidence exists. Its exact transport response
+  is `eb4530f299862da4aca1d7ebcd2cca896cd4bc10`.
+- Exact Session 03 request `672a8d593b453a9e72187ac4ba39e5b71ca1d89e` was
+  consumed. It requests the exact Vercel Origin and private-publication decision
+  and confirms that S03-004 has not started. Session 06's committed preflight
+  response identifies a hostname conflict (`sai.tailf8dcea.ts.net` versus
+  `sai.tail98bed6.ts.net`); this authorization freezes `sai.tailf8dcea.ts.net`,
+  but Session 05/06 must recheck the live name before accepting the route.
+- The queue/facts commit `f0040405f6de6445ddeb303dfcaf6a47894b2463` records
+  the authorized gates: S02-003 is `ready`; S06-004 (Preview bootstrap),
+  S03-004 (host start), and S05-006 (raw-TCP Serve/private-path proof) remain
+  `blocked` until their exact predecessor evidence exists. S02-002,
+  S05-005, S05-002, S06-002, S01-002, S01-003, and S06-003 remain blocked.
+- Immutable instruction commit
+  `af480c979ebedd7c36070fee9ed182c43154ce02` contains the owner-scoped
+  instructions below. Each target must read its exact request path with
+  `git show`; no Session 01 implementation or live operation was performed:
+  - Session 02 / `coordination/requests/from-01-to-02-s02-003-authorized-github-preview-source.request.md`:
+    verify/push only exact branch tip `d479f5b3f058d01dccc3258e6c50bb7d1865e52e`.
+  - Session 03 / `coordination/requests/from-01-to-03-s03-004-authorized-host-start.request.md`:
+    after the exact Preview Origin is available, regenerate/verify explicit
+    ClientAuth EKU and start only the non-elevated loopback host.
+  - Session 05 / `coordination/requests/from-01-to-05-s05-006-authorized-raw-tcp-serve.request.md`:
+    after host and review gates, configure exactly one raw-TCP Serve route and
+    run the allowed/denied matrix with rollback.
+  - Session 06 / `coordination/requests/from-01-to-06-s06-004-vercel-preview-and-s06-002.request.md`:
+    create the Preview with WSS unset, freeze the exact Origin, redeploy, then
+    independently verify S06-002 only after the endpoint/path evidence exists.
+- A read-only `git ls-remote` from Session 01 could not reach GitHub because the
+  configured proxy refused the connection; Session 02 must perform the
+  authoritative remote-presence check. No push, Vercel deployment, certificate
+  generation/installation, host start, Serve/Funnel change, merge, or public
+  exposure occurred in this session.
