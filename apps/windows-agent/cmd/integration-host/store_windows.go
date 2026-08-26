@@ -35,6 +35,8 @@ type processStoreLock struct {
 	over windows.Overlapped
 }
 
+const processStoreLockMaximum = 5 * time.Second
+
 type storedCredential struct {
 	ID        string    `json:"id"`
 	Secret    []byte    `json:"secret"`
@@ -172,6 +174,9 @@ func (s *dpapiStore) Reset(ctx context.Context) error {
 }
 
 func (s *dpapiStore) lockProcess(ctx context.Context) (*processStoreLock, error) {
+	if ctx == nil {
+		return nil, errors.New("nil context")
+	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
 		return nil, fmt.Errorf("create credential store lock directory: %w", err)
 	}
@@ -180,6 +185,8 @@ func (s *dpapiStore) lockProcess(ctx context.Context) (*processStoreLock, error)
 		return nil, fmt.Errorf("open credential store lock: %w", err)
 	}
 	lock := &processStoreLock{file: file}
+	deadline := time.NewTimer(processStoreLockMaximum)
+	defer deadline.Stop()
 	for {
 		err = windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &lock.over)
 		if err == nil {
@@ -193,6 +200,9 @@ func (s *dpapiStore) lockProcess(ctx context.Context) (*processStoreLock, error)
 		case <-ctx.Done():
 			_ = file.Close()
 			return nil, ctx.Err()
+		case <-deadline.C:
+			_ = file.Close()
+			return nil, errors.New("credential store lock timeout")
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
