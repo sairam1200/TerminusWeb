@@ -471,27 +471,52 @@ func TestConnectionIDCannotBeReused(t *testing.T) {
 	secondWS.Close()
 }
 
-func TestCredentialRevocationClosesAuthorizationAndSession(t *testing.T) {
+func TestCredentialRevocationClosesAllAuthorizationsAndSessions(t *testing.T) {
 	endpoint, adapter, _ := newTestEndpoint(t)
 	server := httptest.NewTLSServer(endpoint)
 	defer server.Close()
-	client, credential := pairAndAuthorize(t, endpoint, server)
-	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
-	client.read("session_opened")
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	second := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000079")
+	clients := []*testClient{first, second}
+	for _, client := range clients {
+		client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+		client.read("session_opened")
+	}
 	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
-	session := adapter.sessions[0]
+	sessions := append([]*fakeSession(nil), adapter.sessions...)
 	adapter.mu.Unlock()
-	select {
-	case <-session.closed:
-	case <-time.After(time.Second):
-		t.Fatal("revocation left terminal open")
+	for index, session := range sessions {
+		select {
+		case <-session.closed:
+		case <-time.After(time.Second):
+			t.Fatalf("revocation left terminal %d open", index)
+		}
 	}
-	client.read("session_closed")
-	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
-		t.Fatalf("code = %s", got)
+	for _, client := range clients {
+		client.read("session_closed")
+		if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
+			t.Fatalf("code = %s", got)
+		}
+	}
+}
+
+func TestSessionRegistryRejectsClosedConnectionBeforeProcessCreation(t *testing.T) {
+	adapter := &fakeAdapter{}
+	registry := sessionRegistry{adapter: adapter, now: time.Now}
+	done := make(chan struct{})
+	close(done)
+	owner := &connection{done: done, credential: Credential{ID: "30000000-0000-4000-8000-000000000079"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+	if _, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
+		t.Fatal("closed connection opened a terminal session")
+	}
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != 0 {
+		t.Fatalf("closed connection created %d terminal sessions", created)
 	}
 }
 

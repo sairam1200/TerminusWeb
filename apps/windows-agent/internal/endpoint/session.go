@@ -46,6 +46,12 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 		r.mu.Unlock()
 		return "", errors.New("terminal session admission is unavailable")
 	}
+	select {
+	case <-owner.done:
+		r.mu.Unlock()
+		return "", errors.New("terminal session connection is closed")
+	default:
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	session, err := r.adapter.Open(ctx, terminal.Config{Columns: dimensions.Columns, Rows: dimensions.Rows})
 	if err != nil {
