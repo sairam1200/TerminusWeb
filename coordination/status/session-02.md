@@ -1,14 +1,14 @@
 # Session 02 Status
 
-- Current task: S02-002
+- Current task: S02-005
 - State: review
 - Branch: `session/02-web-renderer`
-- Files changed: `apps/web/app/globals.css`, `apps/web/app/layout.tsx`, `apps/web/components/TerminalShell.tsx`, `apps/web/components/TerminalShell.test.tsx`, `apps/web/package.json`, `apps/web/package-lock.json`
-- Commands/evidence: same-PC Chrome reached an authenticated non-elevated ConPTY PowerShell session; user reported raw output was garbled; inspection confirmed protocol output chunks were rendered as ordinary paragraphs. Added official `@xterm/xterm` 6.0.0 ANSI rendering and routed native xterm input (including Ctrl+C) to the protocol adapter. `npm test` passed 35/35; `npm run typecheck`, `npm run lint`, and `npm run build` passed in the Session 02 worktree. Vercel production deployment `dpl_Cd5bSehoevVCC5545rH92ygZy6gD` reached `READY` and aliased `https://terminus-web.vercel.app`. Production Chrome confirmed xterm present, legacy markers absent, rendered output with no raw escape or replacement characters, xterm focus and Ctrl+C interaction, stored-credential connection without pairing, resize from 134x21 to 64x9 and restoration, heartbeat cleanup after abrupt refresh, credential reconnect after cleanup, and resize after reconnect. The agent remained loopback-only with one authenticated socket and one ConPTY PowerShell session during the connected checks.
+- Files changed: `apps/web/app/globals.css`, `apps/web/components/TerminalShell.tsx`, `apps/web/components/TerminalShell.test.tsx`
+- Commands/evidence: Figma Make root `0:1` inspected through the official design-context workflow. Focused UI tests passed 11/11; full web tests passed 40/40; typecheck, lint, production build, targeted formatting, and `git diff --check` passed. The production build rendered at 1280x720 and 390x844 in English and Swedish with zero browser-console errors or warnings.
 - Independent reviewer/evidence: none yet; product commit remains in review pending maker-independent Session 06 verification.
-- Assumptions: xterm.js stable API is the appropriate browser terminal renderer for ConPTY VT output; no protocol or security contract changed.
-- Blockers/requests: user visual readability confirmation and maker-independent Session 06 review remain; integration/cherry-pick requires explicit user authorization.
-- Product/task commit: `3f5971ba0a394d28fd20e47c63ae468cb8b5986d`
+- Assumptions: the Figma Make source is the approved visual reference; project security and protocol behavior override prototype-only connection controls and remote font imports.
+- Blockers/requests: maker-independent Session 06 review and any production deployment remain pending; integration/cherry-pick requires explicit user authorization.
+- Product/task commit: `601f76e73b27058ead9fd4b226c9183a1bd0c04d`
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
 
 ## S02-004 handoff (2026-08-27)
@@ -91,4 +91,30 @@
 - Privacy evidence: no terminal plaintext, command text, clipboard data, secrets, reusable pairing material, or private keys were recorded.
 - Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
 - Product/task commit: `cae2ded7adeeefa9e5cd97e3561cf5bfd9d0570f`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S02-005 Figma-derived bilingual interface (2026-08-27)
+
+- State: owner implementation and validation complete; independent review and deployment remain pending.
+- Source: Figma Make file `hmK588nDMBB1tmM2bAsPzD`, root node `0:1`, read through the official Figma design-context workflow. The source supplied the dark violet/cyan/rose/emerald visual system, responsive terminal/control layout, exact inline SVG geometry, and English/Swedish interaction model.
+- Product files: `apps/web/app/globals.css`, `apps/web/components/TerminalShell.tsx`, and `apps/web/components/TerminalShell.test.tsx`.
+- Implementation: replaced the existing green card layout with the Figma-derived full-screen dark grid/glow shell; retained the real adapter, xterm renderer, pairing, resize, reconnect, detach, session-limit, and cleanup behavior; added four accent themes, three font sizes, three glow levels, responsive side/bottom terminal controls, and a flag-plus-switch-icon English/Swedish control. The browser cannot edit the configured endpoint. The mTLS badge renders only for the real protocol client, never for the labelled simulation.
+- Browser evidence:
+  - Production build served on loopback and inspected at 1280x720 and 390x844 with Playwright CLI.
+  - English and Swedish mobile states rendered without horizontal overflow after the 390px header was changed to a two-row grid.
+  - Swedish control changed the document language, visible status, connection actions, terminal labels, mobile-key accessibility names, viewport metadata, and input text.
+  - Production-preview browser console: zero errors and zero warnings.
+  - The remote Google Fonts import from the Figma prototype was intentionally omitted because Terminus CSP blocks it; the existing local monospace stack is used without weakening CSP.
+- Commands/evidence:
+  - `npx vitest run components/TerminalShell.test.tsx`: PASS (11/11).
+  - `npm test`: PASS (7 files, 40/40 tests).
+  - `npm run typecheck`: PASS.
+  - `npm run lint`: PASS.
+  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
+  - Targeted `npx prettier --check components/TerminalShell.tsx components/TerminalShell.test.tsx app/globals.css`: PASS.
+  - Repository-wide `npm run format:check`: pre-existing baseline failure on 29 untouched files; none of the three S02-005 files were listed.
+  - `git diff --check`: PASS before product commit.
+- Security/operations: no endpoint, authentication, certificate, Origin, credential, protocol, Windows-agent, Tailscale, Funnel, or deployment behavior changed. No production deployment was performed.
+- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
+- Product/task commit: `601f76e73b27058ead9fd4b226c9183a1bd0c04d`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
