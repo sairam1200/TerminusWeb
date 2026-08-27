@@ -171,6 +171,21 @@ describe("TerminalShell", () => {
     await waitFor(() => expect(adapter.connectCalls).toBe(1));
   });
 
+  it("does not detach during page teardown so refresh can release capacity", async () => {
+    const adapter = new ProtocolUiAdapter("connected");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+
+    fireEvent(document, new Event("visibilitychange"));
+    fireEvent(window, new PageTransitionEvent("pagehide"));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(adapter.detachCalls).toBe(0);
+  });
+
   it("streams protocol output through the ANSI terminal renderer", () => {
     const adapter = new ProtocolUiAdapter("connected");
     const inputSpy = vi.spyOn(adapter, "sendInput");

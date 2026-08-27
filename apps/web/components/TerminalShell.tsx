@@ -29,6 +29,7 @@ const MOBILE_KEYS = [
 
 const MIN_COLUMNS = 20;
 const MIN_ROWS = 8;
+const BACKGROUND_DETACH_DELAY_MS = 100;
 
 function measureViewport(element: HTMLElement): TerminalViewport {
   const rect = element.getBoundingClientRect();
@@ -133,22 +134,53 @@ export function TerminalShell({
     if (adapter.kind !== "protocol-client" || adapter.detach === undefined)
       return;
     const detach = adapter.detach.bind(adapter);
+    let detachTimer: ReturnType<typeof setTimeout> | undefined;
+    let pageIsHiding = false;
+    const cancelPendingDetach = () => {
+      if (detachTimer !== undefined) clearTimeout(detachTimer);
+      detachTimer = undefined;
+    };
+    const pageHiding = () => {
+      pageIsHiding = true;
+      cancelPendingDetach();
+    };
+    const pageShowing = () => {
+      pageIsHiding = false;
+    };
     const visibilityChanged = () => {
       if (
         document.visibilityState === "hidden" &&
         adapter.getState() === "connected"
       ) {
-        void detach();
+        cancelPendingDetach();
+        detachTimer = setTimeout(() => {
+          detachTimer = undefined;
+          if (
+            !pageIsHiding &&
+            document.visibilityState === "hidden" &&
+            adapter.getState() === "connected"
+          ) {
+            void detach();
+          }
+        }, BACKGROUND_DETACH_DELAY_MS);
       } else if (
         document.visibilityState === "visible" &&
         adapter.getState() === "detached"
       ) {
+        pageIsHiding = false;
+        cancelPendingDetach();
         void adapter.connect();
       }
     };
     document.addEventListener("visibilitychange", visibilityChanged);
-    return () =>
+    window.addEventListener("pagehide", pageHiding);
+    window.addEventListener("pageshow", pageShowing);
+    return () => {
+      cancelPendingDetach();
       document.removeEventListener("visibilitychange", visibilityChanged);
+      window.removeEventListener("pagehide", pageHiding);
+      window.removeEventListener("pageshow", pageShowing);
+    };
   }, [adapter]);
 
   useEffect(() => {
