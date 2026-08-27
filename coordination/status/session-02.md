@@ -15,7 +15,7 @@
 
 - Current task: `S02-004` — Explain the eight-session limit after a rejected new tab.
 - State: implementation and owner validation complete; independent review and Session 01 queue transition remain pending.
-- Architecture input: Session 01 product `2e309af6079b58c88f7b71dbf68a0ab4d65fe9aa`; the existing protocol 0.1 `SESSION_OPEN_FAILED` error remains unchanged.
+- Architecture input: Session 01 product `2e309afc90a9c657aa71864252882ae9eb9047c0`; the existing protocol 0.1 `SESSION_OPEN_FAILED` error remains unchanged.
 - Product files: `apps/web/components/TerminalShell.tsx`, `TerminalShell.test.tsx`, and `apps/web/app/globals.css`.
 - Implementation: when a private connection reaches error state with `SESSION_OPEN_FAILED`, the UI now presents an accessible alert explaining that a new PowerShell session could not open and asks the user to close an earlier Terminus tab or disconnect a session if eight are active, then retry. Other connection failures retain their existing behavior.
 - Commands/evidence:
