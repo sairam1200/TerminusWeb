@@ -33,7 +33,7 @@
 
 ## S02-002 iPhone clock-skew follow-up (2026-08-27)
 
-- State: owner implementation and automated validation complete; production iPhone retest pending deployment; independent review remains pending.
+- State: owner implementation, deployment, and initial real-iPhone validation complete; manual interaction checks and independent review remain pending.
 - Product files: `apps/web/terminal/protocolTerminalAdapter.ts` and `protocolTerminalAdapter.test.ts`.
 - Real-device evidence: iPhone Safari reached the client-certificate-protected `/healthz` endpoint over the tailnet, then reached protocol `pairing` after first loading `/healthz` in the same Safari process. A fresh one-time code was consumed and local pairing approval succeeded. The browser then reported `AUTHORIZATION_EXPIRED` before opening a terminal; the agent created no PowerShell child.
 - Root cause: the browser calculated the freshly issued 12-hour authorization and 120-second resume-grant deadlines by subtracting the phone wall clock from Windows timestamps. Even small device-clock differences could reject a fresh authorization or resume grant despite the agent's authoritative monotonic deadlines.
@@ -45,6 +45,9 @@
   - `npm run lint`: PASS.
   - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
   - `git diff --check`: PASS before commit.
+  - Vercel production deployment `dpl_Dx53BFNMxUFeRxC38gszgCK7izsT` reached `READY`, was aliased to `https://terminus-web.vercel.app`, and returned HTTP 200 with the expected private WebSocket CSP.
+  - After loading `/healthz` and Terminus in the same iPhone Safari process, a final fresh pairing request was consumed and locally approved. The corrected production client completed authorization and the loopback agent opened exactly one direct ConPTY `powershell.exe` child (agent PID 22648, child PID 29604).
+  - The iPhone tailnet peer was online and active; the agent remained bound only to `127.0.0.1:8443`. Manual command-output, rotation-resize, and background/reconnect confirmation remain pending from the user.
 - Privacy evidence: the one-time code was shown only in a local operator window and PC clipboard; it was not printed to task output, chat, logs, source, fixtures, or artifacts. Terminal plaintext was not inspected or recorded.
 - Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
 - Product/task commit: `f22db4df3fa514a1ec68773c2c8e4466a6b3b6aa`.
