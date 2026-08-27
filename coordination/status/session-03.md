@@ -85,7 +85,7 @@
 
 - Current task: `S03-005` — Support eight bounded independent ConPTY sessions.
 - State: implementation and owner validation complete; independent review and Session 01 queue transition remain pending.
-- Architecture input: Session 01 product `2e309af6079b58c88f7b71dbf68a0ab4d65fe9aa` clarifies that each authenticated WebSocket owns one terminal and the agent-wide active/detached limit is eight. This is a compatible protocol 0.1 clarification; no schema, message, error enum, or version changed.
+- Architecture input: Session 01 product `2e309afc90a9c657aa71864252882ae9eb9047c0` clarifies that each authenticated WebSocket owns one terminal and the agent-wide active/detached limit is eight. This is a compatible protocol 0.1 clarification; no schema, message, error enum, or version changed.
 - Product files: `apps/windows-agent/internal/endpoint/session.go`, `endpoint_test.go`, `endpoint_windows_test.go`, and `apps/windows-agent/README.md`.
 - Implementation: replaces the process-global singleton with a mutex-protected session map keyed by session ID. Admission is atomic at eight; a ninth request returns existing `SESSION_OPEN_FAILED` before `terminal.Adapter.Open` can create ConPTY. Input, resize, detach/resume, expiry, disconnect, credential revocation, shutdown, and cleanup operate on the correct owned session. Active and detached sessions count until terminal cleanup finishes, and a clean close releases the slot.
 - Test evidence on non-elevated Windows:
