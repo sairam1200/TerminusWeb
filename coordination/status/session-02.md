@@ -1,13 +1,13 @@
 # Session 02 Status
 
 - Current task: S02-005
-- State: review
+- State: review; production deployment and live UI validation complete, independent verification pending
 - Branch: `session/02-web-renderer`
 - Files changed: `apps/web/app/globals.css`, `apps/web/components/TerminalShell.tsx`, `apps/web/components/TerminalShell.test.tsx`
-- Commands/evidence: Figma Make root `0:1` inspected through the official design-context workflow. Focused UI tests passed 11/11; full web tests passed 40/40; typecheck, lint, production build, targeted formatting, and `git diff --check` passed. The production build rendered at 1280x720 and 390x844 in English and Swedish with zero browser-console errors or warnings.
+- Commands/evidence: Figma Make root `0:1` inspected through the official design-context workflow. Focused UI tests passed 11/11; full web tests passed 40/40; typecheck, lint, production build, targeted formatting, and `git diff --check` passed. The production build rendered at 1280x720 and 390x844 in English and Swedish with zero browser-console errors or warnings. Branch `session/02-web-renderer` was pushed to GitHub. Vercel deployment `dpl_9h1hGq6DPsQykoBkVogqcbUxxv2u` reached `READY` and owns `https://terminus-web.vercel.app`; live Playwright checks passed in English and Swedish at desktop and 390x844 with zero console errors or warnings.
 - Independent reviewer/evidence: none yet; product commit remains in review pending maker-independent Session 06 verification.
 - Assumptions: the Figma Make source is the approved visual reference; project security and protocol behavior override prototype-only connection controls and remote font imports.
-- Blockers/requests: maker-independent Session 06 review and any production deployment remain pending; integration/cherry-pick requires explicit user authorization.
+- Blockers/requests: maker-independent Session 06 review remains pending. The user authorized production deployment and requested a push to `main`, but integration remains gated because `origin/main` is an unrelated initial commit and the product SHA has not received the required independent verification; no force-push or unverified main integration was performed.
 - Product/task commit: `601f76e73b27058ead9fd4b226c9183a1bd0c04d`
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
 
@@ -95,7 +95,7 @@
 
 ## S02-005 Figma-derived bilingual interface (2026-08-27)
 
-- State: owner implementation and validation complete; independent review and deployment remain pending.
+- State: owner implementation, production deployment, and live UI validation complete; independent review remains pending.
 - Source: Figma Make file `hmK588nDMBB1tmM2bAsPzD`, root node `0:1`, read through the official Figma design-context workflow. The source supplied the dark violet/cyan/rose/emerald visual system, responsive terminal/control layout, exact inline SVG geometry, and English/Swedish interaction model.
 - Product files: `apps/web/app/globals.css`, `apps/web/components/TerminalShell.tsx`, and `apps/web/components/TerminalShell.test.tsx`.
 - Implementation: replaced the existing green card layout with the Figma-derived full-screen dark grid/glow shell; retained the real adapter, xterm renderer, pairing, resize, reconnect, detach, session-limit, and cleanup behavior; added four accent themes, three font sizes, three glow levels, responsive side/bottom terminal controls, and a flag-plus-switch-icon English/Swedish control. The browser cannot edit the configured endpoint. The mTLS badge renders only for the real protocol client, never for the labelled simulation.
@@ -105,6 +105,8 @@
   - Swedish control changed the document language, visible status, connection actions, terminal labels, mobile-key accessibility names, viewport metadata, and input text.
   - Production-preview browser console: zero errors and zero warnings.
   - The remote Google Fonts import from the Figma prototype was intentionally omitted because Terminus CSP blocks it; the existing local monospace stack is used without weakening CSP.
+  - Vercel production deployment `dpl_9h1hGq6DPsQykoBkVogqcbUxxv2u` reached `READY` and was aliased to `https://terminus-web.vercel.app`.
+  - The canonical production UI rendered in English and Swedish at desktop and 390x844 with zero browser-console errors or warnings.
 - Commands/evidence:
   - `npx vitest run components/TerminalShell.test.tsx`: PASS (11/11).
   - `npm test`: PASS (7 files, 40/40 tests).
@@ -114,7 +116,7 @@
   - Targeted `npx prettier --check components/TerminalShell.tsx components/TerminalShell.test.tsx app/globals.css`: PASS.
   - Repository-wide `npm run format:check`: pre-existing baseline failure on 29 untouched files; none of the three S02-005 files were listed.
   - `git diff --check`: PASS before product commit.
-- Security/operations: no endpoint, authentication, certificate, Origin, credential, protocol, Windows-agent, Tailscale, Funnel, or deployment behavior changed. No production deployment was performed.
+- Security/operations: no endpoint, authentication, certificate, Origin, credential, protocol, Windows-agent, Tailscale, Funnel, or public-exposure behavior changed. The existing Vercel project was deployed only after explicit user authorization.
 - Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
 - Product/task commit: `601f76e73b27058ead9fd4b226c9183a1bd0c04d`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
