@@ -234,3 +234,19 @@
 - Session 01 did not push, deploy, install/generate certificates, start the
   host, configure Serve/Funnel, merge, or expose any route. S01-002 remains
   blocked until Session 06 independently verifies the exact producer commits.
+
+## S01-004 bounded multi-session contract handoff (2026-08-27)
+
+- Current task: `S01-004` — Clarify bounded independent browser-tab sessions in protocol 0.1.
+- State: contract clarification and deterministic protocol validation complete; independent review remains pending.
+- Product: protocol 0.1 already scopes one terminal session to one WebSocket connection. The clarification permits multiple authenticated connections, sets an agent-wide maximum of eight active or detached terminal sessions, requires atomic rejection of a ninth request before process creation, and requires cleanup to complete before capacity is released. It reuses `SESSION_OPEN_FAILED`; no message, schema, enum, fixture, transcript, or protocol-version change is required.
+- Files changed: `docs/ARCHITECTURE.md`, `packages/protocol/README.md`, `packages/security/SECURITY-CONTRACT-0.1.md`, `coordination/facts.md`, and `coordination/tasks.yaml`.
+- Commands/evidence:
+  - Required architecture/contracts/Definition of Done, all session briefs, ownership, queue dependencies, and session statuses were read before changes.
+  - `npm run verify` in `packages/protocol`: PASS (`22 transcripts`, `27 fixtures`, `1 positive auth vector`, `4 negative auth mutations`).
+  - `git diff --check` and product `git show --check`: PASS.
+  - Exact owner products prepared against this clarification: S03-005 `f8dc2a8f10bee25ddcef6397b7ac44dfdc15f564`; S02-004 `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`. Their independent reviews remain pending and their commits have not been integrated or deployed.
+- Security/operations: pairing, credential authentication, TLS/mTLS, exact Origin validation, authorization expiry, loopback-only origin, Tailscale-private publication, and Funnel-disabled rules are unchanged. No live agent, browser, deployment, certificate, listener, Tailscale, or public-exposure mutation occurred.
+- Independent reviewer: pending; do not mark S01-004 `done` or any implementation `verified` without maker-independent evidence.
+- Product/task commit: `2e309af6079b58c88f7b71dbf68a0ab4d65fe9aa`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
