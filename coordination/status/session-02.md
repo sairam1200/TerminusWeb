@@ -53,6 +53,24 @@
 - Product/task commit: `f22db4df3fa514a1ec68773c2c8e4466a6b3b6aa`.
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit.
 
+## S02-002 iPhone foreground reconnect follow-up (2026-08-27)
+
+- State: owner implementation and automated validation complete; production iPhone retest pending deployment; independent review remains pending.
+- Product files: `apps/web/components/TerminalShell.tsx` and `TerminalShell.test.tsx`.
+- Real-device evidence: after a successful iPhone terminal session, returning to Safari after five seconds in the background showed `SESSION_OPEN_FAILED`; manually pressing retry immediately reconnected. The ConPTY session and credential remained valid.
+- Root cause: foreground visibility could race an in-flight detach or attempt WSS reconnect in the same event before iOS networking was ready.
+- Implementation: record one foreground recovery intent, wait until the adapter reaches `detached` or `error`, then make one bounded reconnect attempt after 500 ms. No retry loop is introduced; manual retry and every authentication/security check remain intact.
+- Commands/evidence:
+  - Focused `vitest run components/TerminalShell.test.tsx`: PASS (10/10), including deferred-detach foreground coverage.
+  - `npm test`: PASS (7 files, 39/39 tests).
+  - `npm run typecheck`: PASS.
+  - `npm run lint`: PASS.
+  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
+  - `git diff --check`: PASS before commit.
+- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
+- Product/task commit: `e358d31b57d1d9080c77f1924fa8ba40194f925a`.
+- Handoff commit: resolve from branch HEAD after the status-only handoff commit.
+
 ## S02-004 live refresh follow-up (2026-08-27)
 
 - State: owner implementation and live production validation complete; independent review remains pending.
