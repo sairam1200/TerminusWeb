@@ -103,6 +103,13 @@
 - Product/task commit: `f8dc2a8f10bee25ddcef6397b7ac44dfdc15f564`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
 
+## S03-005 revocation-race hardening (2026-08-27)
+
+- Cumulative product tip: `0d489e71f6c19578c942dacd2ffcb4407dafe0ab` (includes initial S03-005 product `f8dc2a8f10bee25ddcef6397b7ac44dfdc15f564`).
+- Follow-up: session admission now rejects a connection whose shutdown has begun, closing the ordering gap between credential revocation/disconnect and concurrent `open_session`. Multi-session revocation coverage proves that every active session sharing the revoked credential is closed and every authorization receives the generic authentication failure.
+- Revalidation: focused endpoint PASS; `go vet ./...` PASS; full `go test -count=1 ./...` PASS (`cmd/integration-host` 2.812s, `internal/endpoint` 7.170s, `internal/protocol` 0.599s, `internal/terminal` 13.287s); `go test -count=20 ./internal/endpoint` PASS in 112.414s; `git diff --check` and product `git show --check` PASS.
+- Independent review and integration remain pending. No live agent/network/deployment state changed.
+
 ## S03-003 final remediation handoff (2026-08-26)
 
 - Final cumulative product tip: `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c` (ancestry includes `0e655bcbd03ca6e253d659f358dbf4d939e63ad6`, `63bae2286c9430d4706cc5afab68aaff2667f06e`, `c008604e66907a5c2d138dc801ce93f4881fbf64`, `6f428f1b4df618d4fd9e18569d80b5bdb564a8b9`, and exact S03-002 `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc`).
