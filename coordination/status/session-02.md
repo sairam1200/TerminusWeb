@@ -10,3 +10,23 @@
 - Blockers/requests: user visual readability confirmation and maker-independent Session 06 review remain; integration/cherry-pick requires explicit user authorization.
 - Product/task commit: `3f5971ba0a394d28fd20e47c63ae468cb8b5986d`
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
+
+## S02-004 handoff (2026-08-27)
+
+- Current task: `S02-004` — Explain the eight-session limit after a rejected new tab.
+- State: implementation and owner validation complete; independent review and Session 01 queue transition remain pending.
+- Architecture input: Session 01 product `2e309af6079b58c88f7b71dbf68a0ab4d65fe9aa`; the existing protocol 0.1 `SESSION_OPEN_FAILED` error remains unchanged.
+- Product files: `apps/web/components/TerminalShell.tsx`, `TerminalShell.test.tsx`, and `apps/web/app/globals.css`.
+- Implementation: when a private connection reaches error state with `SESSION_OPEN_FAILED`, the UI now presents an accessible alert explaining that a new PowerShell session could not open and asks the user to close an earlier Terminus tab or disconnect a session if eight are active, then retry. Other connection failures retain their existing behavior.
+- Commands/evidence:
+  - Focused `vitest run components/TerminalShell.test.tsx`: PASS (8/8).
+  - Full `vitest run`: PASS (7 files, 36/36 tests).
+  - `tsc --noEmit`: PASS.
+  - `eslint .`: PASS.
+  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
+  - `git diff --check` and product `git show --check`: PASS.
+- Security/operations: no endpoint, authentication, certificate, Origin, credential, Tailscale, or deployment behavior changed. No production deployment was performed.
+- Live-browser limitation: this product commit has not been integrated or deployed, so the new ninth-tab alert has not yet been exercised in production Chrome. The prior S02-002 production terminal flow remains unchanged until authorized integration/deployment.
+- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
+- Product/task commit: `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
