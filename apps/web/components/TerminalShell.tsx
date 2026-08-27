@@ -247,7 +247,7 @@ const QUICK_KEYS = [
 
 const MIN_COLUMNS = 20;
 const MIN_ROWS = 8;
-const BACKGROUND_DETACH_DELAY_MS = 100;
+const BACKGROUND_DETACH_DELAY_MS = 0;
 const FOREGROUND_RECONNECT_DELAY_MS = 500;
 
 function measureViewport(element: HTMLElement): TerminalViewport {
@@ -501,14 +501,23 @@ export function TerminalShell({
         }
       }, FOREGROUND_RECONNECT_DELAY_MS);
     };
-    const pageHiding = () => {
+    const pageHiding = (event: PageTransitionEvent) => {
       pageIsHiding = true;
       foregroundReconnectPending = false;
       cancelPendingDetach();
       cancelPendingReconnect();
+      // Safari may freeze a background page before even a short timer runs.
+      // A persisted pagehide keeps this document alive, so detach now and
+      // retain the memory-only resume grant for pageshow. A real reload/close
+      // remains undetached so transport teardown releases server capacity.
+      if (event.persisted && adapter.getState() === "connected") void detach();
     };
-    const pageShowing = () => {
+    const pageShowing = (event: PageTransitionEvent) => {
       pageIsHiding = false;
+      if (event.persisted) {
+        foregroundReconnectPending = true;
+        scheduleForegroundReconnect();
+      }
     };
     const visibilityChanged = () => {
       if (

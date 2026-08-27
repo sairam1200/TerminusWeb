@@ -239,6 +239,20 @@ describe("TerminalShell", () => {
     expect(adapter.detachCalls).toBe(0);
   });
 
+  it("detaches a persisted Safari page before it is frozen", async () => {
+    const adapter = new ProtocolUiAdapter("connected");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+
+    fireEvent(document, new Event("visibilitychange"));
+    fireEvent(window, new PageTransitionEvent("pagehide", { persisted: true }));
+
+    await waitFor(() => expect(adapter.detachCalls).toBe(1));
+  });
+
   it("streams protocol output through the ANSI terminal renderer", () => {
     const adapter = new ProtocolUiAdapter("connected");
     const inputSpy = vi.spyOn(adapter, "sendInput");
