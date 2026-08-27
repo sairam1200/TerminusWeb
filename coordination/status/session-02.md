@@ -69,6 +69,7 @@
   - Targeted Prettier check and `git diff --check`: PASS.
 - Security/operations: no resume grant, credential, pairing material, or terminal content is persisted or logged. No protocol, agent, endpoint, certificate, Tailscale, Funnel, deployment, or public-exposure behavior changed.
 - Limitations: automated evidence uses JSDOM lifecycle events; it does not prove physical iPhone Safari behavior. No deployment or live mutation was performed.
+- Publication authorization: the user explicitly authorized a normal push of `session/02-web-renderer` on 2026-08-27. This authorization does not include `main`, force-push, deployment, or live infrastructure mutation.
 - Independent reviewer: pending; do not mark this follow-up `done` or `verified` until maker-independent review is recorded.
 - Product/task commit: `7c7ce0263560bb06c102019e7452279681577203`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
