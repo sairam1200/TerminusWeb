@@ -30,3 +30,21 @@
 - Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
 - Product/task commit: `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S02-004 live refresh follow-up (2026-08-27)
+
+- State: owner implementation and live production validation in progress; independent review remains pending.
+- Product files: `apps/web/components/TerminalShell.tsx` and `apps/web/components/TerminalShell.test.tsx`.
+- Root cause: a reload first emitted `visibilitychange(hidden)`, which immediately detached the session. Page teardown then discarded the memory-only resume grant, leaving that detached session to occupy capacity until expiry. At the eight-session limit, an immediate reload/reconnect was therefore rejected.
+- Implementation: delay background detach by 100 ms and cancel it on `pagehide`. Real background tabs still detach, while reload/close lets WebSocket teardown release the server session immediately. The resume grant remains memory-only; no authentication, credential-storage, endpoint, or protocol behavior was weakened.
+- Commands/evidence:
+  - `npm test`: PASS (7 files, 37/37 tests), including page-teardown coverage.
+  - `npm run typecheck`: PASS.
+  - `npm run lint`: PASS.
+  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
+  - `git diff --check`: PASS before commit.
+  - Live Chrome before this follow-up opened eight independent PowerShell sessions, rejected a ninth with `SESSION_OPEN_FAILED`, recovered a released slot, and resized the recovered terminal. Final reload-at-capacity retest is pending deployment of this product commit.
+- Privacy evidence: no terminal plaintext, command text, clipboard data, secrets, reusable pairing material, or private keys were recorded.
+- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
+- Product/task commit: `cae2ded7adeeefa9e5cd97e3561cf5bfd9d0570f`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
