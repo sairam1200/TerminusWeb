@@ -245,7 +245,7 @@
   - Required architecture/contracts/Definition of Done, all session briefs, ownership, queue dependencies, and session statuses were read before changes.
   - `npm run verify` in `packages/protocol`: PASS (`22 transcripts`, `27 fixtures`, `1 positive auth vector`, `4 negative auth mutations`).
   - `git diff --check` and product `git show --check`: PASS.
-  - Exact owner products prepared against this clarification: S03-005 `f8dc2a8f10bee25ddcef6397b7ac44dfdc15f564`; S02-004 `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`. Their independent reviews remain pending and their commits have not been integrated or deployed.
+  - Exact owner products prepared against this clarification: cumulative S03-005 `0d489e71f6c19578c942dacd2ffcb4407dafe0ab`; S02-004 `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`. Their independent reviews remain pending and their commits have not been integrated or deployed.
 - Security/operations: pairing, credential authentication, TLS/mTLS, exact Origin validation, authorization expiry, loopback-only origin, Tailscale-private publication, and Funnel-disabled rules are unchanged. No live agent, browser, deployment, certificate, listener, Tailscale, or public-exposure mutation occurred.
 - Independent reviewer: pending; do not mark S01-004 `done` or any implementation `verified` without maker-independent evidence.
 - Product/task commit: `2e309afc90a9c657aa71864252882ae9eb9047c0`.
