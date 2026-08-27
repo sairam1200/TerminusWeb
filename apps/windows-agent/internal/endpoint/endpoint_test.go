@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -137,6 +138,24 @@ func (s *fakeSession) Resize(columns, rows uint16) error {
 }
 func (s *fakeSession) Wait() error  { <-s.closed; return nil }
 func (s *fakeSession) Close() error { s.once.Do(func() { close(s.closed) }); return nil }
+
+func waitSessionState(t *testing.T, session *fakeSession, input string, columns, rows uint16) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		session.mu.Lock()
+		gotInput, gotColumns, gotRows := session.input.String(), session.columns, session.rows
+		session.mu.Unlock()
+		if gotInput == input && gotColumns == columns && gotRows == rows {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	session.mu.Lock()
+	gotInput, gotColumns, gotRows := session.input.String(), session.columns, session.rows
+	session.mu.Unlock()
+	t.Fatalf("session state = %q %dx%d, want %q %dx%d", gotInput, gotColumns, gotRows, input, columns, rows)
+}
 
 type testClient struct {
 	t        *testing.T
@@ -716,19 +735,95 @@ func TestEndpointCloseCleansActiveTerminal(t *testing.T) {
 	}
 }
 
-func TestSessionRegistryEnforcesOneSession(t *testing.T) {
+func TestEndpointAllowsEightIndependentSessionsAndRejectsNinth(t *testing.T) {
+	endpoint, adapter, _ := newTestEndpoint(t)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	clients := []*testClient{first}
+	for index := 2; index <= maxConcurrentSessions; index++ {
+		connectionID := fmt.Sprintf("10000000-0000-4000-8000-%012d", index)
+		clients = append(clients, authorizeExisting(t, server, credential, connectionID))
+	}
+	sessionIDs := make([]string, 0, len(clients))
+	for _, client := range clients {
+		client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+		sessionIDs = append(sessionIDs, client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID)
+	}
+
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	sessions := append([]*fakeSession(nil), adapter.sessions...)
+	adapter.mu.Unlock()
+	if created != maxConcurrentSessions {
+		t.Fatalf("created sessions = %d, want %d", created, maxConcurrentSessions)
+	}
+
+	ninth := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000009")
+	ninth.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	if got := ninth.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.SessionOpenFailed {
+		t.Fatalf("ninth session error = %s, want %s", got, protocol.SessionOpenFailed)
+	}
+	adapter.mu.Lock()
+	created = len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != maxConcurrentSessions {
+		t.Fatalf("rejected admission created a terminal: sessions = %d", created)
+	}
+
+	firstID := sessionIDs[0]
+	secondID := sessionIDs[1]
+	first.send("terminal_input", protocol.TerminalPayload{SessionID: firstID, Data: protocol.EncodeBase64([]byte("first"))})
+	clients[1].send("terminal_input", protocol.TerminalPayload{SessionID: secondID, Data: protocol.EncodeBase64([]byte("second"))})
+	first.send("resize", protocol.ResizePayload{SessionID: firstID, Dimensions: protocol.Dimensions{Columns: 101, Rows: 31}})
+	clients[1].send("resize", protocol.ResizePayload{SessionID: secondID, Dimensions: protocol.Dimensions{Columns: 102, Rows: 32}})
+	waitSessionState(t, sessions[0], "first", 101, 31)
+	waitSessionState(t, sessions[1], "second", 102, 32)
+
+	first.send("close_session", protocol.CloseSessionPayload{SessionID: firstID, Reason: "user_request"})
+	first.read("session_closed")
+	replacement := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000010")
+	replacement.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	replacement.read("session_opened")
+	adapter.mu.Lock()
+	created = len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != maxConcurrentSessions+1 {
+		t.Fatalf("replacement sessions created = %d, want %d", created, maxConcurrentSessions+1)
+	}
+}
+
+func TestSessionRegistryAdmissionIsAtomicAtEightSessions(t *testing.T) {
 	adapter := &fakeAdapter{}
 	registry := sessionRegistry{adapter: adapter, now: time.Now}
-	first := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000001"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
-	second := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000002"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
-	id, err := registry.open(first, protocol.Dimensions{Columns: 80, Rows: 24})
-	if err != nil {
-		t.Fatal(err)
+	const attempts = maxConcurrentSessions + 4
+	results := make(chan error, attempts)
+	for index := 0; index < attempts; index++ {
+		index := index
+		go func() {
+			owner := &connection{credential: Credential{ID: fmt.Sprintf("30000000-0000-4000-8000-%012d", index+1)}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+			_, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24})
+			results <- err
+		}()
 	}
-	if _, err := registry.open(second, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
-		t.Fatal("second terminal session was accepted")
+	accepted := 0
+	for index := 0; index < attempts; index++ {
+		if err := <-results; err == nil {
+			accepted++
+		}
 	}
-	if err := registry.closeBy(first, id, "user_request"); err != nil {
+	if accepted != maxConcurrentSessions {
+		t.Fatalf("accepted = %d, want %d", accepted, maxConcurrentSessions)
+	}
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != maxConcurrentSessions {
+		t.Fatalf("created sessions = %d, want %d", created, maxConcurrentSessions)
+	}
+	if err := registry.close("agent_shutdown"); err != nil {
 		t.Fatal(err)
 	}
 }

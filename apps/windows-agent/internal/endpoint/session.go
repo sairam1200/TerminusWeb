@@ -13,11 +13,13 @@ import (
 	"terminus/windows-agent/internal/terminal"
 )
 
+const maxConcurrentSessions = 8
+
 type sessionRegistry struct {
 	mu           sync.Mutex
 	adapter      terminal.Adapter
 	now          func() time.Time
-	active       *managedSession
+	active       map[string]*managedSession
 	shuttingDown bool
 }
 
@@ -40,7 +42,7 @@ type managedSession struct {
 
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
 	r.mu.Lock()
-	if r.shuttingDown || r.active != nil {
+	if r.shuttingDown || len(r.active) >= maxConcurrentSessions {
 		r.mu.Unlock()
 		return "", errors.New("terminal session admission is unavailable")
 	}
@@ -59,7 +61,10 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 		return "", err
 	}
 	managed := &managedSession{id: id, credentialID: owner.credentialID(), terminal: session, cancel: cancel, owner: owner, closeDone: make(chan struct{})}
-	r.active = managed
+	if r.active == nil {
+		r.active = make(map[string]*managedSession)
+	}
+	r.active[id] = managed
 	r.mu.Unlock()
 	go r.copyOutput(managed)
 	return id, nil
@@ -111,8 +116,8 @@ func (r *sessionRegistry) resume(owner *connection, id, encodedGrant string, dim
 		return errors.New("invalid resume grant")
 	}
 	r.mu.Lock()
-	managed := r.active
-	if managed == nil || managed.id != id || !managed.detached || managed.resuming || managed.credentialID != owner.credentialID() || managed.detachedConnectionID == owner.connectionID() || !r.now().Before(managed.grantExpires) || subtle.ConstantTimeCompare(provided, managed.grant[:]) != 1 {
+	managed := r.active[id]
+	if managed == nil || !managed.detached || managed.resuming || managed.credentialID != owner.credentialID() || managed.detachedConnectionID == owner.connectionID() || !r.now().Before(managed.grantExpires) || subtle.ConstantTimeCompare(provided, managed.grant[:]) != 1 {
 		r.mu.Unlock()
 		return errors.New("resume grant rejected")
 	}
@@ -129,8 +134,8 @@ func (r *sessionRegistry) resume(owner *connection, id, encodedGrant string, dim
 func (r *sessionRegistry) activateResume(owner *connection, id string) error {
 	for {
 		r.mu.Lock()
-		managed := r.active
-		if managed == nil || managed.id != id || !managed.resuming {
+		managed := r.active[id]
+		if managed == nil || !managed.resuming {
 			r.mu.Unlock()
 			return errors.New("session is not resuming")
 		}
@@ -161,8 +166,8 @@ func (r *sessionRegistry) activateResume(owner *connection, id string) error {
 
 func (r *sessionRegistry) abortTransition(id string) {
 	r.mu.Lock()
-	managed := r.active
-	shouldClose := managed != nil && managed.id == id && (managed.detached || managed.resuming)
+	managed := r.active[id]
+	shouldClose := managed != nil && (managed.detached || managed.resuming)
 	r.mu.Unlock()
 	if shouldClose {
 		_ = r.closeManaged(managed, "protocol_error")
@@ -171,12 +176,20 @@ func (r *sessionRegistry) abortTransition(id string) {
 
 func (r *sessionRegistry) revokeCredential(credentialID string) error {
 	r.mu.Lock()
-	managed := r.active
-	r.mu.Unlock()
-	if managed == nil || managed.credentialID != credentialID {
-		return nil
+	managed := make([]*managedSession, 0)
+	for _, session := range r.active {
+		if session.credentialID == credentialID {
+			managed = append(managed, session)
+		}
 	}
-	return r.closeManaged(managed, "protocol_error")
+	r.mu.Unlock()
+	var errs []error
+	for _, session := range managed {
+		if err := r.closeManaged(session, "protocol_error"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (r *sessionRegistry) closeBy(owner *connection, id, _ string) error {
@@ -191,38 +204,54 @@ func (r *sessionRegistry) closeBy(owner *connection, id, _ string) error {
 
 func (r *sessionRegistry) close(reason string) error {
 	r.mu.Lock()
-	managed := r.active
-	r.mu.Unlock()
-	if managed == nil {
-		return nil
+	managed := make([]*managedSession, 0, len(r.active))
+	for _, session := range r.active {
+		managed = append(managed, session)
 	}
-	return r.closeManaged(managed, reason)
+	r.mu.Unlock()
+	var errs []error
+	for _, session := range managed {
+		if err := r.closeManaged(session, reason); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (r *sessionRegistry) shutdown() error {
 	r.mu.Lock()
 	r.shuttingDown = true
-	managed := r.active
-	r.mu.Unlock()
-	if managed == nil {
-		return nil
+	managed := make([]*managedSession, 0, len(r.active))
+	for _, session := range r.active {
+		managed = append(managed, session)
 	}
-	return r.closeManagedMode(managed, "agent_shutdown", false)
+	r.mu.Unlock()
+	var errs []error
+	for _, session := range managed {
+		if err := r.closeManagedMode(session, "agent_shutdown", false); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (r *sessionRegistry) disconnected(owner *connection) {
 	r.mu.Lock()
-	managed := r.active
-	shouldClose := managed != nil && managed.owner == owner && !managed.detached
+	managed := make([]*managedSession, 0, 1)
+	for _, session := range r.active {
+		if session.owner == owner && !session.detached {
+			managed = append(managed, session)
+		}
+	}
 	r.mu.Unlock()
-	if shouldClose {
-		_ = r.closeManaged(managed, "protocol_error")
+	for _, session := range managed {
+		_ = r.closeManaged(session, "protocol_error")
 	}
 }
 
 func (r *sessionRegistry) owned(owner *connection, id string) (*managedSession, error) {
-	managed := r.active
-	if managed == nil || managed.id != id || managed.owner != owner || managed.detached || managed.closed {
+	managed := r.active[id]
+	if managed == nil || managed.owner != owner || managed.detached || managed.closed {
 		return nil, errors.New("terminal session is not attached to this connection")
 	}
 	return managed, nil
@@ -276,7 +305,7 @@ func (r *sessionRegistry) expire(managed *managedSession, expected time.Time) {
 	defer timer.Stop()
 	<-timer.C
 	r.mu.Lock()
-	expired := r.active == managed && managed.detached && !managed.resuming && managed.grantExpires.Equal(expected) && !r.now().Before(expected)
+	expired := r.active[managed.id] == managed && managed.detached && !managed.resuming && managed.grantExpires.Equal(expected) && !r.now().Before(expected)
 	r.mu.Unlock()
 	if expired {
 		_ = r.closeManaged(managed, "idle_timeout")
@@ -306,8 +335,8 @@ func (r *sessionRegistry) closeManagedMode(managed *managedSession, reason strin
 	err := managed.terminal.Close()
 	r.mu.Lock()
 	managed.closeErr = err
-	if r.active == managed {
-		r.active = nil
+	if r.active[managed.id] == managed {
+		delete(r.active, managed.id)
 	}
 	r.mu.Unlock()
 	if notify && owner != nil && owner.sessionState() == protocol.SessionOpen {
