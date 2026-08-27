@@ -248,5 +248,5 @@
   - Exact owner products prepared against this clarification: S03-005 `f8dc2a8f10bee25ddcef6397b7ac44dfdc15f564`; S02-004 `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`. Their independent reviews remain pending and their commits have not been integrated or deployed.
 - Security/operations: pairing, credential authentication, TLS/mTLS, exact Origin validation, authorization expiry, loopback-only origin, Tailscale-private publication, and Funnel-disabled rules are unchanged. No live agent, browser, deployment, certificate, listener, Tailscale, or public-exposure mutation occurred.
 - Independent reviewer: pending; do not mark S01-004 `done` or any implementation `verified` without maker-independent evidence.
-- Product/task commit: `2e309af6079b58c88f7b71dbf68a0ab4d65fe9aa`.
+- Product/task commit: `2e309afc90a9c657aa71864252882ae9eb9047c0`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
