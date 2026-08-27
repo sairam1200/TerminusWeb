@@ -57,8 +57,16 @@ The first integration target is deliberately narrow:
 1. Load the PWA from a Vercel preview.
 2. Pair one browser with one Windows agent.
 3. Connect directly through a Tailscale-private `wss://` endpoint.
-4. Open one non-elevated PowerShell session through ConPTY.
+4. Open one independent non-elevated PowerShell session per authenticated
+   browser tab through ConPTY, with an agent-wide maximum of eight concurrent
+   sessions.
 5. Exchange input, output, resize, heartbeat, detach, and close frames.
 6. Reconnect after foreground/background or network interruption without exposing a public port.
+
+The ninth concurrent session is denied before a ConPTY process is created. The
+web client tells the user to close an earlier Terminus session and retry. Each
+accepted tab retains its own connection, session identifier, ConPTY process,
+resize state, heartbeat, reconnect state, and cleanup lifecycle; protocol 0.1
+does not multiplex multiple terminals over one WebSocket.
 
 Subscriptions, advertising, owners, multi-tenancy, and super-administration are outside this first vertical slice.

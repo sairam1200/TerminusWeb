@@ -44,3 +44,19 @@ Session 01 owns this file. Other sessions submit proposed corrections through `c
   temporary Production-classified bootstrap; an already-initialized Preview
   project or a separately authorized platform decision is required before an
   exact HTTPS Origin can be frozen.
+
+## Eight-session browser-tab admission decision (2026-08-27)
+
+- The user requires each authenticated Chrome tab to own an independent
+  non-elevated PowerShell/ConPTY session.
+- The Windows agent admits at most eight concurrent terminal sessions across
+  all connections. A ninth `open_session` is rejected before process creation,
+  and the browser asks the user to close an earlier Terminus session before
+  retrying.
+- Each WebSocket still carries at most one session. Protocol 0.1 does not add
+  multiplexing, new frames, fields, or error codes; the existing
+  `SESSION_OPEN_FAILED` result represents bounded admission failure.
+- Detached and resuming sessions count toward the limit until deterministic
+  cleanup completes. Pairing, mTLS, authentication, authorization, exact
+  Origin validation, expiry, private listener scope, and Funnel-disabled
+  requirements remain unchanged.

@@ -143,6 +143,41 @@ tasks:
     requires_user_authorization: true
     evidence: One private raw-TCP Serve mapping from sai.tailf8dcea.ts.net:443 to the exact S03 loopback port, Funnel disabled, no HTTPS/TLS termination or path rewriting, complete pre/post snapshots, one approved private path, denied LAN/public/wrong-device/wrong-Origin/wrong-subprotocol/invalid-client-certificate/Funnel paths, and rollback evidence; no grant broadening or unrelated live mutation.
 
+  - id: S01-004
+    owner: session_01
+    state: in_progress
+    title: Clarify bounded independent browser-tab sessions in protocol 0.1
+    depends_on: [S01-001]
+    evidence: Contract states one session per connection, eight sessions agent-wide, atomic ninth-session rejection before process creation, detached-session accounting, and no wire-version change.
+
+  - id: S03-005
+    owner: session_03
+    state: in_progress
+    title: Implement eight independent bounded ConPTY sessions
+    depends_on: [S01-004, S03-003]
+    evidence: Positive sessions one through eight, atomic ninth rejection without process creation, independent input/resize/close, detach accounting, credential revocation, shutdown, and real Windows process-tree cleanup.
+
+  - id: S02-004
+    owner: session_02
+    state: in_progress
+    title: Explain agent session-capacity rejection in the terminal UI
+    depends_on: [S01-004, S02-002]
+    evidence: SESSION_OPEN_FAILED presents accessible guidance to close an earlier Terminus session and retry without changing authentication or protocol framing.
+
+  - id: S05-007
+    owner: session_05
+    state: blocked
+    title: Review bounded multi-session abuse and isolation controls
+    depends_on: [S03-005, S02-004]
+    evidence: Independent review of atomic admission, per-session isolation, detached capacity retention, resource exhaustion, revocation, cleanup, and unchanged private-access boundaries.
+
+  - id: S06-005
+    owner: session_06
+    state: blocked
+    title: Verify eight-tab independent terminal behavior
+    depends_on: [S03-005, S02-004, S05-007]
+    evidence: Exact-commit automated and real Chrome proof for eight independent sessions, ninth-tab guidance, slot recovery, resize/reconnect, non-elevation, and leak-free cleanup.
+
   - id: S01-002
     owner: session_01
     state: blocked

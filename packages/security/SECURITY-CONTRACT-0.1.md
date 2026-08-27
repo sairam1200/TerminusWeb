@@ -69,6 +69,13 @@ Canonical proof inputs and outputs are in `auth-vectors-0.1.json`. Implementatio
 
 ## Failure and logging rules
 
+- Terminal process admission is capped at eight concurrent sessions across the
+  agent. The reservation is atomic, detached sessions retain their reservation,
+  and a rejected ninth request must not create a ConPTY process. Capacity
+  failures use the existing generic `SESSION_OPEN_FAILED` result so they do not
+  disclose session identifiers or terminal metadata. Closing, expiry,
+  revocation, connection loss, and agent shutdown release every reservation
+  only after the corresponding contained process cleanup completes.
 - Parsing, schema, direction, state, version, size, timing, origin, pairing, authentication, authorization, and replay checks fail closed according to the wire contract.
 - Rate limits are required in addition to high-entropy pairing codes: at most five failed pairing/authentication attempts per source device identity in five minutes, followed by a five-minute monotonic cooldown. Rate-limit metadata contains counts and device/credential identifiers only.
 - Logs and structured errors never contain terminal bytes, commands, clipboard data, pairing codes, credential secrets, proofs, challenges, resume grants, tokens, private keys, WebSocket payloads, or reusable hashes of those values.
