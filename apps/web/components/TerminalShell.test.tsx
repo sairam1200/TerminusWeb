@@ -18,7 +18,10 @@ const xtermMock = vi.hoisted(() => ({
     return { dispose: xtermMock.inputDispose };
   }),
   open: vi.fn(),
+  options: { fontSize: 14, theme: {} },
+  refresh: vi.fn(),
   resize: vi.fn(),
+  rows: 8,
   write: vi.fn(),
 }));
 
@@ -28,7 +31,10 @@ vi.mock("@xterm/xterm", () => ({
     focus = xtermMock.focus;
     onData = xtermMock.onData;
     open = xtermMock.open;
+    options = xtermMock.options;
+    refresh = xtermMock.refresh;
     resize = xtermMock.resize;
+    rows = xtermMock.rows;
     write = xtermMock.write;
   },
 }));
@@ -52,10 +58,11 @@ describe("TerminalShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Start simulation" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("connected");
+    expect(await screen.findByRole("status")).toHaveTextContent(/connected/i);
     expect(
       screen.getByRole("textbox", { name: "Simulation input" }),
     ).toHaveFocus();
+    expect(screen.queryByText("mTLS · PRIVATE")).not.toBeInTheDocument();
   });
 
   it("supports keyboard submit, paste, mobile keys, and disconnect", async () => {
@@ -78,8 +85,32 @@ describe("TerminalShell", () => {
     expect(inputSpy).toHaveBeenCalledWith("\u001b");
 
     await user.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(screen.getByRole("status")).toHaveTextContent("disconnected");
+    expect(screen.getByRole("status")).toHaveTextContent(/disconnected/i);
     expect(input).toBeDisabled();
+  });
+
+  it("switches the complete interface between English and Swedish", async () => {
+    const user = userEvent.setup();
+    render(<TerminalShell />);
+
+    await user.click(screen.getByRole("button", { name: "Switch to Swedish" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Terminalarbetsyta" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Starta simulering" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Byt till engelska" }),
+    ).toBeVisible();
+    expect(document.documentElement).toHaveAttribute("lang", "sv");
+
+    await user.click(screen.getByRole("button", { name: "Byt till engelska" }));
+    expect(
+      screen.getByRole("heading", { name: "Terminal workspace" }),
+    ).toBeVisible();
+    expect(document.documentElement).toHaveAttribute("lang", "en");
   });
 
   it("reports a failed connection and exposes a retry control", async () => {
@@ -89,7 +120,7 @@ describe("TerminalShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Start simulation" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("error");
+    expect(await screen.findByRole("status")).toHaveTextContent(/error/i);
     expect(
       screen.getByRole("button", { name: "Retry simulation" }),
     ).toBeEnabled();
@@ -220,6 +251,7 @@ describe("TerminalShell", () => {
       "\u001b[32msynthetic-output\u001b[0m",
     );
     expect(inputSpy).toHaveBeenCalledWith("\u0003");
+    expect(screen.getByText("mTLS · PRIVATE")).toBeVisible();
     expect(screen.queryByText("synthetic-output")).not.toBeInTheDocument();
   });
 });
