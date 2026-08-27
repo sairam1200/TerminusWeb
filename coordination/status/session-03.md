@@ -81,6 +81,28 @@
 - Product/task commit: `6f428f1b4df618d4fd9e18569d80b5bdb564a8b9`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
 
+## S03-005 handoff (2026-08-27)
+
+- Current task: `S03-005` — Support eight bounded independent ConPTY sessions.
+- State: implementation and owner validation complete; independent review and Session 01 queue transition remain pending.
+- Architecture input: Session 01 product `2e309af6079b58c88f7b71dbf68a0ab4d65fe9aa` clarifies that each authenticated WebSocket owns one terminal and the agent-wide active/detached limit is eight. This is a compatible protocol 0.1 clarification; no schema, message, error enum, or version changed.
+- Product files: `apps/windows-agent/internal/endpoint/session.go`, `endpoint_test.go`, `endpoint_windows_test.go`, and `apps/windows-agent/README.md`.
+- Implementation: replaces the process-global singleton with a mutex-protected session map keyed by session ID. Admission is atomic at eight; a ninth request returns existing `SESSION_OPEN_FAILED` before `terminal.Adapter.Open` can create ConPTY. Input, resize, detach/resume, expiry, disconnect, credential revocation, shutdown, and cleanup operate on the correct owned session. Active and detached sessions count until terminal cleanup finishes, and a clean close releases the slot.
+- Test evidence on non-elevated Windows:
+  - Focused `go test -short -count=1 ./internal/endpoint`: PASS.
+  - `go vet ./...`: PASS.
+  - `go test -short -count=1 ./...`: PASS.
+  - `go test -count=1 ./...`: PASS, including Windows ConPTY/process cleanup (`cmd/integration-host` 2.260s, `internal/endpoint` 7.147s, `internal/protocol` 2.077s, `internal/terminal` 14.309s).
+  - `go test -count=20 ./internal/endpoint`: PASS in 112.343s.
+  - New endpoint test opens eight authenticated connections, proves isolated input and resize on two sessions, rejects the ninth without creating a terminal, closes one, and admits a replacement. A concurrent registry test proves the boundary admits exactly eight of twelve simultaneous attempts.
+  - Changed Go files pass `gofmt -l` with no output. The repository-wide `gofmt -l .` still reports unrelated pre-existing CRLF-formatted files; no unrelated formatting rewrite was made.
+  - `git diff --check` and product `git show --check`: PASS.
+  - Race mode remains unavailable because no `gcc` is installed; no compiler was installed. The required repeated endpoint concurrency suite passed.
+- Security/operations: pairing, credential authentication, exact Origin validation, TLS/mTLS, authorization expiry, private loopback/Tailscale boundary, and Funnel-disabled policy are unchanged. No agent was started or stopped, no live endpoint or Tailscale policy changed, and no terminal plaintext or pairing material was logged.
+- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
+- Product/task commit: `f8dc2a8f10bee25ddcef6397b7ac44dfdc15f564`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
 ## S03-003 final remediation handoff (2026-08-26)
 
 - Final cumulative product tip: `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c` (ancestry includes `0e655bcbd03ca6e253d659f358dbf4d939e63ad6`, `63bae2286c9430d4706cc5afab68aaff2667f06e`, `c008604e66907a5c2d138dc801ce93f4881fbf64`, `6f428f1b4df618d4fd9e18569d80b5bdb564a8b9`, and exact S03-002 `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc`).
