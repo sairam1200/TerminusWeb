@@ -171,6 +171,28 @@ describe("TerminalShell", () => {
     await waitFor(() => expect(adapter.connectCalls).toBe(1));
   });
 
+  it("waits for an in-flight iPhone detach before foreground reconnect", async () => {
+    const adapter = new ProtocolUiAdapter("connected", true);
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(adapter.detachCalls).toBe(1));
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(adapter.connectCalls).toBe(0);
+
+    adapter.completeDetach();
+    await waitFor(() => expect(adapter.connectCalls).toBe(1));
+  });
+
   it("does not detach during page teardown so refresh can release capacity", async () => {
     const adapter = new ProtocolUiAdapter("connected");
     render(<TerminalShell adapterFactory={() => adapter} />);
@@ -261,7 +283,10 @@ class ProtocolUiAdapter implements TerminalAdapter {
   connectCalls = 0;
   detachCalls = 0;
 
-  constructor(initialState: TerminalConnectionState = "disconnected") {
+  constructor(
+    initialState: TerminalConnectionState = "disconnected",
+    private readonly deferDetach = false,
+  ) {
     this.state = initialState;
   }
 
@@ -272,6 +297,11 @@ class ProtocolUiAdapter implements TerminalAdapter {
 
   async detach(): Promise<void> {
     this.detachCalls += 1;
+    this.setState("detaching");
+    if (!this.deferDetach) this.setState("detached");
+  }
+
+  completeDetach(): void {
     this.setState("detached");
   }
 

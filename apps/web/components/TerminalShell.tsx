@@ -30,6 +30,7 @@ const MOBILE_KEYS = [
 const MIN_COLUMNS = 20;
 const MIN_ROWS = 8;
 const BACKGROUND_DETACH_DELAY_MS = 100;
+const FOREGROUND_RECONNECT_DELAY_MS = 500;
 
 function measureViewport(element: HTMLElement): TerminalViewport {
   const rect = element.getBoundingClientRect();
@@ -135,14 +136,51 @@ export function TerminalShell({
       return;
     const detach = adapter.detach.bind(adapter);
     let detachTimer: ReturnType<typeof setTimeout> | undefined;
+    let foregroundReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let foregroundReconnectPending = false;
     let pageIsHiding = false;
     const cancelPendingDetach = () => {
       if (detachTimer !== undefined) clearTimeout(detachTimer);
       detachTimer = undefined;
     };
+    const cancelPendingReconnect = () => {
+      if (foregroundReconnectTimer !== undefined)
+        clearTimeout(foregroundReconnectTimer);
+      foregroundReconnectTimer = undefined;
+    };
+    const scheduleForegroundReconnect = () => {
+      if (
+        !foregroundReconnectPending ||
+        document.visibilityState !== "visible" ||
+        foregroundReconnectTimer !== undefined
+      )
+        return;
+      const state = adapter.getState();
+      if (state === "connected") {
+        foregroundReconnectPending = false;
+        return;
+      }
+      if (state !== "detached" && state !== "error") return;
+      foregroundReconnectTimer = setTimeout(() => {
+        foregroundReconnectTimer = undefined;
+        if (
+          foregroundReconnectPending &&
+          document.visibilityState === "visible" &&
+          ["detached", "error"].includes(adapter.getState())
+        ) {
+          // iOS may not make WebSocket networking immediately available in
+          // the visibility event itself. One bounded delayed attempt avoids a
+          // transient SESSION_OPEN_FAILED while preserving manual retry.
+          foregroundReconnectPending = false;
+          void adapter.connect();
+        }
+      }, FOREGROUND_RECONNECT_DELAY_MS);
+    };
     const pageHiding = () => {
       pageIsHiding = true;
+      foregroundReconnectPending = false;
       cancelPendingDetach();
+      cancelPendingReconnect();
     };
     const pageShowing = () => {
       pageIsHiding = false;
@@ -152,6 +190,8 @@ export function TerminalShell({
         document.visibilityState === "hidden" &&
         adapter.getState() === "connected"
       ) {
+        foregroundReconnectPending = false;
+        cancelPendingReconnect();
         cancelPendingDetach();
         detachTimer = setTimeout(() => {
           detachTimer = undefined;
@@ -163,20 +203,28 @@ export function TerminalShell({
             void detach();
           }
         }, BACKGROUND_DETACH_DELAY_MS);
-      } else if (
-        document.visibilityState === "visible" &&
-        adapter.getState() === "detached"
-      ) {
+      } else if (document.visibilityState === "visible") {
         pageIsHiding = false;
         cancelPendingDetach();
-        void adapter.connect();
+        foregroundReconnectPending = true;
+        scheduleForegroundReconnect();
       }
     };
+    const unsubscribeReconnectState = adapter.subscribe((state) => {
+      if (state === "connected") {
+        foregroundReconnectPending = false;
+        cancelPendingReconnect();
+        return;
+      }
+      scheduleForegroundReconnect();
+    });
     document.addEventListener("visibilitychange", visibilityChanged);
     window.addEventListener("pagehide", pageHiding);
     window.addEventListener("pageshow", pageShowing);
     return () => {
       cancelPendingDetach();
+      cancelPendingReconnect();
+      unsubscribeReconnectState();
       document.removeEventListener("visibilitychange", visibilityChanged);
       window.removeEventListener("pagehide", pageHiding);
       window.removeEventListener("pageshow", pageShowing);
