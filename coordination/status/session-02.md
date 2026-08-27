@@ -53,6 +53,26 @@
 - Product/task commit: `f22db4df3fa514a1ec68773c2c8e4466a6b3b6aa`.
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit.
 
+## S02-002 Safari suspension follow-up (2026-08-27)
+
+- State: owner implementation and automated validation complete; real iPhone Safari retest and independent review remain pending.
+- User-observed evidence: returning to the terminal page in Safari after roughly ten seconds showed the session closed, and manual Retry opened a replacement session instead of resuming the prior ConPTY session.
+- Root cause: the background detach was deferred for 100 ms so reload/page teardown could cancel it. Safari can freeze that timer or emit a persisted `pagehide` first. Without a completed detach, no memory-only resume grant exists; protocol 0.1 therefore requires the agent to close the shell on transport loss, and Retry can only open a new session.
+- Implementation: queue background detach on the next task with no artificial delay, keep non-persisted reload/close teardown cancellation, and detach immediately for persisted Safari/BFCache `pagehide`. A persisted `pageshow` records one bounded foreground recovery intent and reuses the existing 500 ms reconnect gate. Resume grants remain memory-only and every authentication, mTLS, Origin, expiry, and manual-retry check remains unchanged.
+- Product files: `apps/web/components/TerminalShell.tsx` and `apps/web/components/TerminalShell.test.tsx`.
+- Commands/evidence:
+  - Focused `npx vitest run components/TerminalShell.test.tsx --reporter=verbose`: PASS (12/12), including persisted Safari page suspension, reload teardown, deferred detach, and bounded foreground reconnect coverage.
+  - `npm test`: PASS (7 files, 41/41 tests). The first sandboxed attempt failed before test discovery with Windows `spawn EPERM`; the same command passed outside that sandbox restriction.
+  - `npm run typecheck`: PASS.
+  - `npm run lint`: PASS.
+  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
+  - Targeted Prettier check and `git diff --check`: PASS.
+- Security/operations: no resume grant, credential, pairing material, or terminal content is persisted or logged. No protocol, agent, endpoint, certificate, Tailscale, Funnel, deployment, or public-exposure behavior changed.
+- Limitations: automated evidence uses JSDOM lifecycle events; it does not prove physical iPhone Safari behavior. No deployment or live mutation was performed.
+- Independent reviewer: pending; do not mark this follow-up `done` or `verified` until maker-independent review is recorded.
+- Product/task commit: `7c7ce0263560bb06c102019e7452279681577203`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
 ## S02-002 iPhone foreground reconnect follow-up (2026-08-27)
 
 - State: owner implementation and automated validation complete; production iPhone retest pending deployment; independent review remains pending.
