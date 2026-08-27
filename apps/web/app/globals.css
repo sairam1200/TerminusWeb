@@ -200,6 +200,15 @@ h2 {
   font-size: 0.68rem;
 }
 
+.sessionOpenGuidance {
+  margin: 0;
+  padding: 0.8rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--warning);
+  background: rgba(255, 211, 125, 0.08);
+  font-size: 0.82rem;
+}
+
 .primaryButton,
 .secondaryButton {
   padding: 0.68rem 0.95rem;

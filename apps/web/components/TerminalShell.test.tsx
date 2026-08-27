@@ -95,6 +95,24 @@ describe("TerminalShell", () => {
     ).toBeEnabled();
   });
 
+  it("asks the user to close an earlier tab when session admission fails", async () => {
+    const user = userEvent.setup();
+    const adapter = new FailingAdapter(
+      "SESSION_OPEN_FAILED",
+      "protocol-client",
+    );
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    await user.click(screen.getByRole("button", { name: "Connect privately" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "If eight sessions are already active, close an earlier Terminus tab or disconnect one session, then retry.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Retry private connection" }),
+    ).toBeEnabled();
+  });
+
   it("updates orientation and keeps viewport dimensions above safe minimums", async () => {
     render(<TerminalShell />);
     Object.defineProperty(window, "innerWidth", {
@@ -170,12 +188,19 @@ describe("TerminalShell", () => {
 });
 
 class FailingAdapter implements TerminalAdapter {
-  readonly kind = "test-double" as const;
+  readonly kind: TerminalAdapter["kind"];
   readonly label = "FAILING TEST DOUBLE — NO TERMINAL CONNECTION";
   private state: TerminalConnectionState = "disconnected";
   private readonly listeners = new Set<
     (state: TerminalConnectionState) => void
   >();
+
+  constructor(
+    private readonly errorCode?: string,
+    kind: TerminalAdapter["kind"] = "test-double",
+  ) {
+    this.kind = kind;
+  }
 
   async connect(): Promise<void> {
     this.state = "error";
@@ -189,6 +214,10 @@ class FailingAdapter implements TerminalAdapter {
 
   getState(): TerminalConnectionState {
     return this.state;
+  }
+
+  getErrorCode(): string | undefined {
+    return this.errorCode;
   }
 
   resize(): void {}

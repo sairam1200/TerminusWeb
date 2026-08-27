@@ -245,6 +245,7 @@ export function TerminalShell({
     "detaching",
     "closing",
   ].includes(connectionState);
+  const errorCode = adapter.getErrorCode?.();
 
   return (
     <main className="workspace">
@@ -271,8 +272,8 @@ export function TerminalShell({
               <span aria-hidden="true" />
               {connectionState}
             </p>
-            {adapter.getErrorCode?.() !== undefined && (
-              <p className="errorCode">{adapter.getErrorCode()}</p>
+            {errorCode !== undefined && (
+              <p className="errorCode">{errorCode}</p>
             )}
             {connected ? (
               <>
@@ -321,6 +322,14 @@ export function TerminalShell({
             )}
           </div>
         </div>
+
+        {connectionState === "error" && errorCode === "SESSION_OPEN_FAILED" && (
+          <p className="sessionOpenGuidance" role="alert">
+            A new PowerShell session could not open. If eight sessions are
+            already active, close an earlier Terminus tab or disconnect one
+            session, then retry.
+          </p>
+        )}
 
         <div
           ref={terminalRef}
