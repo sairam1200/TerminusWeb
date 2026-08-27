@@ -33,7 +33,7 @@
 
 ## S02-004 live refresh follow-up (2026-08-27)
 
-- State: owner implementation and live production validation in progress; independent review remains pending.
+- State: owner implementation and live production validation complete; independent review remains pending.
 - Product files: `apps/web/components/TerminalShell.tsx` and `apps/web/components/TerminalShell.test.tsx`.
 - Root cause: a reload first emitted `visibilitychange(hidden)`, which immediately detached the session. Page teardown then discarded the memory-only resume grant, leaving that detached session to occupy capacity until expiry. At the eight-session limit, an immediate reload/reconnect was therefore rejected.
 - Implementation: delay background detach by 100 ms and cancel it on `pagehide`. Real background tabs still detach, while reload/close lets WebSocket teardown release the server session immediately. The resume grant remains memory-only; no authentication, credential-storage, endpoint, or protocol behavior was weakened.
@@ -43,7 +43,11 @@
   - `npm run lint`: PASS.
   - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
   - `git diff --check`: PASS before commit.
-  - Live Chrome before this follow-up opened eight independent PowerShell sessions, rejected a ninth with `SESSION_OPEN_FAILED`, recovered a released slot, and resized the recovered terminal. Final reload-at-capacity retest is pending deployment of this product commit.
+  - Vercel production deployment `dpl_GZXfaPdbHgoiVH3MgtRRnCSZDhnE` reached `READY` and was aliased to `https://terminus-web.vercel.app`; the production response returned HTTP 200 with the expected private WebSocket CSP.
+  - Live Chrome opened eight independent PowerShell sessions, rejected a ninth with `SESSION_OPEN_FAILED`, recovered a released slot, and resized the recovered terminal from 134 columns to 83 and back.
+  - At the eight-session limit, reloading the recovered tab immediately reduced direct PowerShell children from eight to seven; reconnect succeeded and restored exactly eight unique children. The reconnected terminal resized successfully.
+  - Disconnecting all controlled tabs reduced direct PowerShell children to zero. One intentional verified session was then reopened and marked deliverable in Chrome.
+  - Agent PID 16788 remained bound only to `127.0.0.1:8443`; Tailscale reported the 443 forward as `tailnet only`, including from `tailscale funnel status`.
 - Privacy evidence: no terminal plaintext, command text, clipboard data, secrets, reusable pairing material, or private keys were recorded.
 - Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
 - Product/task commit: `cae2ded7adeeefa9e5cd97e3561cf5bfd9d0570f`.
