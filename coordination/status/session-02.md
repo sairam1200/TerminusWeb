@@ -31,6 +31,25 @@
 - Product/task commit: `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
 
+## S02-002 iPhone clock-skew follow-up (2026-08-27)
+
+- State: owner implementation and automated validation complete; production iPhone retest pending deployment; independent review remains pending.
+- Product files: `apps/web/terminal/protocolTerminalAdapter.ts` and `protocolTerminalAdapter.test.ts`.
+- Real-device evidence: iPhone Safari reached the client-certificate-protected `/healthz` endpoint over the tailnet, then reached protocol `pairing` after first loading `/healthz` in the same Safari process. A fresh one-time code was consumed and local pairing approval succeeded. The browser then reported `AUTHORIZATION_EXPIRED` before opening a terminal; the agent created no PowerShell child.
+- Root cause: the browser calculated the freshly issued 12-hour authorization and 120-second resume-grant deadlines by subtracting the phone wall clock from Windows timestamps. Even small device-clock differences could reject a fresh authorization or resume grant despite the agent's authoritative monotonic deadlines.
+- Implementation: capture authorization and resume lifetimes with the browser monotonic clock. Wire timestamps remain schema-validated metadata, and the Windows agent remains authoritative for credential validity and server-side expiry. Authentication, mTLS, exact Origin, pairing, and credential storage are unchanged.
+- Commands/evidence:
+  - Focused `vitest run terminal/protocolTerminalAdapter.test.ts`: PASS (10/10).
+  - `npm test`: PASS (7 files, 38/38 tests).
+  - `npm run typecheck`: PASS.
+  - `npm run lint`: PASS.
+  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
+  - `git diff --check`: PASS before commit.
+- Privacy evidence: the one-time code was shown only in a local operator window and PC clipboard; it was not printed to task output, chat, logs, source, fixtures, or artifacts. Terminal plaintext was not inspected or recorded.
+- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
+- Product/task commit: `f22db4df3fa514a1ec68773c2c8e4466a6b3b6aa`.
+- Handoff commit: resolve from branch HEAD after the status-only handoff commit.
+
 ## S02-004 live refresh follow-up (2026-08-27)
 
 - State: owner implementation and live production validation complete; independent review remains pending.
