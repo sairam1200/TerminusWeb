@@ -290,7 +290,7 @@ describe("ProtocolTerminalAdapter", () => {
       }),
     );
     await waitFor(() => expect(adapter.getErrorCode()).toBe("RESUME_REJECTED"));
-    await waitFor(() => expect(socket.closeCode).toBe(1008));
+    await waitFor(() => expect(socket.closeCode).toBe(4008));
   });
 
   it("closes with BACKPRESSURE_LIMIT before the outbound buffer can grow unbounded", async () => {
@@ -311,8 +311,34 @@ describe("ProtocolTerminalAdapter", () => {
     await waitFor(() =>
       expect(adapter.getErrorCode()).toBe("BACKPRESSURE_LIMIT"),
     );
-    await waitFor(() => expect(socket.closeCode).toBe(1008));
+    await waitFor(() => expect(socket.closeCode).toBe(4008));
     expect(socket.sent).toHaveLength(0);
+  });
+
+  it("uses a browser-valid application close code for agent errors", async () => {
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(
+      new MemoryCredentialStore(cryptoProvider),
+      sockets,
+    );
+    const connection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = sockets[0] as MockWebSocket;
+    socket.open();
+    await connection;
+    const hello = socket.sentFrame(0);
+
+    await socket.receive(
+      agentFrame(hello.connectionId, 0, "error", {
+        code: "AUTHENTICATION_FAILED",
+        fatal: true,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(adapter.getErrorCode()).toBe("AUTHENTICATION_FAILED"),
+    );
+    expect(socket.closeCode).toBe(4008);
   });
 
   it("fails closed on malformed, binary, replayed, and wrong-subprotocol input", async () => {
@@ -324,12 +350,12 @@ describe("ProtocolTerminalAdapter", () => {
       {
         input: '{"version":"0.1"',
         expectedCode: "INVALID_JSON",
-        expectedClose: 1007,
+        expectedClose: 4007,
       },
       {
         input: new ArrayBuffer(1),
         expectedCode: "SCHEMA_INVALID",
-        expectedClose: 1002,
+        expectedClose: 4002,
       },
     ];
     for (const testCase of cases) {
@@ -370,7 +396,7 @@ describe("ProtocolTerminalAdapter", () => {
     await socket.receive(ack);
     await socket.receive(ack);
     await waitFor(() => expect(adapter.getErrorCode()).toBe("SEQUENCE_REPLAY"));
-    await waitFor(() => expect(socket.closeCode).toBe(1008));
+    await waitFor(() => expect(socket.closeCode).toBe(4008));
 
     const wrongProtocolSockets: MockWebSocket[] = [];
     const wrongProtocolAdapter = createAdapter(
