@@ -164,13 +164,13 @@ describe("ProtocolTerminalAdapter", () => {
     await waitFor(() => expect(adapter.getState()).toBe("disconnected"));
   });
 
-  it("answers a fresh challenge when the browser wall clock is ahead", async () => {
-    const clientNow = now + 5 * 60 * 1000;
+  it("opens a session when the browser wall clock is behind", async () => {
+    const clientNow = now - 5 * 60 * 1000;
     const store = new MemoryCredentialStore(cryptoProvider, () => clientNow);
     await store.saveCredential(
       credentialId,
       credentialSecret,
-      "2026-09-25T12:00:00.000Z",
+      "2026-09-25T11:55:00.000Z",
     );
     const sockets: MockWebSocket[] = [];
     const adapter = createAdapter(
@@ -201,7 +201,43 @@ describe("ProtocolTerminalAdapter", () => {
     );
 
     await waitFor(() => expect(socket.sentFrame(1).type).toBe("auth_response"));
+    await socket.receive(
+      agentFrame(hello.connectionId, 2, "auth_result", {
+        authenticated: true,
+        authorizationExpiresAt: "2026-08-27T00:00:00.000Z",
+      }),
+    );
+    await waitFor(() => expect(socket.sentFrame(2).type).toBe("open_session"));
     expect(adapter.getErrorCode()).toBeUndefined();
+  });
+
+  it("captures a fresh resume grant with a monotonic deadline", async () => {
+    const clientNow = now + 5 * 60 * 1000;
+    const monotonic = { value: 0 };
+    const store = new MemoryCredentialStore(cryptoProvider, () => clientNow);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T11:55:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(
+      store,
+      sockets,
+      () => monotonic.value,
+      () => clientNow,
+    );
+
+    await driveToDetached(adapter, sockets);
+    expect(adapter.getState()).toBe("detached");
+
+    monotonic.value = 120_001;
+    const reconnection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const socket = sockets[1] as MockWebSocket;
+    socket.open();
+    await reconnection;
+    await authenticate(socket, "open_session");
   });
 
   it("uses a transient pairing code and stores the returned credential as a key", async () => {

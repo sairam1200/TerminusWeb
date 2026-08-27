@@ -71,6 +71,8 @@ interface ResumeGrant {
 
 const SOCKET_OPEN = 1;
 const APPLICATION_CLOSE_CODE_OFFSET = 3000;
+const AUTHORIZATION_LIFETIME_MS = 12 * 60 * 60 * 1000;
+const RESUME_GRANT_LIFETIME_MS = 120_000;
 const textDecoder = new TextDecoder();
 
 function browserCloseCode(protocolCloseCode: number): number {
@@ -393,16 +395,11 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         this.resumeGrant = {
           sessionId: String(frame.payload.sessionId),
           value: String(frame.payload.resumeGrant),
-          monotonicDeadline:
-            this.monotonicNow() +
-            Math.min(
-              120_000,
-              Math.max(
-                0,
-                new Date(String(frame.payload.expiresAt)).valueOf() -
-                  this.now(),
-              ),
-            ),
+          // The wire timestamp is schema-validated metadata. The grant was
+          // freshly issued for this response, so capture its bounded lifetime
+          // on the browser's monotonic clock instead of comparing two devices'
+          // wall clocks.
+          monotonicDeadline: this.monotonicNow() + RESUME_GRANT_LIFETIME_MS,
         };
         if (this.resumeGrant.monotonicDeadline <= this.monotonicNow()) {
           throw new ProtocolViolation("RESUME_REJECTED", 1008);
@@ -589,11 +586,14 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
 
   private scheduleAuthorizationExpiry(expiresAt: string): boolean {
     this.clearAuthorizationTimer();
-    const remaining = new Date(expiresAt).valueOf() - this.now();
-    if (remaining <= 0 || remaining > 12 * 60 * 60 * 1000) return false;
+    // The server remains authoritative and closes the connection at its own
+    // monotonic authorization deadline. The timestamp is wire metadata; using
+    // it with the phone's wall clock can immediately expire a fresh grant when
+    // the two devices differ even slightly.
+    if (!Number.isFinite(new Date(expiresAt).valueOf())) return false;
     this.authorizationTimer = setTimeout(
       () => this.fail(new ProtocolViolation("AUTHORIZATION_EXPIRED", 1008)),
-      remaining,
+      AUTHORIZATION_LIFETIME_MS,
     );
     return true;
   }
