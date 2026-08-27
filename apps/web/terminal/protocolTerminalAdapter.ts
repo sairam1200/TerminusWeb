@@ -70,7 +70,19 @@ interface ResumeGrant {
 }
 
 const SOCKET_OPEN = 1;
+const APPLICATION_CLOSE_CODE_OFFSET = 3000;
 const textDecoder = new TextDecoder();
+
+function browserCloseCode(protocolCloseCode: number): number {
+  if (protocolCloseCode === 1000) return protocolCloseCode;
+  // The browser API reserves 1001-2999 for protocol/extension use and throws
+  // when script passes them to close(). Mirror our protocol code in the
+  // private 4000 range; the stable reason still carries the application error.
+  if (protocolCloseCode >= 1000 && protocolCloseCode <= 1999) {
+    return protocolCloseCode + APPLICATION_CLOSE_CODE_OFFSET;
+  }
+  return 4000;
+}
 
 export class ProtocolTerminalAdapter implements TerminalAdapter {
   readonly kind = "protocol-client" as const;
@@ -413,7 +425,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         this.errorCode = code;
         this.stopHeartbeat();
         this.setState("error");
-        this.socket?.close(1008, code);
+        this.socket?.close(browserCloseCode(1008), code);
         break;
       }
     }
@@ -529,9 +541,11 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     ) {
       void this.sendFrame("error", { code: violation.code, fatal: true })
         .catch(() => undefined)
-        .finally(() => socket.close(violation.closeCode, violation.code));
+        .finally(() =>
+          socket.close(browserCloseCode(violation.closeCode), violation.code),
+        );
     } else {
-      socket?.close(violation.closeCode, violation.code);
+      socket?.close(browserCloseCode(violation.closeCode), violation.code);
     }
     this.setState("error");
   }
