@@ -1,12 +1,42 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   TerminalAdapter,
   TerminalConnectionState,
 } from "../terminal/adapter";
 import { MockTerminalAdapter } from "../terminal/mockTerminalAdapter";
 import { TerminalShell } from "./TerminalShell";
+
+const xtermMock = vi.hoisted(() => ({
+  data: { listener: undefined as ((value: string) => void) | undefined },
+  dispose: vi.fn(),
+  focus: vi.fn(),
+  inputDispose: vi.fn(),
+  onData: vi.fn((listener: (value: string) => void) => {
+    xtermMock.data.listener = listener;
+    return { dispose: xtermMock.inputDispose };
+  }),
+  open: vi.fn(),
+  resize: vi.fn(),
+  write: vi.fn(),
+}));
+
+vi.mock("@xterm/xterm", () => ({
+  Terminal: class {
+    dispose = xtermMock.dispose;
+    focus = xtermMock.focus;
+    onData = xtermMock.onData;
+    open = xtermMock.open;
+    resize = xtermMock.resize;
+    write = xtermMock.write;
+  },
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  xtermMock.data.listener = undefined;
+});
 
 describe("TerminalShell", () => {
   it("labels the test double and keeps input disabled until connected", async () => {
@@ -122,6 +152,21 @@ describe("TerminalShell", () => {
     fireEvent(document, new Event("visibilitychange"));
     await waitFor(() => expect(adapter.connectCalls).toBe(1));
   });
+
+  it("streams protocol output through the ANSI terminal renderer", () => {
+    const adapter = new ProtocolUiAdapter("connected");
+    const inputSpy = vi.spyOn(adapter, "sendInput");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    adapter.emitOutput("\u001b[32msynthetic-output\u001b[0m");
+    xtermMock.data.listener?.("\u0003");
+
+    expect(xtermMock.write).toHaveBeenCalledWith(
+      "\u001b[32msynthetic-output\u001b[0m",
+    );
+    expect(inputSpy).toHaveBeenCalledWith("\u0003");
+    expect(screen.queryByText("synthetic-output")).not.toBeInTheDocument();
+  });
 });
 
 class FailingAdapter implements TerminalAdapter {
@@ -167,6 +212,7 @@ class ProtocolUiAdapter implements TerminalAdapter {
   private readonly listeners = new Set<
     (state: TerminalConnectionState) => void
   >();
+  private readonly outputListeners = new Set<(output: string) => void>();
   private state: TerminalConnectionState;
   connectCalls = 0;
   detachCalls = 0;
@@ -207,8 +253,13 @@ class ProtocolUiAdapter implements TerminalAdapter {
     return () => this.listeners.delete(listener);
   }
 
-  subscribeOutput(): () => void {
-    return () => undefined;
+  subscribeOutput(listener: (output: string) => void): () => void {
+    this.outputListeners.add(listener);
+    return () => this.outputListeners.delete(listener);
+  }
+
+  emitOutput(output: string): void {
+    this.outputListeners.forEach((listener) => listener(output));
   }
 
   private setState(state: TerminalConnectionState) {

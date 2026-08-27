@@ -221,7 +221,7 @@ h2 {
 }
 
 .terminalViewport {
-  min-height: clamp(18rem, 52dvh, 35rem);
+  height: clamp(18rem, 52dvh, 35rem);
   padding: clamp(1rem, 3vw, 1.75rem);
   overflow: auto;
   background:
@@ -235,6 +235,14 @@ h2 {
     ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: clamp(0.82rem, 2.2vw, 0.98rem);
   line-height: 1.55;
+}
+
+.terminalViewport .xterm {
+  height: 100%;
+}
+
+.terminalViewport .xterm-viewport {
+  background-color: transparent !important;
 }
 
 .terminalViewport p {

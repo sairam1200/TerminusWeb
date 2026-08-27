@@ -1,5 +1,6 @@
 "use client";
 
+import { Terminal } from "@xterm/xterm";
 import {
   type ClipboardEvent,
   type FormEvent,
@@ -56,6 +57,7 @@ export function TerminalShell({
         ? new ProtocolTerminalAdapter(protocolConfig)
         : new MockTerminalAdapter(),
   );
+  const protocolClient = adapter.kind === "protocol-client";
   const [connectionState, setConnectionState] = useState(adapter.getState());
   const [markers, setMarkers] = useState<string[]>([]);
   const [input, setInput] = useState("");
@@ -69,11 +71,55 @@ export function TerminalShell({
   );
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const xtermRef = useRef<Terminal | null>(null);
+  const pendingOutputRef = useRef<string[]>([]);
+  const connectedRef = useRef(connectionState === "connected");
+
+  useEffect(() => {
+    if (!protocolClient || terminalRef.current === null) return;
+
+    const terminal = new Terminal({
+      cols: MIN_COLUMNS,
+      rows: MIN_ROWS,
+      convertEol: false,
+      cursorBlink: true,
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace',
+      fontSize: 14,
+      scrollback: 5000,
+      theme: {
+        background: "#07100d",
+        cursor: "#67f7bd",
+        foreground: "#eef8f3",
+        selectionBackground: "#315f4c",
+      },
+    });
+    terminal.open(terminalRef.current);
+    const inputSubscription = terminal.onData((data) => {
+      if (connectedRef.current) adapter.sendInput(data);
+    });
+    xtermRef.current = terminal;
+    for (const output of pendingOutputRef.current) terminal.write(output);
+    pendingOutputRef.current = [];
+
+    return () => {
+      xtermRef.current = null;
+      pendingOutputRef.current = [];
+      inputSubscription.dispose();
+      terminal.dispose();
+    };
+  }, [adapter, protocolClient]);
 
   useEffect(() => {
     const unsubscribeState = adapter.subscribe(setConnectionState);
-    const unsubscribeOutput = adapter.subscribeOutput((marker) => {
-      setMarkers((current) => [...current.slice(-4), marker]);
+    const unsubscribeOutput = adapter.subscribeOutput((output) => {
+      if (protocolClient) {
+        const terminal = xtermRef.current;
+        if (terminal === null) pendingOutputRef.current.push(output);
+        else terminal.write(output);
+        return;
+      }
+      setMarkers((current) => [...current.slice(-4), output]);
     });
 
     return () => {
@@ -81,7 +127,7 @@ export function TerminalShell({
       unsubscribeOutput();
       void adapter.disconnect();
     };
-  }, [adapter]);
+  }, [adapter, protocolClient]);
 
   useEffect(() => {
     if (adapter.kind !== "protocol-client" || adapter.detach === undefined)
@@ -106,10 +152,12 @@ export function TerminalShell({
   }, [adapter]);
 
   useEffect(() => {
+    connectedRef.current = connectionState === "connected";
     if (connectionState === "connected") {
-      inputRef.current?.focus();
+      if (protocolClient) xtermRef.current?.focus();
+      else inputRef.current?.focus();
     }
-  }, [connectionState]);
+  }, [connectionState, protocolClient]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -124,6 +172,7 @@ export function TerminalShell({
         setOrientation(
           window.innerWidth <= window.innerHeight ? "portrait" : "landscape",
         );
+        xtermRef.current?.resize(nextViewport.columns, nextViewport.rows);
         adapter.resize(nextViewport);
       });
     };
@@ -188,7 +237,6 @@ export function TerminalShell({
   };
 
   const connected = connectionState === "connected";
-  const protocolClient = adapter.kind === "protocol-client";
   const busy = [
     "connecting",
     "authenticating",
@@ -287,18 +335,22 @@ export function TerminalShell({
           data-columns={viewport.columns}
           data-rows={viewport.rows}
           tabIndex={0}
-          onClick={() => inputRef.current?.focus()}
+          onClick={() => {
+            if (protocolClient) xtermRef.current?.focus();
+            else inputRef.current?.focus();
+          }}
         >
           {!protocolClient && (
             <p className="safetyNotice">
               No agent, shell, protocol, or network destination is connected.
             </p>
           )}
-          {markers.map((marker, index) => (
-            <p className="marker" key={`${marker}-${index}`}>
-              {marker}
-            </p>
-          ))}
+          {!protocolClient &&
+            markers.map((marker, index) => (
+              <p className="marker" key={`${marker}-${index}`}>
+                {marker}
+              </p>
+            ))}
           {!connected && !protocolClient && (
             <p className="terminalHint">
               Start the local simulation to exercise the interface.
