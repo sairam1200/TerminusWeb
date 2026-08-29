@@ -55,12 +55,16 @@ Every frame has exactly these members:
 - `terminal_output.data`: at most 32,768 decoded bytes.
 - Columns and rows: integers from 1 through 1,000.
 - At most one terminal session is open or detached for a protocol connection. Version 0.1 does not multiplex sessions.
-- An agent accepts at most eight concurrent terminal sessions across all
-  authenticated connections. Opening a ninth session fails with the existing
-  `SESSION_OPEN_FAILED` error before a terminal process is created. Open,
-  detached, and resuming sessions count toward the limit until their cleanup
-  completes. This is an admission-policy clarification and does not change the
-  version 0.1 frame schema or state machine.
+- Version 0.1 defines no protocol or application-policy numeric maximum for
+  aggregate terminal sessions across the agent. The agent MUST NOT reject a
+  valid authenticated `open_session` solely because any number of other
+  sessions exists. It attempts terminal creation unless shutdown has begun.
+- A genuine adapter `Open`, ConPTY, or system resource failure uses the existing
+  `SESSION_OPEN_FAILED` error and cleans up any partially created resources.
+  Open, detached, and resuming sessions remain independently tracked until
+  deterministic cleanup completes; that accounting is not a capacity
+  reservation or a fixed admission limit. These semantics do not change the
+  version 0.1 frame schema, error enum, or state machine.
 - Implementations MUST apply bounded outbound queues. The agent closes the terminal session with `BACKPRESSURE_LIMIT` rather than buffering unbounded terminal output.
 - Terminal bytes are opaque. The protocol does not log, inspect, normalize, or persist their content.
 
