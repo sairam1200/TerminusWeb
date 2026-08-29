@@ -238,7 +238,7 @@
 ## S01-004 no-fixed-cap contract follow-up handoff (2026-08-29)
 
 - Current task: `S01-004` — Clarify independent browser-tab sessions without a fixed agent cap.
-- State: owner contract follow-up and deterministic protocol validation complete; independent review remains pending.
+- State: owner Definition of Done complete (`done`); this product is not Session 06 `verified`.
 - Product: protocol 0.1 still scopes one terminal session to one authenticated WebSocket connection, but it defines no protocol or application-policy numeric maximum across the agent. A valid request is not rejected because other sessions exist; the agent attempts terminal creation unless shutdown has begun. Genuine adapter `Open`, ConPTY, or system resource failures preserve `SESSION_OPEN_FAILED` and clean partial resources. Open, detached, and resuming sessions remain accounted for until cleanup without reserving fixed-capacity slots. No frame, field, schema, enum, fixture, transcript, state-machine, or wire-version change was made.
 - Files changed: `docs/ARCHITECTURE.md`, `packages/protocol/README.md`, `packages/security/SECURITY-CONTRACT-0.1.md`, `coordination/facts.md`, and `coordination/tasks.yaml`.
 - Commands/evidence:
@@ -249,6 +249,6 @@
 - Compatibility: existing `SESSION_OPEN_FAILED` and `BACKPRESSURE_LIMIT` wire results are unchanged. Earlier S03-005 and S02-004 products prepared against the superseded fixed-cap clarification require their source owners to update and re-review them; they were not integrated or deployed.
 - Security/operations: pairing, credential authentication, TLS/mTLS, exact Origin validation, authorization expiry, credential revocation, deterministic process cleanup, bounded per-session output queues, loopback-only origin, Tailscale-private publication, and Funnel-disabled rules are unchanged. No live agent, browser, deployment, certificate, listener, Tailscale, or public-exposure mutation occurred.
 - Remaining limitation: no configured application count limit does not remove actual Windows/ConPTY resource limits; only a genuine creation/system failure may return `SESSION_OPEN_FAILED`. Above-eight real Windows and Chrome evidence belongs to S03-005 and S06-005.
-- Independent reviewer: pending; do not mark S01-004 `done` or any implementation `verified` without maker-independent evidence.
+- Independent reviewer/evidence: `/root/s01_unbounded_review` reviewed exact product `e795c391cbdb7a77c136ce5e15e0577331d436b7` and returned PASS with no findings reported. This satisfies the maker-independent owner `done` gate only; it is not Session 06 verification.
 - Product/task commit: `e795c391cbdb7a77c136ce5e15e0577331d436b7`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
