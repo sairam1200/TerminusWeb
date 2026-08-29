@@ -146,37 +146,37 @@ tasks:
   - id: S01-004
     owner: session_01
     state: in_progress
-    title: Clarify bounded independent browser-tab sessions in protocol 0.1
+    title: Clarify independent browser-tab sessions without a fixed agent cap
     depends_on: [S01-001]
-    evidence: Contract states one session per connection, eight sessions agent-wide, atomic ninth-session rejection before process creation, detached-session accounting, and no wire-version change.
+    evidence: Contract states one session per authenticated connection, no protocol/application numeric cap, admission until genuine terminal creation failure or shutdown, detached-session accounting, preserved cleanup/backpressure/security boundaries, and no wire-version or schema change.
 
   - id: S03-005
     owner: session_03
     state: in_progress
-    title: Implement eight independent bounded ConPTY sessions
+    title: Implement independent ConPTY sessions without a fixed agent cap
     depends_on: [S01-004, S03-003]
-    evidence: Positive sessions one through eight, atomic ninth rejection without process creation, independent input/resize/close, detach accounting, credential revocation, shutdown, and real Windows process-tree cleanup.
+    evidence: Concurrent positive sessions above eight with no count-based rejection, genuine adapter/Open and shutdown failure paths, independent input/resize/close, detach accounting, credential revocation, bounded per-session backpressure, and real Windows process-tree cleanup.
 
   - id: S02-004
     owner: session_02
     state: in_progress
-    title: Explain agent session-capacity rejection in the terminal UI
+    title: Explain genuine terminal-creation failure in the terminal UI
     depends_on: [S01-004, S02-002]
-    evidence: SESSION_OPEN_FAILED presents accessible guidance to close an earlier Terminus session and retry without changing authentication or protocol framing.
+    evidence: SESSION_OPEN_FAILED presents accessible retry guidance for genuine terminal creation/system failure or shutdown without count-based close-an-earlier-session guidance and without changing authentication or protocol framing.
 
   - id: S05-007
     owner: session_05
     state: blocked
-    title: Review bounded multi-session abuse and isolation controls
+    title: Review uncapped-by-policy multi-session abuse and isolation controls
     depends_on: [S03-005, S02-004]
-    evidence: Independent review of atomic admission, per-session isolation, detached capacity retention, resource exhaustion, revocation, cleanup, and unchanged private-access boundaries.
+    evidence: Independent review of no fixed admission cap, above-eight isolation, detached accounting, actual resource-exhaustion behavior, per-session backpressure, authentication rate limits, revocation, cleanup, and unchanged private-access boundaries.
 
   - id: S06-005
     owner: session_06
     state: blocked
-    title: Verify eight-tab independent terminal behavior
+    title: Verify above-eight independent terminal behavior
     depends_on: [S03-005, S02-004, S05-007]
-    evidence: Exact-commit automated and real Chrome proof for eight independent sessions, ninth-tab guidance, slot recovery, resize/reconnect, non-elevation, and leak-free cleanup.
+    evidence: Exact-commit automated and real Chrome proof for more than eight independent sessions with no count-based rejection, genuine open-failure guidance, resize/reconnect, non-elevation, revocation, bounded backpressure, and leak-free cleanup.
 
   - id: S01-002
     owner: session_01
