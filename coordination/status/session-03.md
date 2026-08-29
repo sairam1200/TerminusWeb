@@ -110,6 +110,25 @@
 - Revalidation: focused endpoint PASS; `go vet ./...` PASS; full `go test -count=1 ./...` PASS (`cmd/integration-host` 2.812s, `internal/endpoint` 7.170s, `internal/protocol` 0.599s, `internal/terminal` 13.287s); `go test -count=20 ./internal/endpoint` PASS in 112.414s; `git diff --check` and product `git show --check` PASS.
 - Independent review and integration remain pending. No live agent/network/deployment state changed.
 
+## S03-005 no-fixed-cap follow-up (2026-08-29)
+
+- State: `done` at the owner/reviewer level; this is not Session 06 `verified` evidence.
+- Exact architecture/security input: Session 01 product `e795c391cbdb7a77c136ce5e15e0577331d436b7`, consumed with `git show` without merge or cherry-pick. Protocol 0.1 still permits one terminal per authenticated connection while imposing no fixed aggregate application session count.
+- Exact product: `e13c4c8d2659125476c7458b45720892ee49fc24`.
+- Product files: `apps/windows-agent/internal/endpoint/session.go`, `apps/windows-agent/internal/endpoint/endpoint_test.go`, and `apps/windows-agent/README.md`.
+- Implementation: removed the legacy count predicate while retaining shutdown and closed-connection rejection, genuine adapter/ConPTY open failure reporting, independent active/detached accounting, cleanup, credential revocation, output bounds/backpressure, pairing/authentication, and private listener/security boundaries.
+- Evidence on non-elevated Microsoft Windows NT `10.0.26200.0` as `sai\\saira`:
+  - Focused positive/negative endpoint tests: PASS, including 12 authenticated endpoint sessions, 24 concurrent registry opens, genuine adapter-open failure, closed-connection rejection, and permanent shutdown rejection.
+  - `go vet ./...`: PASS (`go-vet-exit=0`).
+  - `go test -count=1 ./...`: PASS, including real Windows ConPTY/process cleanup (`cmd/integration-host` 1.655s, `internal/endpoint` 7.166s, `internal/protocol` 1.140s, `internal/terminal` 12.858s).
+  - Focused concurrency/negative suite with `-short -count=20`: PASS (`internal/endpoint` 2.230s).
+  - Final `gofmt -d` on changed Go files, `git diff --check`, product `git show --check`, changed-path review, and stale fixed-cap/ninth/reservation scan: PASS; no output/findings.
+  - Race mode remains unavailable because no supported C compiler/`gcc` exists in PATH; none was installed. Repeated synchronized concurrency tests are the applicable local evidence.
+- Independent reviewer: `/root/s03_uncapped_review` reviewed exact product `e13c4c8d2659125476c7458b45720892ee49fc24` read-only and returned PASS with no findings.
+- Operations: no live agent, listener, Tailscale policy, Funnel, certificate, deployment, or network state was changed; no terminal plaintext, credentials, pairing material, or secrets were recorded.
+- Queue/integration: Session 01 alone may transition the authoritative task queue; Session 06 must independently reproduce exact-commit evidence before `verified` or release claims.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
 ## S03-003 final remediation handoff (2026-08-26)
 
 - Final cumulative product tip: `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c` (ancestry includes `0e655bcbd03ca6e253d659f358dbf4d939e63ad6`, `63bae2286c9430d4706cc5afab68aaff2667f06e`, `c008604e66907a5c2d138dc801ce93f4881fbf64`, `6f428f1b4df618d4fd9e18569d80b5bdb564a8b9`, and exact S03-002 `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc`).
