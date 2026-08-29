@@ -249,16 +249,17 @@
 - Compatibility: existing `SESSION_OPEN_FAILED` and `BACKPRESSURE_LIMIT` wire results are unchanged. Earlier S03-005 and S02-004 products prepared against the superseded fixed-cap clarification require their source owners to update and re-review them; they were not integrated or deployed.
 - Security/operations: pairing, credential authentication, TLS/mTLS, exact Origin validation, authorization expiry, credential revocation, deterministic process cleanup, bounded per-session output queues, loopback-only origin, Tailscale-private publication, and Funnel-disabled rules are unchanged. No live agent, browser, deployment, certificate, listener, Tailscale, or public-exposure mutation occurred.
 - Remaining limitation: no configured application count limit does not remove actual Windows/ConPTY resource limits; only a genuine creation/system failure may return `SESSION_OPEN_FAILED`. Above-eight real Windows and Chrome evidence belongs to S03-005 and S06-005.
-- Independent reviewer/evidence: `/root/s01_unbounded_review` reviewed exact product `e795c391cbdb7a77c136ce5e15e0577331d436b7` and returned PASS with no findings reported. This satisfies the maker-independent owner `done` gate only; it is not Session 06 verification.
-- Product/task commit: `e795c391cbdb7a77c136ce5e15e0577331d436b7`.
+- Independent reviewer/evidence: `/root/s01_unbounded_review` reviewed the content-identical pre-author-rewrite product, now represented by exact product `6fc6737f5f6c64e1c06e7783ca9d5baecb4dbf17`, and returned PASS with no findings reported. This satisfies the maker-independent owner `done` gate only; it is not Session 06 verification.
+- Product/task commit: `6fc6737f5f6c64e1c06e7783ca9d5baecb4dbf17`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
 
 ## No-fixed-cap owner handoff reconciliation (2026-08-29)
 
 - Exact committed handoffs were read from their owner branches and passed `git show --check` plus product-to-handoff and handoff-to-branch ancestry checks:
-  - S01-004 product `e795c391cbdb7a77c136ce5e15e0577331d436b7`, handoff `5795a3f06878d09df29ae320813885cb2157e63d`, reviewer `/root/s01_unbounded_review`: PASS.
+  - S01-004 product `6fc6737f5f6c64e1c06e7783ca9d5baecb4dbf17`, handoff `7e12c744bde8361e59fbf57ab8a52a01531c9355`, reviewer `/root/s01_unbounded_review`: PASS. The authorized author-only history rewrite preserved the reviewed product tree exactly.
   - S02-004 product `bf7ca71b437907e7d25251e54d59355440797ad4`, handoff and `session/02-web-renderer` tip `1e52575afeacba4cff2b79567b229b9d84c00686`, reviewer `/root/s02_open_failure_review`: PASS.
   - S03-005 product `e13c4c8d2659125476c7458b45720892ee49fc24`, handoff and `session/03-windows-agent` tip `00faa091c89b904dc3128a823cbe282e3b48d238`, reviewer `/root/s03_uncapped_review`: PASS.
-- Queue commit `1fc34de0318d0f1fe13da310e86dd4cc692b6b34` transitions S01-004, S02-004, and S03-005 from `in_progress` to owner `done`. None is Session 06 `verified`.
+- Queue commit `ceb5882f488323bbcfc25375844123baf9eede11` transitions S01-004, S02-004, and S03-005 from `in_progress` to owner `done`. None is Session 06 `verified`.
 - S05-007 transitions deterministically from `blocked` to `ready` because S03-005 and S02-004 are now `done`. S06-005 remains `blocked` until S05-007 is owner-done; no integration, deployment, or live-state claim was made.
 - Queue commit author and committer are both `sairam1200 <sairamch10@gmail.com>` and its required co-author trailer occurs exactly once.
+- User-authorized history rewrite: the five Session 01 commits after `f35b64793e3b7e06f2af3268664c718c6f56b1c6` were recreated with author and committer `sairam1200 <sairamch10@gmail.com>` and unchanged commit messages/content except for this status-only SHA refresh. The pre-rewrite tip remains recoverable locally as `session01_pre_author_rewrite_backup`; the remote update uses an exact `--force-with-lease` against `0f78c1ff65420ef2f238c097fb2a5e585e0b51b8`.
