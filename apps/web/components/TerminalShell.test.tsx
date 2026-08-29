@@ -126,7 +126,7 @@ describe("TerminalShell", () => {
     ).toBeEnabled();
   });
 
-  it("asks the user to close an earlier tab when session admission fails", async () => {
+  it("gives bilingual system guidance when PowerShell cannot open", async () => {
     const user = userEvent.setup();
     const adapter = new FailingAdapter(
       "SESSION_OPEN_FAILED",
@@ -137,10 +137,19 @@ describe("TerminalShell", () => {
     await user.click(screen.getByRole("button", { name: "Connect privately" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "If eight sessions are already active, close an earlier Terminus tab or disconnect one session, then retry.",
+      "PowerShell could not open. Check the Windows agent and available system resources, then retry.",
     );
     expect(
       screen.getByRole("button", { name: "Retry private connection" }),
+    ).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Switch to Swedish" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "PowerShell kunde inte öppnas. Kontrollera Windows-agenten och tillgängliga systemresurser och försök sedan igen.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Försök ansluta privat igen" }),
     ).toBeEnabled();
   });
 
@@ -224,7 +233,7 @@ describe("TerminalShell", () => {
     await waitFor(() => expect(adapter.connectCalls).toBe(1));
   });
 
-  it("does not detach during page teardown so refresh can release capacity", async () => {
+  it("does not detach during page teardown so refresh releases server resources", async () => {
     const adapter = new ProtocolUiAdapter("connected");
     render(<TerminalShell adapterFactory={() => adapter} />);
     Object.defineProperty(document, "visibilityState", {

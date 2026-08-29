@@ -128,8 +128,8 @@ const TRANSLATIONS = {
     portrait: "portrait",
     landscape: "landscape",
     sendKey: (key: string) => `Send ${key}`,
-    sessionLimit:
-      "A new PowerShell session could not open. If eight sessions are already active, close an earlier Terminus tab or disconnect one session, then retry.",
+    sessionOpenFailure:
+      "PowerShell could not open. Check the Windows agent and available system resources, then retry.",
     terminalOutput: "Private terminal output",
     simulatedOutput: "Simulated terminal output",
     privateTraffic:
@@ -213,8 +213,8 @@ const TRANSLATIONS = {
     portrait: "stående",
     landscape: "liggande",
     sendKey: (key: string) => `Skicka ${key}`,
-    sessionLimit:
-      "En ny PowerShell-session kunde inte öppnas. Om åtta sessioner redan är aktiva, stäng en tidigare Terminus-flik eller koppla från en session och försök igen.",
+    sessionOpenFailure:
+      "PowerShell kunde inte öppnas. Kontrollera Windows-agenten och tillgängliga systemresurser och försök sedan igen.",
     terminalOutput: "Privat terminalutdata",
     simulatedOutput: "Simulerad terminalutdata",
     privateTraffic:
@@ -509,7 +509,7 @@ export function TerminalShell({
       // Safari may freeze a background page before even a short timer runs.
       // A persisted pagehide keeps this document alive, so detach now and
       // retain the memory-only resume grant for pageshow. A real reload/close
-      // remains undetached so transport teardown releases server capacity.
+      // remains undetached so transport teardown releases server resources.
       if (event.persisted && adapter.getState() === "connected") void detach();
     };
     const pageShowing = (event: PageTransitionEvent) => {
@@ -814,7 +814,7 @@ export function TerminalShell({
 
       {connectionState === "error" && errorCode === "SESSION_OPEN_FAILED" && (
         <p className="sessionOpenGuidance" role="alert">
-          {t.sessionLimit}
+          {t.sessionOpenFailure}
         </p>
       )}
 
