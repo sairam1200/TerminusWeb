@@ -145,28 +145,28 @@ tasks:
 
   - id: S01-004
     owner: session_01
-    state: in_progress
+    state: done
     title: Clarify independent browser-tab sessions without a fixed agent cap
     depends_on: [S01-001]
     evidence: Contract states one session per authenticated connection, no protocol/application numeric cap, admission until genuine terminal creation failure or shutdown, detached-session accounting, preserved cleanup/backpressure/security boundaries, and no wire-version or schema change.
 
   - id: S03-005
     owner: session_03
-    state: in_progress
+    state: done
     title: Implement independent ConPTY sessions without a fixed agent cap
     depends_on: [S01-004, S03-003]
     evidence: Concurrent positive sessions above eight with no count-based rejection, genuine adapter/Open and shutdown failure paths, independent input/resize/close, detach accounting, credential revocation, bounded per-session backpressure, and real Windows process-tree cleanup.
 
   - id: S02-004
     owner: session_02
-    state: in_progress
+    state: done
     title: Explain genuine terminal-creation failure in the terminal UI
     depends_on: [S01-004, S02-002]
     evidence: SESSION_OPEN_FAILED presents accessible retry guidance for genuine terminal creation/system failure or shutdown without count-based close-an-earlier-session guidance and without changing authentication or protocol framing.
 
   - id: S05-007
     owner: session_05
-    state: blocked
+    state: ready
     title: Review uncapped-by-policy multi-session abuse and isolation controls
     depends_on: [S03-005, S02-004]
     evidence: Independent review of no fixed admission cap, above-eight isolation, detached accounting, actual resource-exhaustion behavior, per-session backpressure, authentication rate limits, revocation, cleanup, and unchanged private-access boundaries.
