@@ -13,8 +13,6 @@ import (
 	"terminus/windows-agent/internal/terminal"
 )
 
-const maxConcurrentSessions = 8
-
 type sessionRegistry struct {
 	mu           sync.Mutex
 	adapter      terminal.Adapter
@@ -42,7 +40,7 @@ type managedSession struct {
 
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
 	r.mu.Lock()
-	if r.shuttingDown || len(r.active) >= maxConcurrentSessions {
+	if r.shuttingDown {
 		r.mu.Unlock()
 		return "", errors.New("terminal session admission is unavailable")
 	}

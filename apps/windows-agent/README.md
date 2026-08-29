@@ -24,10 +24,12 @@ The endpoint accepts only `/terminal`, the exact `terminus.v0_1` WebSocket
 subprotocol, and one configured serialized HTTPS Origin. Pairing, credential
 authentication, per-direction sequencing, payload limits, heartbeat/liveness,
 one terminal per WebSocket connection, detach/resume, output backpressure, and
-cleanup are enforced in process. The agent admits at most eight active or
-detached terminal sessions across all connections; a ninth request is rejected
-before a ConPTY process is created. A caller must inject a private-device
-identity resolver, mandatory
+cleanup are enforced in process. The registry independently tracks every active
+or detached terminal session but applies no fixed numeric session cap. Every
+valid authenticated connection may attempt to create its one terminal unless
+endpoint shutdown has begun; genuine adapter, ConPTY, or system resource
+failures use the existing generic `SESSION_OPEN_FAILED` result. A caller must
+inject a private-device identity resolver, mandatory
 local pairing confirmation, and a credential store protected with the Windows
 facility appropriate to the eventual service identity. There is deliberately
 no plaintext credential-store implementation. Store deletion is part of the
