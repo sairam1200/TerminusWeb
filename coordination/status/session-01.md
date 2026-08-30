@@ -1,5 +1,57 @@
 # Session 01 Status
 
+## S01-005 remembered-session protocol 0.2 handoff (2026-08-30)
+
+- Current task: `S01-005` — Freeze remembered-session and bounded-history
+  contract version 0.2.
+- State: owner `done`; exact cumulative product received named independent
+  review PASS. This is not Session 06 integrated-candidate verification.
+- Exact dependency: S01-004 product
+  `6fc6737f5f6c64e1c06e7783ca9d5baecb4dbf17`, owner `done`.
+- Product: protocol 0.2 keeps one terminal per authenticated WebSocket and no
+  fixed aggregate session-count cap. Each page gets a canonical lowercase
+  60-bit Crockford Base32 ID formatted `xxxx-xxxx-xxxx` and represented only as
+  `#/s/{id}`. The ID is a locator, never authorization; reopen requires the
+  same authenticated credential and required private source-device identity.
+- History: the Windows agent retains only the latest 262,144 output bytes per
+  running session and 16,777,216 bytes agent-wide in volatile memory. Replay
+  uses contiguous byte offsets, explicit truncation, one atomic owner, a
+  snapshot barrier before live output, bounded queues, and no browser/disk/
+  Vercel/control-plane plaintext persistence. New Session closes and
+  invalidates the old ID before assigning a new fragment.
+- Files: `packages/protocol/README-0.2.md`, schema/state machine, accepted and
+  rejected 0.2 fixtures, reference verifier, 0.2 security contract/auth vector,
+  architecture/shared-contract docs, facts, and task queue. Frozen 0.1
+  executable artifacts remain unchanged and verify independently.
+- Owner evidence: `npm run verify` PASS — protocol 0.1: 22 transcripts, 27
+  fixtures, one positive auth vector, four negative mutations; protocol 0.2:
+  23 transcripts, 32 fixtures, one positive auth vector, four negative
+  mutations. JSON parse, `git diff --check`, exact `git show --check`, author,
+  compatibility, and secret/plaintext scans passed.
+- Independent reviewer/evidence: `/root/s06_006_origin` first returned FAIL on
+  exact `f631c2812140cdf8180579561372b6829b635977` with four Medium fixture/
+  verifier gaps. Cumulative `c010c446ddae77d74ff9aaede1437cee73d775a9`
+  closed separate device/credential denial, executable history budgets,
+  wrong-session offset, and New Session lifecycle coverage. A second FAIL
+  identified an unreachable global-budget seed and silent close-failure state;
+  cumulative exact tip `f9a70299974734c3eeb920697d2dfa4717148a9a`
+  replaced them with 64 valid full per-session rings plus one-byte global
+  eviction and visible `new_session_error`. Final fresh review of exact
+  `f9a7029...` returned PASS with no severity findings and independently
+  reproduced all gates and invalid-seed probes.
+- Assumptions/limits: history covers raw terminal output only and is deliberately
+  volatile; agent restart, explicit close/New Session, credential expiry or
+  revocation, process exit, containment/resource failure, and shutdown discard
+  it. Raw replay rendering must disable clipboard/navigation/notification/
+  external-load side effects. Physical browser and integrated live evidence
+  belong to S06-007 after consumers and security review complete.
+- Scope: no web/agent implementation, terminal plaintext, certificate,
+  listener, browser, Tailscale, Vercel, merge, push, or deployment mutation.
+- Product/task commits: `f631c2812140cdf8180579561372b6829b635977`,
+  `c010c446ddae77d74ff9aaede1437cee73d775a9`, and cumulative reviewed tip
+  `f9a70299974734c3eeb920697d2dfa4717148a9a`.
+- Handoff commit: resolve from branch HEAD after this status-only commit.
+
 - Current task: `S01-001` — freeze protocol and security contract version 0.1
 - State: done
 - Branch: `session/01-architecture`
