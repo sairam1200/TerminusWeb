@@ -1,16 +1,48 @@
 # Session 05 Status
 
-- Current task: `S05-006` - Verify the existing Tailscale-private raw TCP route and application mTLS boundary without mutation.
-- State: `done` at the owner/reviewer level; this is not Session 06 `verified` evidence and does not clear release.
-- Queue inspected: exact Session 01 commit `8e87e8f422bc10f77573e41555d6d46d237431ad`; S03-004 and S05-001 are `done`, S05-005 was completed first, and S05-006 is `ready` in that immutable queue snapshot.
-- Exact inputs: S03-004 endpoint product `ce5ac98b8a79abd42fee6083345709c77aaf669c`; S03 handoff `ec1e6520acfb7775b1ce20da5b83719c6df3d4c4`; S05-005 product `e4a362922f2487b685d06e27dd02bd2f7b52e656`; S05-005 status `214af37854c86d68effc21c2cc59fbd432403713`.
-- Product/test commit: `e823add5f5495e9f66339dfcd3f81731d3e3cfd9`.
-- Files: `tests/security/Test-S05-006.ps1` and `docs/security/S05-006-private-route-verification.md`.
-- Read-only result: the harness proved one tailnet-only raw TCP route `443 -> 127.0.0.1:8443`; valid installed ClientAuth succeeded twice and exact Origin/subprotocol completed WSS upgrade; unrelated/no certificate, wrong Origin (403), and wrong subprotocol (426) were denied. Loopback 8443 and private Serve 443 connected, while LAN and Tailscale-origin direct 8443 did not.
-- Mutation guard: the owner run's canonical pre/post snapshot was byte-identical with SHA-256 `2bf95fce25f37fdbaaa7580aedb7a27f5cb481d9c8872001fcf78fa055956329`. The snapshot covered the selected device, route, audience, listener/process, firewall profiles, and DNS. No route, grants/ACL, DNS, Funnel, firewall, listener, process, certificate, credential, push, merge, or deployment mutation occurred.
-- Rollback evidence: `tailscale serve get-config --all <file>` returned only `{ "version": "0.0.1" }` and did not export the node-local raw TCP route, so it is not a sufficient rollback artifact. Because the task was read-only and the pre/post snapshots matched, the safe rollback was no action; the working route was not reset. Future authorized reconstruction would require the exact raw TCP 443-to-loopback-8443 mapping after a complete state audit.
-- Independent reviewer/evidence: `/root/s03_006_independent` returned PASS WITH ONE NON-BLOCKING REPRODUCIBILITY CAVEAT on exact product `e823add5f5495e9f66339dfcd3f81731d3e3cfd9`. The reviewer reproduced the full read-only matrix using the current fixed-host PID 24048, with an identical pre/post hash `2b9360f1bc59be8f0782e0b2609082c93537594d91c8483846b7b6db1f45fbf0`; AST, diff/show, owned-scope, clean-tree, and secret scans passed. No mutation occurred.
-- Reviewer caveat: the committed default PID 5384 is a time-bound observation and became stale after an authorized host restart. Reproduction against a restarted host must supply the supported `-ExpectedProcessId` override (24048 in the independent run); this does not change the route or security result.
-- Limits/blockers: no independently controlled wrong-tailnet peer, complete additive grants/ACL policy, device approval state, external-public probe, mobile Chrome/Firefox behavior, complete application pairing/authentication, terminal frames, or reconnect/resume flow is claimed. These remain later independent policy/browser/release gates; the one-time certificate setup and silent reconnect acceptance is preserved, not declared browser-verified here.
-- Commands/evidence: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/security/Test-S05-006.ps1 -ClientCertificateThumbprint <public-thumbprint>` passed for the owner with PID 5384; the independent rerun passed with `-ExpectedProcessId 24048`. `git show --check e823add5f5495e9f66339dfcd3f81731d3e3cfd9`, owned-path inspection, and secret-safe review passed.
+- Current task: `S05-002` - Review protocol 0.1 and both consumer implementations.
+- State: `done` at the Session 05 owner/reviewer level; this is not Session 06
+  `verified` evidence and does not clear release.
+- Queue inspected: exact Session 01 commit
+  `fd56e75f97f9ed4ad559aa653984bdefc8ed7037`, status baseline
+  `710194431da4e705e5f4d5cfed014581cf81dd0f`; S05-002 is `ready` with its
+  dependencies complete.
+- Exact inputs: protocol/security
+  `910b69e24f464bb3e89152f3e5881beb9b706b76`; web consumer
+  `16e850a34b56a315fb78c137ddae6d38220180ea`; Windows agent cumulative fix
+  `0446e685489d2e9d09715d6cc5ba011a5471a540`; live reports
+  `e4a362922f2487b685d06e27dd02bd2f7b52e656` and
+  `e823add5f5495e9f66339dfcd3f81731d3e3cfd9`.
+- Product/task commit: `4c44f403a11160c23927f6eb35c142ea31e3f8a5`.
+- Files: `docs/security/S05-002-first-slice-security-review.md`.
+- Verdict: no unresolved Critical, High, or Medium product finding was
+  reproduced. Protocol/authentication, pairing/reconnect storage, Origin,
+  subprotocol, mTLS, replay/state, revocation, stalled-open, rate/resource,
+  secret/plaintext, and direct browser-agent boundaries passed within the
+  documented deterministic and live evidence scopes.
+- Commands/evidence: exact protocol `npm run verify` passed schema semantics,
+  22 transcripts, 27 fixtures, one positive auth vector, and four negative
+  mutations. The exact agent selected adversarial suite passed 20 repetitions;
+  full tests, vet, terminal lifecycle, and real ConPTY cleanup also passed. The
+  exact web focused 11/11 and full 42/42 tests, typecheck, lint, formatting, and
+  configured build passed. Direct WebSocket/no-relay and secret-boundary source
+  scans passed. S05-006 provides bounded live tailnet-only raw TCP, mTLS,
+  Origin, and subprotocol evidence without an application frame.
+- Independent reviewer/evidence: `/root` returned PASS with no severity
+  findings on exact product `4c44f403a11160c23927f6eb35c142ea31e3f8a5`
+  after checking the one-file owned scope, full report accuracy, exact object
+  identities, consumer product-to-status tree parity, clean worktree,
+  `git show`/diff checks, and secret-pattern scan.
+- Assumptions: the deterministic browser-storage regression uses
+  `fake-indexeddb` and Node WebCrypto; live transport evidence is not a complete
+  application auth/resume flow. Run-specific Next HTML hashes are
+  informational and are not immutable artifact identity.
+- Limits/blockers: release evidence still requires a confirmed live Chrome
+  application flow with stored reconnect and above-eight sessions,
+  Chrome/Firefox on Android and iPhone, a named wrong-tailnet peer plus complete
+  grants/approval audit, an external non-tailnet probe, a CGO/compiler-capable
+  Go race run, and an exact integrated/deployed candidate. These do not block
+  S05-002 owner `done`, but no browser/mobile/release claim is made.
+- Mutation guard: no product, live network, browser, certificate, credential,
+  push, merge, or deployment mutation was performed.
 - Handoff commit: resolve from branch HEAD after this status-only commit.
