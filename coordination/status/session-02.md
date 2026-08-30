@@ -1,5 +1,74 @@
 # Session 02 Status
 
+- Current task: `S02-002` - Integrate browser terminal with protocol 0.1
+- State: owner/reviewer `done`; Session 06 live authentication/reconnect
+  verification remains pending action-time user confirmation
+- Branch: `session/02-web-renderer`
+- Files changed: `apps/web/terminal/protocolTerminalAdapter.test.ts` and
+  `apps/web/evidence/S02-002-browser-integration-20260830.md`
+- Commands/evidence: focused adapter tests passed 11/11; full web tests passed
+  42/42 across 7 files; protocol 0.1 verifier passed 22 transcripts, 27
+  fixtures, 1 positive auth vector, and 4 negative mutations; typecheck, lint,
+  targeted Prettier, exact-Origin/endpoint Next.js production build,
+  `git diff --check`, and product `git show --check` passed.
+- Independent reviewer/evidence: `/root/s06_006_origin` reviewed and
+  reproduced exact product
+  `16e850a34b56a315fb78c137ddae6d38220180ea`; PASS with no severity
+  findings.
+- Assumptions: application credential reuse is web-owned and is proven by a
+  fresh IndexedDB store/adapter after one pairing exchange. Client-certificate
+  selection/reuse belongs to the browser/OS TLS stack and requires real-browser
+  evidence.
+- Blockers/requests: clicking **Connect privately** would transmit an
+  authentication proof to the user's private agent and open a real ConPTY
+  session. The action is held pending immediate confirmation and remains a
+  Session 06/live release gate. Physical Android and iPhone Chrome/Firefox
+  behavior also remains outside this owner run.
+- Product/task commit:
+  `16e850a34b56a315fb78c137ddae6d38220180ea`
+- Handoff commit: resolve from branch HEAD after the status-only handoff commit
+
+## S02-002 one-time identity and credential reuse follow-up (2026-08-30)
+
+- Queue input: exact Session 01 queue
+  `3428aaa35ceca06fc21c41a001a370a463235aa5`; S02-002 was `ready`.
+  Exact web baseline was
+  `bf7ca71b437907e7d25251e54d59355440797ad4`.
+- Integration inputs: exact Windows-agent product
+  `0446e685489d2e9d09715d6cc5ba011a5471a540`, endpoint-ready response at
+  `c092189`, and private-path review products `e4a362922` and
+  `e823add5f`. At final owner capture, coordinator evidence reported the
+  non-elevated fixed host at PID 6932 on only `127.0.0.1:8443`, valid
+  installed-certificate health HTTP 200/TLS 1.3, and no-certificate denial.
+- Product: exact commit
+  `16e850a34b56a315fb78c137ddae6d38220180ea` adds a deterministic browser
+  credential-reuse regression and its evidence report. One synthetic pairing
+  persists a non-extractable key in IndexedDB; a fresh store and adapter then
+  authenticate without a second pairing state or `pairing_request`. Existing
+  tests separately cover detach/resume with the stored credential.
+- Real-browser boundary: Chrome loaded
+  `https://terminus-web.vercel.app/` in the disconnected protocol-client
+  state, displayed the fixed private endpoint, and produced no console
+  errors/warnings. At 390 by 844 CSS pixels it had no horizontal overflow.
+  An existing client-certificate-protected `/healthz` tab was present.
+  No new authentication proof or terminal frame was sent by this owner run.
+- Build evidence: the configured build embedded only
+  `wss://sai.tailf8dcea.ts.net` in `connect-src`. The recorded generated
+  `index.html` checksum is evidence for that single run only. The independent
+  reviewer reproduced the exact build but obtained a different HTML checksum
+  because Next.js build identity is nondeterministic; the checksum is not a
+  reproducible source hash and must not be used as an integration invariant.
+- Independent review: `/root/s06_006_origin` reproduced focused 11/11 and
+  full 42/42 tests, typecheck, lint, targeted Prettier, configured build,
+  lockfile dependencies, exact CSP, scope, clean worktree, and secret/plaintext
+  scans. Verdict: PASS with no severity findings.
+- Limitations: current live authenticated Chrome connect/reconnect, silent
+  browser certificate reuse across those connections, physical mobile browser
+  behavior, and deployment of the exact cumulative web candidate are not
+  claimed. Session 06 must reproduce those release gates.
+
+## Previous current-task summary
+
 - Current task: `S02-004` — Explain genuine terminal-creation failure without fixed-cap guidance
 - State: done at the owner level; Session 06 verification remains pending
 - Branch: `session/02-web-renderer`
