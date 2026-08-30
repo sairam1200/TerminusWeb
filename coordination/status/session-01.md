@@ -280,3 +280,10 @@
 - Session 06 status commits `13bed730095e3da2d37e4d157fa203cc0fa56594` and `807042ebb6f4be3ef555897fc1f82f8ed8a2721f` preserve the initial pending-review state and then record named independent reviewer `/root/mobile_cert_compat`. The reviewer caught two identifiers mistyped in the review request, resolved and checked the actual full SHAs above, and returned conditional PASS. Unchanged CRLF formatting drift and non-reproduction of the report's external Vercel GETs remain disclosed caveats.
 - Queue commit `0c57852` transitions S06-006 from `ready` to owner `done` and S03-004 from `blocked` to `ready`. No other task state changed. This is not Session 06 release verification and does not authorize public exposure.
 - No merge, push, deployment, DNS/Tailscale policy or route mutation, Funnel, certificate generation/installation, or host start occurred in this queue transition.
+
+## Stalled-open availability remediation gate (2026-08-30)
+
+- Session 05 product `cec6ea3467e1a8b3eb31920280b91eb30c60fa7a` and status handoff `d34243a93c30690f3a450924976046133c0aad13` complete S05-007 with named independent reviewer `/root/s05_007_independent`: PASS for report/test accuracy, not release clearance.
+- Finding `S05-007-AVAIL-001` is Medium and release-blocking: exact S03 product `e13c4c8d2659125476c7458b45720892ee49fc24` holds the registry-wide mutex across synchronous `Adapter.Open`, so one stalled terminal creation blocks unrelated cleanup, revocation, and shutdown. Reviewer overlay tests passed 3/3 and 10 repeated runs; full exact S03 tests and focused S02 tests passed. Actual OS exhaustion was not induced or claimed.
+- Queue commit `e9b6dd023178c18638e03b96cfd0543670c7d7f3` marks S05-007 owner `done`, adds ready owner task S03-006 for lock-free terminal creation with atomic admission revalidation/cleanup, and makes S06-005 depend on the remediation. It does not restore a fixed numeric session cap.
+- No product repair, merge, push, deployment, certificate, listener, or Tailscale mutation occurred in this queue transition.
