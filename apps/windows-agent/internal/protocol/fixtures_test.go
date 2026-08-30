@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const contractCommit = "910b69e24f464bb3e89152f3e5881beb9b706b76"
+const contractCommit = "f9a70299974734c3eeb920697d2dfa4717148a9a"
 
 type fixtureFile struct {
 	Transcripts []fixtureTranscript `json:"transcripts"`
@@ -23,7 +23,17 @@ type fixtureTranscript struct {
 			Client uint64 `json:"client_to_agent"`
 			Agent  uint64 `json:"agent_to_client"`
 		} `json:"nextSequence"`
+		NextOutputOffset uint64 `json:"nextOutputOffset"`
+		SessionID        string `json:"sessionId"`
+		History          *struct {
+			Begun     bool   `json:"begun"`
+			Cursor    uint64 `json:"cursor"`
+			EndOffset uint64 `json:"endOffset"`
+		} `json:"history"`
 	} `json:"initial"`
+	Context struct {
+		ReopenDecision string `json:"reopenDecision"`
+	} `json:"context"`
 	Frames []struct {
 		Direction Direction      `json:"direction"`
 		Raw       string         `json:"raw"`
@@ -34,18 +44,20 @@ type fixtureTranscript struct {
 		} `json:"generate"`
 	} `json:"frames"`
 	Expected struct {
-		ConnectionState ConnectionState `json:"connectionState"`
-		SessionState    SessionState    `json:"sessionState"`
-		Code            ErrorCode       `json:"code"`
-		AtFrame         int             `json:"atFrame"`
+		ConnectionState  ConnectionState `json:"connectionState"`
+		SessionState     SessionState    `json:"sessionState"`
+		NextOutputOffset uint64          `json:"nextOutputOffset"`
+		Code             ErrorCode       `json:"code"`
+		AtFrame          int             `json:"atFrame"`
 	} `json:"expected"`
 }
 
 func TestCanonicalAcceptedTranscripts(t *testing.T) {
-	fixtures := loadFixtures(t, "packages/protocol/fixtures/accepted.json")
+	fixtures := loadFixtures(t, "packages/protocol/fixtures/accepted-0.2.json")
 	for _, transcript := range fixtures.Transcripts {
 		t.Run(transcript.ID, func(t *testing.T) {
 			machine := NewMachine(transcript.Initial.ConnectionState, transcript.Initial.SessionState, transcript.Initial.NextSequence.Client, transcript.Initial.NextSequence.Agent)
+			configureFixtureMachine(machine, transcript)
 			for index, item := range transcript.Frames {
 				data := fixtureBytes(t, item.Raw, item.Frame, item.Generate.DecodedBytes, item.Generate.WireTrailingSpaces)
 				decoded, err := Decode(data)
@@ -59,19 +71,22 @@ func TestCanonicalAcceptedTranscripts(t *testing.T) {
 			if machine.Connection != transcript.Expected.ConnectionState || machine.Session != transcript.Expected.SessionState {
 				t.Fatalf("state = %s/%s, want %s/%s", machine.Connection, machine.Session, transcript.Expected.ConnectionState, transcript.Expected.SessionState)
 			}
+			if machine.OutputOffset() != transcript.Expected.NextOutputOffset {
+				t.Fatalf("output offset = %d, want %d", machine.OutputOffset(), transcript.Expected.NextOutputOffset)
+			}
 		})
 	}
 }
 
 func TestCanonicalRejectedSyntaxAndState(t *testing.T) {
-	semantic := map[string]bool{"unsupported-negotiated-version": true, "expired-authentication-challenge": true, "wrong-authentication-proof": true, "replayed-resume-grant": true}
-	fixtures := loadFixtures(t, "packages/protocol/fixtures/rejected.json")
+	fixtures := loadFixtures(t, "packages/protocol/fixtures/rejected-0.2.json")
 	for _, transcript := range fixtures.Transcripts {
-		if semantic[transcript.ID] {
+		if transcript.Context.ReopenDecision != "" && transcript.Context.ReopenDecision != "allow" {
 			continue
 		}
 		t.Run(transcript.ID, func(t *testing.T) {
 			machine := NewMachine(transcript.Initial.ConnectionState, transcript.Initial.SessionState, transcript.Initial.NextSequence.Client, transcript.Initial.NextSequence.Agent)
+			configureFixtureMachine(machine, transcript)
 			var got error
 			for _, item := range transcript.Frames {
 				data := fixtureBytes(t, item.Raw, item.Frame, item.Generate.DecodedBytes, item.Generate.WireTrailingSpaces)
@@ -93,7 +108,7 @@ func TestCanonicalRejectedSyntaxAndState(t *testing.T) {
 }
 
 func TestRequiredEnvelopeAndOptionalCredentialPresence(t *testing.T) {
-	base := `{"version":"0.1","type":"hello","connectionId":"10000000-0000-4000-8000-000000000001","sequence":0,"payload":{"clientInstanceId":"40000000-0000-4000-8000-000000000001","supportedVersions":["0.1"]}}`
+	base := `{"version":"0.2","type":"hello","connectionId":"10000000-0000-4000-8000-000000000001","sequence":0,"payload":{"clientInstanceId":"40000000-0000-4000-8000-000000000001","supportedVersions":["0.2"]}}`
 	for _, item := range []struct{ name, raw string }{
 		{"missing-sequence", strings.Replace(base, `,"sequence":0`, "", 1)},
 		{"null-sequence", strings.Replace(base, `"sequence":0`, `"sequence":null`, 1)},
@@ -105,6 +120,16 @@ func TestRequiredEnvelopeAndOptionalCredentialPresence(t *testing.T) {
 				t.Fatalf("code = %s", code)
 			}
 		})
+	}
+}
+
+func configureFixtureMachine(machine *Machine, transcript fixtureTranscript) {
+	machine.nextOutput = transcript.Initial.NextOutputOffset
+	machine.sessionID = transcript.Initial.SessionID
+	if transcript.Initial.History != nil {
+		machine.historyBegun = transcript.Initial.History.Begun
+		machine.historyCursor = transcript.Initial.History.Cursor
+		machine.historyEnd = transcript.Initial.History.EndOffset
 	}
 }
 

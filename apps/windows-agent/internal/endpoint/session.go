@@ -1,11 +1,9 @@
 package endpoint
 
 import (
+	"container/list"
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
 	"errors"
-	"io"
 	"sync"
 	"time"
 
@@ -13,37 +11,66 @@ import (
 	"terminus/windows-agent/internal/terminal"
 )
 
+const sessionIDGenerationAttempts = 8
+
 type sessionRegistry struct {
 	mu                 sync.Mutex
 	adapter            terminal.Adapter
 	now                func() time.Time
+	newSessionID       func() (string, error)
 	active             map[string]*managedSession
 	pending            map[*pendingSessionOpen]struct{}
 	revokedCredentials map[string]struct{}
+	history            list.List
+	historyBytes       int
 	shuttingDown       bool
 }
 
 type pendingSessionOpen struct {
+	id           string
 	owner        *connection
 	credentialID string
 	cancel       context.CancelFunc
 }
 
 type managedSession struct {
-	id                   string
-	credentialID         string
-	terminal             terminal.Session
-	cancel               context.CancelFunc
-	owner                *connection
-	detached             bool
-	resuming             bool
-	grant                [32]byte
-	grantExpires         time.Time
-	detachedConnectionID string
-	pending              []byte
-	closed               bool
-	closeDone            chan struct{}
-	closeErr             error
+	id                string
+	credentialID      string
+	credentialExpires time.Time
+	deviceIdentity    string
+	terminal          terminal.Session
+	cancel            context.CancelFunc
+	owner             *connection
+	detached          bool
+	replaying         bool
+	history           list.List
+	historyBytes      int
+	nextOffset        uint64
+	closed            bool
+	closeDone         chan struct{}
+	closeErr          error
+}
+
+type historyEntry struct {
+	session        *managedSession
+	offset         uint64
+	data           []byte
+	sessionElement *list.Element
+	globalElement  *list.Element
+}
+
+type historyFrame struct {
+	offset uint64
+	data   []byte
+}
+
+type reopenSnapshot struct {
+	managed   *managedSession
+	id        string
+	start     uint64
+	end       uint64
+	truncated bool
+	frames    []historyFrame
 }
 
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
@@ -53,8 +80,13 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 		r.mu.Unlock()
 		return "", err
 	}
+	id, err := r.reserveSessionIDLocked()
+	if err != nil {
+		r.mu.Unlock()
+		return "", err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	pending := &pendingSessionOpen{owner: owner, credentialID: credentialID, cancel: cancel}
+	pending := &pendingSessionOpen{id: id, owner: owner, credentialID: credentialID, cancel: cancel}
 	if r.pending == nil {
 		r.pending = make(map[*pendingSessionOpen]struct{})
 	}
@@ -67,14 +99,11 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 		r.removePending(pending)
 		return "", err
 	}
-	id, err := randomUUID()
-	if err != nil {
-		_ = session.Close()
-		cancel()
-		r.removePending(pending)
-		return "", err
+	credential := owner.credentialSnapshot()
+	managed := &managedSession{
+		id: id, credentialID: credentialID, deviceIdentity: owner.device,
+		credentialExpires: credential.ExpiresAt, terminal: session, cancel: cancel, owner: owner, closeDone: make(chan struct{}),
 	}
-	managed := &managedSession{id: id, credentialID: credentialID, terminal: session, cancel: cancel, owner: owner, closeDone: make(chan struct{})}
 	r.mu.Lock()
 	delete(r.pending, pending)
 	if err := r.admissionError(owner, credentialID); err != nil {
@@ -85,10 +114,72 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 	if r.active == nil {
 		r.active = make(map[string]*managedSession)
 	}
+	if _, exists := r.active[id]; exists {
+		r.mu.Unlock()
+		cancel()
+		return "", errors.Join(errors.New("terminal session identifier collision"), session.Close())
+	}
 	r.active[id] = managed
 	r.mu.Unlock()
 	go r.copyOutput(managed)
+	if !managed.credentialExpires.IsZero() {
+		go r.expireManagedCredential(managed, managed.credentialExpires)
+	}
 	return id, nil
+}
+
+func (r *sessionRegistry) expireManagedCredential(managed *managedSession, expires time.Time) {
+	now := time.Now
+	if r.now != nil {
+		now = r.now
+	}
+	delay := expires.Sub(now())
+	if delay < 0 {
+		delay = 0
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-managed.closeDone:
+		return
+	}
+	r.mu.Lock()
+	expired := r.active[managed.id] == managed && !managed.closed && !now().Before(expires)
+	r.mu.Unlock()
+	if expired {
+		_ = r.closeManaged(managed, "credential_expired")
+	}
+}
+
+func (r *sessionRegistry) reserveSessionIDLocked() (string, error) {
+	generator := r.newSessionID
+	if generator == nil {
+		generator = randomSessionID
+	}
+	for range sessionIDGenerationAttempts {
+		id, err := generator()
+		if err != nil {
+			return "", err
+		}
+		if !protocol.ValidSessionID(id) || r.idInUseLocked(id) {
+			continue
+		}
+		return id, nil
+	}
+	return "", errors.New("terminal session identifier generation exhausted")
+}
+
+func (r *sessionRegistry) idInUseLocked(id string) bool {
+	if r.active[id] != nil {
+		return true
+	}
+	for pending := range r.pending {
+		if pending.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 // admissionError must be called with r.mu held. Keeping the final validation
@@ -136,87 +227,145 @@ func (r *sessionRegistry) resize(owner *connection, id string, dimensions protoc
 	return managed.terminal.Resize(dimensions.Columns, dimensions.Rows)
 }
 
-func (r *sessionRegistry) detach(owner *connection, id string) (string, time.Time, error) {
+func (r *sessionRegistry) detach(owner *connection, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	managed, err := r.owned(owner, id)
 	if err != nil {
-		return "", time.Time{}, err
-	}
-	if _, err := rand.Read(managed.grant[:]); err != nil {
-		return "", time.Time{}, err
-	}
-	managed.detached = true
-	managed.detachedConnectionID = owner.connectionID()
-	managed.owner = nil
-	managed.grantExpires = r.now().Add(resumeLifetime)
-	expires := managed.grantExpires
-	go r.expire(managed, expires)
-	return protocol.EncodeBase64(managed.grant[:]), expires, nil
-}
-
-func (r *sessionRegistry) resume(owner *connection, id, encodedGrant string, dimensions protocol.Dimensions) error {
-	provided, valid := protocol.DecodeBase64(encodedGrant, 32)
-	if !valid {
-		return errors.New("invalid resume grant")
-	}
-	r.mu.Lock()
-	managed := r.active[id]
-	if managed == nil || !managed.detached || managed.resuming || managed.credentialID != owner.credentialID() || managed.detachedConnectionID == owner.connectionID() || !r.now().Before(managed.grantExpires) || subtle.ConstantTimeCompare(provided, managed.grant[:]) != 1 {
-		r.mu.Unlock()
-		return errors.New("resume grant rejected")
-	}
-	managed.grant = [32]byte{}
-	managed.resuming = true
-	r.mu.Unlock()
-	if err := managed.terminal.Resize(dimensions.Columns, dimensions.Rows); err != nil {
-		r.closeManaged(managed, "protocol_error")
 		return err
 	}
+	managed.owner = nil
+	managed.detached = true
 	return nil
 }
 
-func (r *sessionRegistry) activateResume(owner *connection, id string) error {
+func (r *sessionRegistry) beginReopen(owner *connection, id string, dimensions protocol.Dimensions) (reopenSnapshot, error) {
+	r.mu.Lock()
+	managed := r.active[id]
+	if managed == nil || managed.closed || !managed.detached || managed.replaying || managed.owner != nil ||
+		managed.credentialID != owner.credentialID() || managed.deviceIdentity == "" || owner.device == "" || managed.deviceIdentity != owner.device ||
+		r.shuttingDown || r.credentialRevokedLocked(managed.credentialID) || owner.isDone() {
+		r.mu.Unlock()
+		return reopenSnapshot{}, errors.New("session reopen rejected")
+	}
+	managed.owner = owner
+	managed.detached = false
+	managed.replaying = true
+	snapshot := r.snapshotLocked(managed)
+	r.mu.Unlock()
+
+	if err := managed.terminal.Resize(dimensions.Columns, dimensions.Rows); err != nil {
+		_ = r.closeManaged(managed, "protocol_error")
+		return reopenSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (r *sessionRegistry) snapshotLocked(managed *managedSession) reopenSnapshot {
+	start := managed.nextOffset
+	if front := managed.history.Front(); front != nil {
+		start = front.Value.(*historyEntry).offset
+	}
+	snapshot := reopenSnapshot{managed: managed, id: managed.id, start: start, end: managed.nextOffset, truncated: start > 0}
+	for element := managed.history.Front(); element != nil; element = element.Next() {
+		entry := element.Value.(*historyEntry)
+		snapshot.frames = append(snapshot.frames, historyFrame{offset: entry.offset, data: append([]byte(nil), entry.data...)})
+	}
+	return snapshot
+}
+
+func (r *sessionRegistry) replay(owner *connection, snapshot reopenSnapshot) error {
+	owner.setOutputOffset(snapshot.end)
+	if err := owner.send("session_reopened", protocol.SessionIDPayload{SessionID: snapshot.id}); err != nil {
+		r.releaseReopen(owner, snapshot.managed)
+		return err
+	}
+	if err := owner.send("history_begin", protocol.HistoryBeginPayload{SessionID: snapshot.id, StartOffset: snapshot.start, EndOffset: snapshot.end, Truncated: snapshot.truncated}); err != nil {
+		r.releaseReopen(owner, snapshot.managed)
+		return err
+	}
+	for _, frame := range snapshot.frames {
+		if err := owner.send("history_chunk", protocol.HistoryChunkPayload{SessionID: snapshot.id, Offset: frame.offset, Data: protocol.EncodeBase64(frame.data)}); err != nil {
+			r.releaseReopen(owner, snapshot.managed)
+			return err
+		}
+	}
+	if err := owner.send("history_end", protocol.HistoryEndPayload{SessionID: snapshot.id, EndOffset: snapshot.end}); err != nil {
+		r.releaseReopen(owner, snapshot.managed)
+		return err
+	}
+
+	cursor := snapshot.end
 	for {
 		r.mu.Lock()
-		managed := r.active[id]
-		if managed == nil || !managed.resuming {
+		managed := r.active[snapshot.id]
+		if managed != snapshot.managed || managed.closed || managed.owner != owner || !managed.replaying {
 			r.mu.Unlock()
-			return errors.New("session is not resuming")
+			return errors.New("session reopen lost ownership")
 		}
-		if len(managed.pending) == 0 {
-			managed.owner = owner
-			managed.detached = false
-			managed.detachedConnectionID = ""
-			managed.resuming = false
+		start := managed.nextOffset
+		if front := managed.history.Front(); front != nil {
+			start = front.Value.(*historyEntry).offset
+		}
+		if cursor < start {
+			r.mu.Unlock()
+			r.releaseReopen(owner, managed)
+			return protocol.NewError(protocol.BackpressureLimit, 1008, errors.New("replay history was evicted before delivery"))
+		}
+		end := managed.nextOffset
+		if cursor == end {
+			managed.replaying = false
 			r.mu.Unlock()
 			return nil
 		}
-		pending := append([]byte(nil), managed.pending...)
-		managed.pending = nil
+		frames, ok := historyRangeLocked(managed, cursor, end)
 		r.mu.Unlock()
-		for len(pending) > 0 {
-			length := len(pending)
-			if length > protocol.MaxTerminalOutput {
-				length = protocol.MaxTerminalOutput
-			}
-			if err := owner.send("terminal_output", protocol.TerminalPayload{SessionID: id, Data: protocol.EncodeBase64(pending[:length])}); err != nil {
-				r.closeManaged(managed, "backpressure_limit")
+		if !ok {
+			r.releaseReopen(owner, managed)
+			return protocol.NewError(protocol.BackpressureLimit, 1008, errors.New("replay history is no longer contiguous"))
+		}
+		for _, frame := range frames {
+			if err := owner.send("terminal_output", protocol.TerminalOutputPayload{SessionID: snapshot.id, Offset: frame.offset, Data: protocol.EncodeBase64(frame.data)}); err != nil {
+				r.releaseReopen(owner, managed)
 				return err
 			}
-			pending = pending[length:]
+			cursor = frame.offset + uint64(len(frame.data))
 		}
 	}
 }
 
-func (r *sessionRegistry) abortTransition(id string) {
-	r.mu.Lock()
-	managed := r.active[id]
-	shouldClose := managed != nil && (managed.detached || managed.resuming)
-	r.mu.Unlock()
-	if shouldClose {
-		_ = r.closeManaged(managed, "protocol_error")
+func historyRangeLocked(managed *managedSession, start, end uint64) ([]historyFrame, bool) {
+	cursor := start
+	var frames []historyFrame
+	for element := managed.history.Front(); element != nil && cursor < end; element = element.Next() {
+		entry := element.Value.(*historyEntry)
+		entryEnd := entry.offset + uint64(len(entry.data))
+		if entryEnd <= cursor {
+			continue
+		}
+		if entry.offset > cursor {
+			return nil, false
+		}
+		offset := int(cursor - entry.offset)
+		length := len(entry.data) - offset
+		if remaining := int(end - cursor); length > remaining {
+			length = remaining
+		}
+		data := append([]byte(nil), entry.data[offset:offset+length]...)
+		frames = append(frames, historyFrame{offset: cursor, data: data})
+		cursor += uint64(length)
 	}
+	return frames, cursor == end
+}
+
+func (r *sessionRegistry) releaseReopen(owner *connection, managed *managedSession) {
+	r.mu.Lock()
+	if r.active[managed.id] == managed && !managed.closed && managed.owner == owner && managed.replaying {
+		managed.owner = nil
+		managed.detached = true
+		managed.replaying = false
+	}
+	r.mu.Unlock()
 }
 
 func (r *sessionRegistry) revokeCredential(credentialID string) error {
@@ -225,36 +374,46 @@ func (r *sessionRegistry) revokeCredential(credentialID string) error {
 		r.revokedCredentials = make(map[string]struct{})
 	}
 	r.revokedCredentials[credentialID] = struct{}{}
-	// Endpoint.RevokeCredential emits the generic authentication failure before
-	// connection shutdown calls disconnected and cancels pending opens. Doing
-	// that cancellation here could let the open path win connection.fail with
-	// SESSION_OPEN_FAILED. The revoked marker below still makes the final
-	// admission check reject and close a terminal returned by an adapter that
-	// ignores cancellation.
+	managed := r.sessionsForCredentialLocked(credentialID)
+	r.mu.Unlock()
+	return r.closeSessions(managed, "credential_revoked")
+}
+
+func (r *sessionRegistry) expireCredential(credentialID string) error {
+	r.mu.Lock()
+	managed := r.sessionsForCredentialLocked(credentialID)
+	r.mu.Unlock()
+	return r.closeSessions(managed, "credential_expired")
+}
+
+func (r *sessionRegistry) sessionsForCredentialLocked(credentialID string) []*managedSession {
 	managed := make([]*managedSession, 0)
 	for _, session := range r.active {
 		if session.credentialID == credentialID {
 			managed = append(managed, session)
 		}
 	}
-	r.mu.Unlock()
+	return managed
+}
+
+func (r *sessionRegistry) closeSessions(managed []*managedSession, reason string) error {
 	var errs []error
 	for _, session := range managed {
-		if err := r.closeManaged(session, "protocol_error"); err != nil {
+		if err := r.closeManaged(session, reason); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (r *sessionRegistry) closeBy(owner *connection, id, _ string) error {
+func (r *sessionRegistry) closeBy(owner *connection, id, reason string) error {
 	r.mu.Lock()
 	managed, err := r.owned(owner, id)
 	r.mu.Unlock()
 	if err != nil {
 		return protocol.NewError(protocol.InvalidState, 1008, err)
 	}
-	return r.closeManaged(managed, "user_request")
+	return r.closeManaged(managed, reason)
 }
 
 func (r *sessionRegistry) close(reason string) error {
@@ -264,13 +423,7 @@ func (r *sessionRegistry) close(reason string) error {
 		managed = append(managed, session)
 	}
 	r.mu.Unlock()
-	var errs []error
-	for _, session := range managed {
-		if err := r.closeManaged(session, reason); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	return r.closeSessions(managed, reason)
 }
 
 func (r *sessionRegistry) shutdown() error {
@@ -297,7 +450,8 @@ func (r *sessionRegistry) shutdown() error {
 	return errors.Join(errs...)
 }
 
-func (r *sessionRegistry) disconnected(owner *connection) {
+func (r *sessionRegistry) disconnected(owner *connection, destroy ...bool) {
+	shouldDestroy := len(destroy) > 0 && destroy[0]
 	r.mu.Lock()
 	pending := make([]context.CancelFunc, 0)
 	for open := range r.pending {
@@ -307,8 +461,15 @@ func (r *sessionRegistry) disconnected(owner *connection) {
 	}
 	managed := make([]*managedSession, 0, 1)
 	for _, session := range r.active {
-		if session.owner == owner && !session.detached {
+		if session.owner != owner {
+			continue
+		}
+		if shouldDestroy {
 			managed = append(managed, session)
+		} else {
+			session.owner = nil
+			session.detached = true
+			session.replaying = false
 		}
 	}
 	r.mu.Unlock()
@@ -322,10 +483,15 @@ func (r *sessionRegistry) disconnected(owner *connection) {
 
 func (r *sessionRegistry) owned(owner *connection, id string) (*managedSession, error) {
 	managed := r.active[id]
-	if managed == nil || managed.owner != owner || managed.detached || managed.closed {
+	if managed == nil || managed.owner != owner || managed.detached || managed.replaying || managed.closed {
 		return nil, errors.New("terminal session is not attached to this connection")
 	}
 	return managed, nil
+}
+
+func (r *sessionRegistry) credentialRevokedLocked(credentialID string) bool {
+	_, revoked := r.revokedCredentials[credentialID]
+	return revoked
 }
 
 func (r *sessionRegistry) copyOutput(managed *managedSession) {
@@ -335,51 +501,86 @@ func (r *sessionRegistry) copyOutput(managed *managedSession) {
 		if n > 0 {
 			chunk := append([]byte(nil), buffer[:n]...)
 			r.mu.Lock()
-			if managed.closed {
-				r.mu.Unlock()
+			offset, appended := r.appendHistoryLocked(managed, chunk)
+			owner := managed.owner
+			replaying := managed.replaying
+			r.mu.Unlock()
+			if !appended {
+				_ = r.closeManaged(managed, "protocol_error")
 				return
 			}
-			owner := managed.owner
-			if managed.detached || managed.resuming || owner == nil {
-				if len(managed.pending)+len(chunk) > maxPendingOutput {
-					r.mu.Unlock()
-					_ = r.closeManaged(managed, "backpressure_limit")
-					return
-				}
-				managed.pending = append(managed.pending, chunk...)
-				r.mu.Unlock()
-			} else {
-				r.mu.Unlock()
-				if sendErr := owner.send("terminal_output", protocol.TerminalPayload{SessionID: managed.id, Data: protocol.EncodeBase64(chunk)}); sendErr != nil {
-					_ = r.closeManaged(managed, "backpressure_limit")
-					return
+			if owner != nil && !replaying {
+				if sendErr := owner.send("terminal_output", protocol.TerminalOutputPayload{SessionID: managed.id, Offset: offset, Data: protocol.EncodeBase64(chunk)}); sendErr != nil {
+					if code, _, ok := protocol.ErrorDetails(sendErr); ok && code == protocol.BackpressureLimit {
+						_ = r.closeManaged(managed, "backpressure_limit")
+						return
+					}
+					r.detachAfterTransportSendFailure(managed, owner)
 				}
 			}
 		}
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				_ = r.closeManaged(managed, "process_exit")
-			} else {
-				_ = r.closeManaged(managed, "process_exit")
-			}
+			_ = r.closeManaged(managed, "process_exit")
 			return
 		}
 	}
 }
 
-func (r *sessionRegistry) expire(managed *managedSession, expected time.Time) {
-	delay := expected.Sub(r.now())
-	if delay < 0 {
-		delay = 0
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	<-timer.C
+func (r *sessionRegistry) detachAfterTransportSendFailure(managed *managedSession, owner *connection) {
 	r.mu.Lock()
-	expired := r.active[managed.id] == managed && managed.detached && !managed.resuming && managed.grantExpires.Equal(expected) && !r.now().Before(expected)
+	if r.active[managed.id] == managed && !managed.closed && managed.owner == owner {
+		managed.owner = nil
+		managed.detached = true
+		managed.replaying = false
+	}
 	r.mu.Unlock()
-	if expired {
-		_ = r.closeManaged(managed, "idle_timeout")
+}
+
+func (r *sessionRegistry) appendHistoryLocked(managed *managedSession, data []byte) (uint64, bool) {
+	if managed.closed || len(data) == 0 || managed.nextOffset > protocol.MaxSequence-uint64(len(data)) {
+		return 0, false
+	}
+	offset := managed.nextOffset
+	managed.nextOffset += uint64(len(data))
+	entry := &historyEntry{session: managed, offset: offset, data: append([]byte(nil), data...)}
+	entry.sessionElement = managed.history.PushBack(entry)
+	entry.globalElement = r.history.PushBack(entry)
+	managed.historyBytes += len(entry.data)
+	r.historyBytes += len(entry.data)
+	for managed.historyBytes > protocol.MaxSessionHistory {
+		r.evictEntryBytesLocked(managed.history.Front().Value.(*historyEntry), managed.historyBytes-protocol.MaxSessionHistory)
+	}
+	for r.historyBytes > protocol.MaxAgentHistory {
+		r.evictEntryBytesLocked(r.history.Front().Value.(*historyEntry), r.historyBytes-protocol.MaxAgentHistory)
+	}
+	return offset, true
+}
+
+func (r *sessionRegistry) evictEntryBytesLocked(entry *historyEntry, count int) {
+	if count <= 0 {
+		return
+	}
+	if count >= len(entry.data) {
+		count = len(entry.data)
+		clear(entry.data)
+		entry.session.history.Remove(entry.sessionElement)
+		r.history.Remove(entry.globalElement)
+		entry.sessionElement = nil
+		entry.globalElement = nil
+		entry.data = nil
+	} else {
+		clear(entry.data[:count])
+		entry.data = entry.data[count:]
+		entry.offset += uint64(count)
+	}
+	entry.session.historyBytes -= count
+	r.historyBytes -= count
+}
+
+func (r *sessionRegistry) removeHistoryLocked(managed *managedSession) {
+	for managed.history.Front() != nil {
+		entry := managed.history.Front().Value.(*historyEntry)
+		r.evictEntryBytesLocked(entry, len(entry.data))
 	}
 }
 
@@ -401,6 +602,7 @@ func (r *sessionRegistry) closeManagedMode(managed *managedSession, reason strin
 	managed.closed = true
 	owner := managed.owner
 	managed.owner = nil
+	r.removeHistoryLocked(managed)
 	r.mu.Unlock()
 	managed.cancel()
 	err := managed.terminal.Close()

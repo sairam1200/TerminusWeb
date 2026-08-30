@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	Version                  = "0.1"
-	Subprotocol              = "terminus.v0_1"
+	Version                  = "0.2"
+	Subprotocol              = "terminus.v0_2"
 	MaxWireBytes             = 65_536
 	MaxTerminalInput         = 16_384
 	MaxTerminalOutput        = 32_768
+	MaxSessionHistory        = 262_144
+	MaxAgentHistory          = 16_777_216
 	MaxSequence       uint64 = 9_007_199_254_740_991
 )
 
@@ -50,7 +52,8 @@ const (
 	SessionOpen      SessionState = "OPEN"
 	SessionDetaching SessionState = "DETACHING"
 	SessionDetached  SessionState = "DETACHED"
-	SessionResuming  SessionState = "RESUMING"
+	SessionReopening SessionState = "REOPENING"
+	SessionReplaying SessionState = "REPLAYING"
 	SessionClosing   SessionState = "CLOSING"
 	SessionClosed    SessionState = "CLOSED"
 )
@@ -58,25 +61,26 @@ const (
 type ErrorCode string
 
 const (
-	InvalidJSON          ErrorCode = "INVALID_JSON"
-	SchemaInvalid        ErrorCode = "SCHEMA_INVALID"
-	UnsupportedVersion   ErrorCode = "UNSUPPORTED_VERSION"
-	UnknownType          ErrorCode = "UNKNOWN_TYPE"
-	FrameTooLarge        ErrorCode = "FRAME_TOO_LARGE"
-	PayloadTooLarge      ErrorCode = "PAYLOAD_TOO_LARGE"
-	SequenceReplay       ErrorCode = "SEQUENCE_REPLAY"
-	SequenceGap          ErrorCode = "SEQUENCE_GAP"
-	InvalidState         ErrorCode = "INVALID_STATE"
-	DirectionViolation   ErrorCode = "DIRECTION_VIOLATION"
-	OriginRejected       ErrorCode = "ORIGIN_REJECTED"
-	PairingFailed        ErrorCode = "PAIRING_FAILED"
-	AuthenticationFailed ErrorCode = "AUTHENTICATION_FAILED"
-	AuthorizationExpired ErrorCode = "AUTHORIZATION_EXPIRED"
-	ResumeRejected       ErrorCode = "RESUME_REJECTED"
-	HelloTimeout         ErrorCode = "HELLO_TIMEOUT"
-	HeartbeatTimeout     ErrorCode = "HEARTBEAT_TIMEOUT"
-	SessionOpenFailed    ErrorCode = "SESSION_OPEN_FAILED"
-	BackpressureLimit    ErrorCode = "BACKPRESSURE_LIMIT"
+	InvalidJSON           ErrorCode = "INVALID_JSON"
+	SchemaInvalid         ErrorCode = "SCHEMA_INVALID"
+	UnsupportedVersion    ErrorCode = "UNSUPPORTED_VERSION"
+	UnknownType           ErrorCode = "UNKNOWN_TYPE"
+	FrameTooLarge         ErrorCode = "FRAME_TOO_LARGE"
+	PayloadTooLarge       ErrorCode = "PAYLOAD_TOO_LARGE"
+	SequenceReplay        ErrorCode = "SEQUENCE_REPLAY"
+	SequenceGap           ErrorCode = "SEQUENCE_GAP"
+	OutputOffsetInvalid   ErrorCode = "OUTPUT_OFFSET_INVALID"
+	InvalidState          ErrorCode = "INVALID_STATE"
+	DirectionViolation    ErrorCode = "DIRECTION_VIOLATION"
+	OriginRejected        ErrorCode = "ORIGIN_REJECTED"
+	PairingFailed         ErrorCode = "PAIRING_FAILED"
+	AuthenticationFailed  ErrorCode = "AUTHENTICATION_FAILED"
+	AuthorizationExpired  ErrorCode = "AUTHORIZATION_EXPIRED"
+	SessionReopenRejected ErrorCode = "SESSION_REOPEN_REJECTED"
+	HelloTimeout          ErrorCode = "HELLO_TIMEOUT"
+	HeartbeatTimeout      ErrorCode = "HEARTBEAT_TIMEOUT"
+	SessionOpenFailed     ErrorCode = "SESSION_OPEN_FAILED"
+	BackpressureLimit     ErrorCode = "BACKPRESSURE_LIMIT"
 )
 
 type ProtocolError struct {
@@ -176,6 +180,12 @@ type TerminalPayload struct {
 	Data      string `json:"data"`
 }
 
+type TerminalOutputPayload struct {
+	SessionID string `json:"sessionId"`
+	Offset    uint64 `json:"offset"`
+	Data      string `json:"data"`
+}
+
 type ResizePayload struct {
 	SessionID  string     `json:"sessionId"`
 	Dimensions Dimensions `json:"dimensions"`
@@ -186,16 +196,27 @@ type HeartbeatPayload struct {
 	Nonce string `json:"nonce"`
 }
 
-type SessionDetachedPayload struct {
-	SessionID   string `json:"sessionId"`
-	ResumeGrant string `json:"resumeGrant"`
-	ExpiresAt   string `json:"expiresAt"`
+type ReopenSessionPayload struct {
+	SessionID  string     `json:"sessionId"`
+	Dimensions Dimensions `json:"dimensions"`
 }
 
-type ResumeSessionPayload struct {
-	SessionID   string     `json:"sessionId"`
-	ResumeGrant string     `json:"resumeGrant"`
-	Dimensions  Dimensions `json:"dimensions"`
+type HistoryBeginPayload struct {
+	SessionID   string `json:"sessionId"`
+	StartOffset uint64 `json:"startOffset"`
+	EndOffset   uint64 `json:"endOffset"`
+	Truncated   bool   `json:"truncated"`
+}
+
+type HistoryChunkPayload struct {
+	SessionID string `json:"sessionId"`
+	Offset    uint64 `json:"offset"`
+	Data      string `json:"data"`
+}
+
+type HistoryEndPayload struct {
+	SessionID string `json:"sessionId"`
+	EndOffset uint64 `json:"endOffset"`
 }
 
 type CloseSessionPayload struct {
@@ -216,19 +237,22 @@ type ErrorPayload struct {
 var (
 	ErrSequenceExhausted = errors.New("protocol sequence exhausted")
 	uuidV4Pattern        = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	sessionIDPattern     = regexp.MustCompile(`^[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]{4}$`)
 	timestampPattern     = regexp.MustCompile(`^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\.[0-9]{3}Z$`)
 	typeSet              = map[string]struct{}{
 		"hello": {}, "hello_ack": {}, "pairing_request": {}, "pairing_result": {},
 		"auth_challenge": {}, "auth_response": {}, "auth_result": {}, "open_session": {},
-		"session_opened": {}, "terminal_input": {}, "terminal_output": {}, "resize": {},
-		"heartbeat": {}, "detach": {}, "session_detached": {}, "resume_session": {},
-		"session_resumed": {}, "close_session": {}, "session_closed": {}, "error": {},
+		"session_opened": {}, "reopen_session": {}, "session_reopened": {},
+		"history_begin": {}, "history_chunk": {}, "history_end": {},
+		"terminal_input": {}, "terminal_output": {}, "resize": {},
+		"heartbeat": {}, "detach": {}, "session_detached": {},
+		"close_session": {}, "session_closed": {}, "error": {},
 	}
 	errorCodeSet = map[ErrorCode]struct{}{
 		InvalidJSON: {}, SchemaInvalid: {}, UnsupportedVersion: {}, UnknownType: {},
-		FrameTooLarge: {}, PayloadTooLarge: {}, SequenceReplay: {}, SequenceGap: {},
+		FrameTooLarge: {}, PayloadTooLarge: {}, SequenceReplay: {}, SequenceGap: {}, OutputOffsetInvalid: {},
 		InvalidState: {}, DirectionViolation: {}, OriginRejected: {}, PairingFailed: {},
-		AuthenticationFailed: {}, AuthorizationExpired: {}, ResumeRejected: {},
+		AuthenticationFailed: {}, AuthorizationExpired: {}, SessionReopenRejected: {},
 		HelloTimeout: {}, HeartbeatTimeout: {}, SessionOpenFailed: {}, BackpressureLimit: {},
 	}
 )
@@ -301,7 +325,8 @@ func Marshal(frame Frame) ([]byte, error) {
 	return data, nil
 }
 
-func ValidUUID(value string) bool { return uuidV4Pattern.MatchString(value) }
+func ValidUUID(value string) bool      { return uuidV4Pattern.MatchString(value) }
+func ValidSessionID(value string) bool { return sessionIDPattern.MatchString(value) }
 
 func FormatTimestamp(value time.Time) string { return value.UTC().Format("2006-01-02T15:04:05.000Z") }
 
@@ -337,18 +362,24 @@ func decodePayload(messageType string, raw json.RawMessage) (any, error) {
 		target = &AuthResultPayload{}
 	case "open_session":
 		target = &OpenSessionPayload{}
-	case "session_opened", "session_resumed", "detach":
+	case "session_opened", "session_reopened", "detach", "session_detached":
 		target = &SessionIDPayload{}
-	case "terminal_input", "terminal_output":
+	case "terminal_input":
 		target = &TerminalPayload{}
+	case "terminal_output":
+		target = &TerminalOutputPayload{}
 	case "resize":
 		target = &ResizePayload{}
 	case "heartbeat":
 		target = &HeartbeatPayload{}
-	case "session_detached":
-		target = &SessionDetachedPayload{}
-	case "resume_session":
-		target = &ResumeSessionPayload{}
+	case "reopen_session":
+		target = &ReopenSessionPayload{}
+	case "history_begin":
+		target = &HistoryBeginPayload{}
+	case "history_chunk":
+		target = &HistoryChunkPayload{}
+	case "history_end":
+		target = &HistoryEndPayload{}
 	case "close_session":
 		target = &CloseSessionPayload{}
 	case "session_closed":
@@ -423,46 +454,68 @@ func validatePayload(messageType string, value any) error {
 			return invalid()
 		}
 	case *SessionIDPayload:
-		if !ValidUUID(payload.SessionID) {
+		if !ValidSessionID(payload.SessionID) {
 			return invalid()
 		}
 	case *TerminalPayload:
-		if !ValidUUID(payload.SessionID) {
+		if !ValidSessionID(payload.SessionID) {
 			return invalid()
 		}
 		decoded, ok := DecodeBase64(payload.Data, -1)
 		if !ok || len(decoded) == 0 {
 			return invalid()
 		}
-		limit := MaxTerminalOutput
-		if messageType == "terminal_input" {
-			limit = MaxTerminalInput
+		if len(decoded) > MaxTerminalInput {
+			return protocolError(PayloadTooLarge, 1009, nil)
 		}
-		if len(decoded) > limit {
+	case *TerminalOutputPayload:
+		if !ValidSessionID(payload.SessionID) || payload.Offset > MaxSequence {
+			return invalid()
+		}
+		decoded, ok := DecodeBase64(payload.Data, -1)
+		if !ok || len(decoded) == 0 {
+			return invalid()
+		}
+		if len(decoded) > MaxTerminalOutput {
 			return protocolError(PayloadTooLarge, 1009, nil)
 		}
 	case *ResizePayload:
-		if !ValidUUID(payload.SessionID) || !validDimensions(payload.Dimensions) {
+		if !ValidSessionID(payload.SessionID) || !validDimensions(payload.Dimensions) {
 			return invalid()
 		}
 	case *HeartbeatPayload:
 		if (payload.Kind != "ping" && payload.Kind != "pong") || !fixedBase64(payload.Nonce, 16) {
 			return invalid()
 		}
-	case *SessionDetachedPayload:
-		if !ValidUUID(payload.SessionID) || !fixedBase64(payload.ResumeGrant, 32) || !validTimestamp(payload.ExpiresAt) {
+	case *ReopenSessionPayload:
+		if !ValidSessionID(payload.SessionID) || !validDimensions(payload.Dimensions) {
 			return invalid()
 		}
-	case *ResumeSessionPayload:
-		if !ValidUUID(payload.SessionID) || !fixedBase64(payload.ResumeGrant, 32) || !validDimensions(payload.Dimensions) {
+	case *HistoryBeginPayload:
+		if !ValidSessionID(payload.SessionID) || payload.StartOffset > MaxSequence || payload.EndOffset > MaxSequence {
+			return invalid()
+		}
+	case *HistoryChunkPayload:
+		if !ValidSessionID(payload.SessionID) || payload.Offset > MaxSequence {
+			return invalid()
+		}
+		decoded, ok := DecodeBase64(payload.Data, -1)
+		if !ok || len(decoded) == 0 {
+			return invalid()
+		}
+		if len(decoded) > MaxTerminalOutput {
+			return protocolError(PayloadTooLarge, 1009, nil)
+		}
+	case *HistoryEndPayload:
+		if !ValidSessionID(payload.SessionID) || payload.EndOffset > MaxSequence {
 			return invalid()
 		}
 	case *CloseSessionPayload:
-		if !ValidUUID(payload.SessionID) || payload.Reason != "user_request" {
+		if !ValidSessionID(payload.SessionID) || !contains([]string{"user_request", "new_session"}, payload.Reason) {
 			return invalid()
 		}
 	case *SessionClosedPayload:
-		if !ValidUUID(payload.SessionID) || !contains([]string{"user_request", "idle_timeout", "agent_shutdown", "process_exit", "protocol_error", "backpressure_limit"}, payload.Reason) {
+		if !ValidSessionID(payload.SessionID) || !contains([]string{"user_request", "new_session", "credential_expired", "credential_revoked", "agent_shutdown", "process_exit", "protocol_error", "backpressure_limit"}, payload.Reason) {
 			return invalid()
 		}
 	case *ErrorPayload:
