@@ -112,7 +112,7 @@ tasks:
 
   - id: S03-004
     owner: session_03
-    state: blocked
+    state: ready
     title: Run the authorized private integration host with supplied trusted inputs
     depends_on: [S03-003, S06-006]
     requires_user_authorization: true
@@ -137,7 +137,7 @@ tasks:
 
   - id: S06-006
     owner: session_06
-    state: ready
+    state: done
     title: Freeze the authorized production HTTPS Origin for the current web source
     depends_on: [S02-004, S06-001]
     requires_user_authorization: true
