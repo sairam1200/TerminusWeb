@@ -197,7 +197,7 @@ tasks:
     owner: session_01
     state: blocked
     title: Prepare first-slice integration manifest
-    depends_on: [S06-002]
+    depends_on: [S06-002, S06-005]
     evidence: Exact verified SHAs, merge order, compatibility statement, and unresolved conflict report; no merge.
 
   - id: S01-003
