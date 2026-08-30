@@ -273,3 +273,10 @@
 - Certificate metadata evidence: existing server chain is time-valid, trusted, has ServerAuth, and covers `sai.tailf8dcea.ts.net`; existing browser leaf is time-valid, has ClientAuth, and verifies to the supplied client CA. No private-key or PFX contents were printed or committed.
 - Queue commit: `097b2b085b7df02504d00c8274921db5f6e31885` marks S02-003 done, adds ready task S06-006 for the authorized production-origin freeze, and repoints S03-004/S02-002 from obsolete Preview bootstrap S06-004 to S06-006.
 - Current gate: no product integration occurred. S06-006 must record exact-origin evidence before S03-004 starts; the remaining S05/S06 verification and integration tasks stay blocked until their dependencies pass.
+
+## Production-origin verification and private-host unlock (2026-08-30)
+
+- Session 06 evidence commit `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5` verifies exact web product `bf7ca71b437907e7d25251e54d59355440797ad4` for browser Origin `https://terminus-web.vercel.app` and private endpoint `wss://sai.tailf8dcea.ts.net`. Build, typecheck, lint, and 41/41 tests passed; the report explicitly does not claim candidate deployment or private-WSS verification.
+- Session 06 status commits `13bed730095e3da2d37e4d157fa203cc0fa56594` and `807042ebb6f4be3ef555897fc1f82f8ed8a2721f` preserve the initial pending-review state and then record named independent reviewer `/root/mobile_cert_compat`. The reviewer caught two identifiers mistyped in the review request, resolved and checked the actual full SHAs above, and returned conditional PASS. Unchanged CRLF formatting drift and non-reproduction of the report's external Vercel GETs remain disclosed caveats.
+- Queue commit `0c57852` transitions S06-006 from `ready` to owner `done` and S03-004 from `blocked` to `ready`. No other task state changed. This is not Session 06 release verification and does not authorize public exposure.
+- No merge, push, deployment, DNS/Tailscale policy or route mutation, Funnel, certificate generation/installation, or host start occurred in this queue transition.
