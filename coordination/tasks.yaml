@@ -21,7 +21,7 @@ tasks:
 
   - id: S02-002
     owner: session_02
-    state: blocked
+    state: ready
     title: Integrate browser terminal with protocol 0.1
     depends_on: [S01-001, S02-001, S03-004, S05-005, S05-006, S06-006]
     evidence: Shared fixtures pass and malformed frames fail closed; after one per-device certificate installation/selection and pairing, reconnect/resume silently reuses the existing identity without another certificate import, selection, or pairing prompt.
@@ -105,7 +105,7 @@ tasks:
 
   - id: S05-005
     owner: session_05
-    state: ready
+    state: done
     title: Review TLS/private publication design and prove private-only access
     depends_on: [S03-004, S05-001]
     evidence: Read-only exact-design review explicitly deciding Tailscale Serve TLS termination versus raw-TCP/passthrough for end-to-end browser mTLS, then proving intended private access, denied LAN/public access, existing browser/OS certificate trust, Funnel disabled, and separation of Tailscale policy from application pairing/authentication; no live mutation.
@@ -145,7 +145,7 @@ tasks:
 
   - id: S05-006
     owner: session_05
-    state: ready
+    state: done
     title: Configure authorized raw-TCP private Serve and prove allowed/denied paths
     depends_on: [S03-004, S05-001]
     requires_user_authorization: true
