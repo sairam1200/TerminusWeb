@@ -139,3 +139,32 @@
 - External blocker: no already-trusted server certificate/hostname, client-CA bundle, exact approved browser Origin, or independently approved Tailscale-private publication mapping is available. Therefore no endpoint was started and `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint-ready.response.md` was intentionally not created. Producing it requires a separate Session 03 consumer-wiring task assigned by Session 01 plus explicit authorization for local execution using externally trusted certificate/client-CA inputs; publication/policy remains outside Session 03 authority.
 - Independent reviewer: `/root/s03_002_readonly_review` reviewed exact tip `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c` read-only and returned PASS with no severity findings; `git diff --check 29a8f7c..b52e3bb` passed.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S03-004 authorized endpoint-ready handoff (2026-08-30)
+
+- Current task: `S03-004` — Run the authorized private integration host with supplied trusted inputs.
+- State: owner/reviewer `done`; Session 01 owns the queue transition and Session 06 owns later `verified` evidence.
+- Queue authorization: `e9b6dd023178c18638e03b96cfd0543670c7d7f3`; dependencies S03-003 and S06-006 were owner-done before startup.
+- Exact implementation input: `e13c4c8d2659125476c7458b45720892ee49fc24`; exact S03-003 host dependency `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c`; S06-006 Origin product `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5`.
+- Product/evidence files: `apps/windows-agent/evidence/S03-004-endpoint-ready-20260830.md` and immutable endpoint-ready responses to Sessions 02 and 05 under `coordination/requests/`.
+- Runtime: non-elevated `sai\saira` on Microsoft Windows NT `10.0.26200.0`; host remains attached to the operator session with process PID 5384 and only `127.0.0.1:8443` listening at handoff time.
+- Endpoint: `wss://sai.tailf8dcea.ts.net/terminal`; exact allowed Origin `https://terminus-web.vercel.app`; subprotocol `terminus.v0_1`; TLS 1.3 and verified client certificate required; DPAPI CurrentUser protected-store path is explicit and remains out of the repository.
+- Certificate result: the existing server certificate/key pair passed load, hostname, ServerAuth, and current-user trust validation. The existing browser leaf is time-valid, verifies to the supplied client CA, and has explicit ClientAuth EKU `1.3.6.1.5.5.7.3.2`. No certificate was generated or installed.
+- Live evidence:
+  - Existing installed Terminus ClientAuth identity: `/healthz` returned `ok` and HTTP 200 over the tailnet-only raw-TCP path.
+  - No client certificate: curl failed closed with exit 56 and HTTP status 000.
+  - Supplementary direct-loopback lifecycle instance `127.0.0.1:56244`: mTLS `/healthz` returned HTTP 200; after Ctrl+C the port was closed and no credential-store file existed.
+  - Host output scan found only fixed listener/health metadata and generic loopback TLS EOFs; no terminal plaintext, command, pairing material, credential, proof, token, private key, PFX password, or reusable hash appeared.
+- Deterministic commands on Go `1.26.7` Windows AMD64:
+  - `go vet ./...`: PASS.
+  - `go test -short -count=1 ./...`: PASS.
+  - `go test -count=1 ./...`: PASS, including real Windows ConPTY cleanup.
+  - `go test -short -count=20 ./internal/endpoint`: PASS in 24.451 seconds.
+  - `gofmt -l .` listed 16 unchanged files due the existing CRLF materialization; no source was rewritten and the worktree was clean before evidence changes.
+  - A sandboxed live reset attempt failed closed with `integration host unavailable` and made no store change. Live deletion of the persistent store was not retried; deterministic DPAPI reset/delete/revocation tests passed.
+  - `git diff --check`, product `git show --check`, exact changed-path review, and credential/plaintext scans: PASS.
+- Independent reviewer/evidence: `/root/s03_004_host/s03_004_review` reviewed exact product `ce5ac98b8a79abd42fee6083345709c77aaf669c` and returned PASS. The reviewer reproduced author/committer identity, exact dependency/queue checks, clean owned scope and secret scan, `go vet`, the full Go suite, targeted integration-host 5/5 and endpoint 7/7 suites, loopback-only PID 5384, tailnet-only raw TCP forwarding with Funnel not public, and fail-closed no-client behavior. The reviewer did not independently reproduce the positive HTTP 200 and labels it owner/coordinator evidence.
+- Once-per-device acceptance: importing/selecting the client certificate and completing pairing is a one-time device setup. Authenticated reconnect/resume must reuse that client identity and stored credential without another certificate import or local pairing prompt. The server reuses stored credential state on authenticated reconnect; browser-level silent certificate reuse still requires Session 02/06 Chrome, Firefox, Android, and iPhone evidence and is not claimed here.
+- Scope: no Tailscale/DNS/firewall/grant/Funnel change, certificate generation/installation, LAN/public listener, deployment, merge, push, terminal input, or pairing-code output occurred. The primary host remains live for downstream owner and verifier checks.
+- Product/task commit: `ce5ac98b8a79abd42fee6083345709c77aaf669c`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
