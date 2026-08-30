@@ -202,21 +202,21 @@ tasks:
 
   - id: S02-005
     owner: session_02
-    state: ready
+    state: done
     title: Implement remembered session pages and explicit New Session behavior
     depends_on: [S01-005, S02-002]
     evidence: Each page receives a simple unique session ID in a URL fragment; reload/reconnect of the same ID restores bounded history without storing terminal plaintext; New Session closes the old session and replaces the fragment; unknown/in-use IDs fail closed and pairing is not repeated.
 
   - id: S03-007
     owner: session_03
-    state: ready
+    state: done
     title: Implement credential-bound remembered sessions and bounded history replay
     depends_on: [S01-005, S03-006]
     evidence: Cryptographically random simple IDs, atomic same-credential/source-device reopen, bounded volatile per-session and agent-wide history with ordered offsets, disconnect retention, explicit close/new-session deletion, uniform rejection, concurrency tests, and deterministic ConPTY cleanup.
 
   - id: S05-008
     owner: session_05
-    state: blocked
+    state: ready
     title: Review remembered-session isolation and history privacy
     depends_on: [S02-005, S03-007]
     evidence: Independent review of ID enumeration, credential ownership, concurrent claims, replay ordering, truncation, volatile-only plaintext, fragment privacy, revocation/expiry, resource abuse, and unchanged private-network boundaries.
