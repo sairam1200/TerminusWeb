@@ -3,7 +3,7 @@
 ## S06-006 production Origin freeze
 
 - Current task: `S06-006` — Freeze the authorized production HTTPS Origin for the current web source.
-- State: owner verification complete; independent review of exact evidence commit requested from the coordinator before a `done` queue transition.
+- State: owner `done`; named independent review passed. Session 01 owns the queue transition.
 - Branch: `session/06-verification-release`.
 - Exact input: detached, clean web product `bf7ca71b437907e7d25251e54d59355440797ad4`.
 - Frozen configuration: HTTPS Origin `https://terminus-web.vercel.app`; private WSS destination `wss://sai.tailf8dcea.ts.net`; Vercel project `gaddr/terminus-web`; Root Directory `apps/web`; Node `24.x`; production branch `main`; no build-command override.
@@ -21,11 +21,13 @@
   - Stable alias deployment `dpl_9h1hGq6DPsQykoBkVogqcbUxxv2u` is READY but serves older ancestor `5762f5865608596c8198d583a2dbd394ac973a7b`, not `bf7ca71...`; no deployment claim is made for the candidate.
   - Failed Preview `dpl_988Hz8bhsduMSowLoTKZBBJjRxiU` cloned `aa09734` and failed with no `pages` or `app` directory. Git confirms `aa09734...` has only `apps/web/.gitkeep` and no package manifest, so it is not web source.
 - Evidence classification: exact local real-code gates plus real read-only Vercel/HTTPS/Chromium metadata. No terminal path, mTLS/client-CA, mobile Firefox/Chrome/Safari, physical device, Tailscale, ConPTY, or certificate behavior is claimed.
-- Independent reviewer/evidence: requested from coordinator for exact product `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5`; verdict pending at handoff time.
+- Independent reviewer/evidence: `/root/mobile_cert_compat` returned conditional PASS for actual evidence commit `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5` and actual web product `bf7ca71b437907e7d25251e54d59355440797ad4`. The reviewer verified queue authorization at `097b2b085b7df02504d00c8274921db5f6e31885`, typecheck/lint PASS, Vitest 41/41, generated routes-manifest hash, exact CSP/Origin pair, 37 web paths, direct WebSocket/no API relay, single owned Markdown scope, and a clean secret scan. The reviewer did not independently re-query Vercel and retained the unchanged CRLF-only format-check caveat.
+- Review-request correction: the review request contained identifier typos only. The reviewer inspected the actual full SHAs above; no product or evidence defect resulted, and no commit was rewritten.
 - Assumptions/limitations: the task freezes an Origin and proves deployability; it intentionally does not deploy. Candidate deployment remains gated on the verified integration candidate.
-- Blockers/requests: independent review is the only remaining owner-`done` gate. Session 01 owns any queue transition.
+- Blockers/requests: none for S06-006 owner completion. Session 01 owns any queue transition.
 - Product/task commit: `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5`.
-- Handoff commit: resolve from branch HEAD after this status-only commit.
+- Initial status-only handoff: `13bed730095e3da2d37e4d157fa203cc0fa56594`.
+- Reviewed status-only handoff: resolve from branch HEAD after this new status-only commit.
 - Safety: lock `VERCEL-20260830-01` stayed read-only. No deploy, promotion, push, merge, setting/env, DNS/Tailscale/certificate, or browser-login mutation.
 
 ## Prior S06-001 handoff
