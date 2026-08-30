@@ -165,6 +165,13 @@ tasks:
     depends_on: [S01-004, S03-003]
     evidence: Concurrent positive sessions above eight with no count-based rejection, genuine adapter/Open and shutdown failure paths, independent input/resize/close, detach accounting, credential revocation, bounded per-session backpressure, and real Windows process-tree cleanup.
 
+  - id: S03-006
+    owner: session_03
+    state: ready
+    title: Keep stalled terminal creation from blocking unrelated session lifecycle
+    depends_on: [S03-005, S05-007]
+    evidence: Adapter.Open runs without the registry-wide mutex; admission is atomically revalidated before registration; a terminal created after shutdown, connection invalidation, or credential revocation is closed; deterministic races prove unrelated input, resize, close, disconnect cleanup, revocation, and shutdown remain prompt without a fixed count cap.
+
   - id: S02-004
     owner: session_02
     state: done
@@ -174,7 +181,7 @@ tasks:
 
   - id: S05-007
     owner: session_05
-    state: ready
+    state: done
     title: Review uncapped-by-policy multi-session abuse and isolation controls
     depends_on: [S03-005, S02-004]
     evidence: Independent review of no fixed admission cap, above-eight isolation, detached accounting, actual resource-exhaustion behavior, per-session backpressure, authentication rate limits, revocation, cleanup, and unchanged private-access boundaries.
@@ -183,7 +190,7 @@ tasks:
     owner: session_06
     state: blocked
     title: Verify above-eight independent terminal behavior
-    depends_on: [S03-005, S02-004, S05-007]
+    depends_on: [S03-006, S02-004, S05-007]
     evidence: Exact-commit automated and real Chrome proof for more than eight independent sessions with no count-based rejection, genuine open-failure guidance, resize/reconnect, non-elevation, revocation, bounded backpressure, and leak-free cleanup.
 
   - id: S01-002
