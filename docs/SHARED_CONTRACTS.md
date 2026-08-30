@@ -37,3 +37,13 @@ This list is a capability requirement, not permission for other sessions to inve
 ## Compatibility rule
 
 During the prototype, breaking changes are allowed only through an explicit version bump and coordinated consumer update. Unknown message types, unsupported versions, oversized payloads, invalid state transitions, and replayed sequence values must fail closed.
+
+## Protocol 0.2 remembered-session surface
+
+Version `0.2` is the coordinated breaking successor to `0.1`. It keeps the
+pairing and authenticated direct-WSS boundary while replacing short-lived
+resume grants with credential-bound reopen by a short opaque session locator.
+It adds offset-labelled bounded history replay and does not permit session-ID
+knowledge alone to authorize attachment. Version 0.1 remains source-controlled
+for compatibility evidence, but a connection selects exactly one version and
+never mixes their frames or WebSocket subprotocols.

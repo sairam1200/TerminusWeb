@@ -1,0 +1,79 @@
+{
+  "contractVersion": "0.2",
+  "handshakes": [
+    {
+      "id": "v02-exact-allowed-origin",
+      "request": { "scheme": "wss", "origin": "https://preview.example.invalid", "subprotocol": "terminus.v0_2" },
+      "allowedOrigins": ["https://preview.example.invalid"],
+      "expect": "accept"
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "v02-pair-auth-open-io-detach",
+      "initial": { "connectionState": "NEW", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 0 },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "hello", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "clientInstanceId": "40000000-0000-4000-8000-000000000001", "supportedVersions": ["0.2"] } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "hello_ack", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 0, "payload": { "selectedVersion": "0.2", "agentId": "50000000-0000-4000-8000-000000000001" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "pairing_request", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 1, "payload": { "pairingCode": "AAECAwQFBgcICQoLDA0ODw" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "pairing_result", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 1, "payload": { "credentialId": "30000000-0000-4000-8000-000000000001", "credentialSecret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8", "credentialExpiresAt": "2026-09-25T12:00:00.000Z" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "auth_challenge", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 2, "payload": { "challengeId": "20000000-0000-4000-8000-000000000001", "challenge": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8", "expiresAt": "2026-08-30T12:00:10.000Z" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "auth_response", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 2, "payload": { "challengeId": "20000000-0000-4000-8000-000000000001", "credentialId": "30000000-0000-4000-8000-000000000001", "proof": "loDDHqUw_0yYrBFNf9-3WqETNRyemfXDwj0ooSubU2w" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "auth_result", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 3, "payload": { "authenticated": true, "authorizationExpiresAt": "2026-08-31T00:00:00.000Z" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "open_session", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 3, "payload": { "shell": "powershell", "dimensions": { "columns": 80, "rows": 24 } } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_opened", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 4, "payload": { "sessionId": "k7m4-p2q9-wxyz" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "terminal_input", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 4, "payload": { "sessionId": "k7m4-p2q9-wxyz", "data": "AP8" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "terminal_output", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 5, "payload": { "sessionId": "k7m4-p2q9-wxyz", "offset": 0, "data": "AP8" } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "resize", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 5, "payload": { "sessionId": "k7m4-p2q9-wxyz", "dimensions": { "columns": 1000, "rows": 1000 } } } },
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "detach", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 6, "payload": { "sessionId": "k7m4-p2q9-wxyz" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_detached", "connectionId": "10000000-0000-4000-8000-000000000001", "sequence": 6, "payload": { "sessionId": "k7m4-p2q9-wxyz" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "DETACHED", "nextOutputOffset": 2 }
+    },
+    {
+      "id": "v02-reopen-truncated-history-then-live-output",
+      "initial": { "connectionState": "READY", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 104 },
+      "context": { "reopenAllowed": true },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "reopen_session", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 0, "payload": { "sessionId": "k7m4-p2q9-wxyz", "dimensions": { "columns": 80, "rows": 24 } } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_reopened", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 0, "payload": { "sessionId": "k7m4-p2q9-wxyz" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_begin", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 1, "payload": { "sessionId": "k7m4-p2q9-wxyz", "startOffset": 100, "endOffset": 104, "truncated": true } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_chunk", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 2, "payload": { "sessionId": "k7m4-p2q9-wxyz", "offset": 100, "data": "AP8" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_chunk", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 3, "payload": { "sessionId": "k7m4-p2q9-wxyz", "offset": 102, "data": "AP8" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_end", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 4, "payload": { "sessionId": "k7m4-p2q9-wxyz", "endOffset": 104 } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "terminal_output", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 5, "payload": { "sessionId": "k7m4-p2q9-wxyz", "offset": 104, "data": "AP8" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "OPEN", "nextOutputOffset": 106 }
+    },
+    {
+      "id": "v02-reopen-empty-history",
+      "initial": { "connectionState": "READY", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 0 },
+      "context": { "reopenAllowed": true },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "reopen_session", "connectionId": "10000000-0000-4000-8000-000000000003", "sequence": 0, "payload": { "sessionId": "abcd-efgh-jkmn", "dimensions": { "columns": 80, "rows": 24 } } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_reopened", "connectionId": "10000000-0000-4000-8000-000000000003", "sequence": 0, "payload": { "sessionId": "abcd-efgh-jkmn" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_begin", "connectionId": "10000000-0000-4000-8000-000000000003", "sequence": 1, "payload": { "sessionId": "abcd-efgh-jkmn", "startOffset": 0, "endOffset": 0, "truncated": false } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_end", "connectionId": "10000000-0000-4000-8000-000000000003", "sequence": 2, "payload": { "sessionId": "abcd-efgh-jkmn", "endOffset": 0 } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "OPEN", "nextOutputOffset": 0 }
+    },
+    {
+      "id": "v02-new-session-close",
+      "initial": { "connectionState": "READY", "sessionState": "OPEN", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 0 },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "close_session", "connectionId": "10000000-0000-4000-8000-000000000004", "sequence": 0, "payload": { "sessionId": "k7m4-p2q9-wxyz", "reason": "new_session" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_closed", "connectionId": "10000000-0000-4000-8000-000000000004", "sequence": 0, "payload": { "sessionId": "k7m4-p2q9-wxyz", "reason": "new_session" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "CLOSED", "nextOutputOffset": 0 }
+    },
+    {
+      "id": "v02-history-chunk-decoded-boundary",
+      "initial": { "connectionState": "READY", "sessionState": "REPLAYING", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 32768, "history": { "begun": true, "cursor": 0, "endOffset": 32768 } },
+      "frames": [
+        { "direction": "agent_to_client", "generate": { "field": "payload.data", "decodedBytes": 32768 }, "frame": { "version": "0.2", "type": "history_chunk", "connectionId": "10000000-0000-4000-8000-000000000005", "sequence": 0, "payload": { "sessionId": "k7m4-p2q9-wxyz", "offset": 0, "data": "AA" } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_end", "connectionId": "10000000-0000-4000-8000-000000000005", "sequence": 1, "payload": { "sessionId": "k7m4-p2q9-wxyz", "endOffset": 32768 } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "OPEN", "nextOutputOffset": 32768 }
+    }
+  ]
+}

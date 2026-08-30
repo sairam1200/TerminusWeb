@@ -193,11 +193,46 @@ tasks:
     depends_on: [S03-006, S02-004, S05-007]
     evidence: Exact-commit automated and real Chrome proof for more than eight independent sessions with no count-based rejection, genuine open-failure guidance, resize/reconnect, non-elevation, revocation, bounded backpressure, and leak-free cleanup.
 
+  - id: S01-005
+    owner: session_01
+    state: in_progress
+    title: Freeze remembered-session and bounded-history contract version 0.2
+    depends_on: [S01-004]
+    evidence: Versioned schema, state machine, fixtures, security rules, short opaque session identifiers, credential/source-device-bound reopen, bounded volatile history replay, fragment-route privacy, and explicit compatibility notes.
+
+  - id: S02-005
+    owner: session_02
+    state: blocked
+    title: Implement remembered session pages and explicit New Session behavior
+    depends_on: [S01-005, S02-002]
+    evidence: Each page receives a simple unique session ID in a URL fragment; reload/reconnect of the same ID restores bounded history without storing terminal plaintext; New Session closes the old session and replaces the fragment; unknown/in-use IDs fail closed and pairing is not repeated.
+
+  - id: S03-007
+    owner: session_03
+    state: blocked
+    title: Implement credential-bound remembered sessions and bounded history replay
+    depends_on: [S01-005, S03-006]
+    evidence: Cryptographically random simple IDs, atomic same-credential/source-device reopen, bounded volatile per-session and agent-wide history with ordered offsets, disconnect retention, explicit close/new-session deletion, uniform rejection, concurrency tests, and deterministic ConPTY cleanup.
+
+  - id: S05-008
+    owner: session_05
+    state: blocked
+    title: Review remembered-session isolation and history privacy
+    depends_on: [S02-005, S03-007]
+    evidence: Independent review of ID enumeration, credential ownership, concurrent claims, replay ordering, truncation, volatile-only plaintext, fragment privacy, revocation/expiry, resource abuse, and unchanged private-network boundaries.
+
+  - id: S06-007
+    owner: session_06
+    state: blocked
+    title: Verify remembered session pages and private history replay
+    depends_on: [S01-005, S02-005, S03-007, S05-008, S06-001]
+    evidence: Exact-commit contract and browser/agent proof that same-ID reload restores ordered bounded history, New Session replaces and invalidates the old ID, different pages receive different IDs, wrong credentials and concurrent claims fail closed, and no terminal plaintext reaches browser persistence, URLs sent to Vercel, logs, or control-plane paths.
+
   - id: S01-002
     owner: session_01
     state: blocked
     title: Prepare first-slice integration manifest
-    depends_on: [S06-002, S06-005]
+    depends_on: [S06-002, S06-005, S06-007]
     evidence: Exact verified SHAs, merge order, compatibility statement, and unresolved conflict report; no merge.
 
   - id: S01-003

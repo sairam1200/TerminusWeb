@@ -1,0 +1,46 @@
+{
+  "contractVersion": "0.2",
+  "connectionInitialState": "NEW",
+  "sessionInitialState": "NONE",
+  "connectionStates": ["NEW", "NEGOTIATING", "UNAUTHENTICATED", "PAIRING", "CHALLENGED", "PROVING", "READY", "CLOSING", "CLOSED"],
+  "sessionStates": ["NONE", "OPENING", "OPEN", "DETACHING", "DETACHED", "REOPENING", "REPLAYING", "CLOSING", "CLOSED"],
+  "connectionTransitions": [
+    { "id": "c01", "from": "NEW", "direction": "client_to_agent", "message": "hello", "to": "NEGOTIATING" },
+    { "id": "c02", "from": "NEGOTIATING", "direction": "agent_to_client", "message": "hello_ack", "to": "UNAUTHENTICATED" },
+    { "id": "c03", "from": "UNAUTHENTICATED", "direction": "client_to_agent", "message": "pairing_request", "to": "PAIRING" },
+    { "id": "c04", "from": "PAIRING", "direction": "agent_to_client", "message": "pairing_result", "to": "UNAUTHENTICATED" },
+    { "id": "c05", "from": "UNAUTHENTICATED", "direction": "agent_to_client", "message": "auth_challenge", "to": "CHALLENGED" },
+    { "id": "c06", "from": "CHALLENGED", "direction": "client_to_agent", "message": "auth_response", "to": "PROVING" },
+    { "id": "c07", "from": "PROVING", "direction": "agent_to_client", "message": "auth_result", "to": "READY" },
+    { "id": "c08", "from": "READY", "direction": "client_to_agent", "message": "heartbeat", "to": "READY" },
+    { "id": "c09", "from": "READY", "direction": "agent_to_client", "message": "heartbeat", "to": "READY" }
+  ],
+  "sessionTransitions": [
+    { "id": "s01", "connection": "READY", "from": "NONE", "direction": "client_to_agent", "message": "open_session", "to": "OPENING" },
+    { "id": "s02", "connection": "READY", "from": "OPENING", "direction": "agent_to_client", "message": "session_opened", "to": "OPEN" },
+    { "id": "s03", "connection": "READY", "from": "NONE", "direction": "client_to_agent", "message": "reopen_session", "to": "REOPENING" },
+    { "id": "s04", "connection": "READY", "from": "REOPENING", "direction": "agent_to_client", "message": "session_reopened", "to": "REPLAYING" },
+    { "id": "s05", "connection": "READY", "from": "REPLAYING", "direction": "agent_to_client", "message": "history_begin", "to": "REPLAYING" },
+    { "id": "s06", "connection": "READY", "from": "REPLAYING", "direction": "agent_to_client", "message": "history_chunk", "to": "REPLAYING" },
+    { "id": "s07", "connection": "READY", "from": "REPLAYING", "direction": "agent_to_client", "message": "history_end", "to": "OPEN" },
+    { "id": "s08", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "terminal_input", "to": "OPEN" },
+    { "id": "s09", "connection": "READY", "from": "OPEN", "direction": "agent_to_client", "message": "terminal_output", "to": "OPEN" },
+    { "id": "s10", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "resize", "to": "OPEN" },
+    { "id": "s11", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "detach", "to": "DETACHING" },
+    { "id": "s12", "connection": "READY", "from": "DETACHING", "direction": "agent_to_client", "message": "session_detached", "to": "DETACHED" },
+    { "id": "s13", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "close_session", "to": "CLOSING" },
+    { "id": "s14", "connection": "READY", "from": "CLOSING", "direction": "agent_to_client", "message": "session_closed", "to": "CLOSED" },
+    { "id": "s15", "connection": "READY", "from": "OPEN", "direction": "agent_to_client", "message": "session_closed", "to": "CLOSED" }
+  ],
+  "metaRules": [
+    "A fatal error may be sent from any non-CLOSED connection state when it can be safely constructed; transport close then enters CLOSED.",
+    "Transport loss or authorization expiry detaches an OPEN running session atomically from its connection; it does not delete the session or its bounded history.",
+    "A reopen_session starts in connection-local NONE and may claim only a globally DETACHED session owned by the authenticated credential. Unknown, wrong-owner, already-attached, ended, or concurrently claimed identifiers fail identically with SESSION_REOPEN_REJECTED.",
+    "Exactly one history_begin occurs after session_reopened. Zero or more contiguous history_chunk frames cover [startOffset,endOffset), followed by one history_end with the same endOffset. Live terminal_output begins at that end offset or later and never interleaves with the snapshot.",
+    "history_begin with truncated false requires startOffset zero. Every chunk offset equals the preceding chunk end; decoded chunk length advances the offset. Offset overflow, overlap, gap, or mismatched end is OUTPUT_OFFSET_INVALID and fatal.",
+    "The agent captures the snapshot end atomically with ownership attachment. Output produced afterward remains bounded and is sent only after history_end.",
+    "Explicit close with new_session or user_request destroys that running session and its history. Credential expiry/revocation, process exit, unrecoverable failure, and agent shutdown do the same.",
+    "Heartbeat frames do not change session state and are legal only after authentication.",
+    "Any message without a matching transition is INVALID_STATE and fatal. Direction is part of the transition key."
+  ]
+}

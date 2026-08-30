@@ -63,3 +63,32 @@ Session 01 owns this file. Other sessions submit proposed corrections through `c
   authentication, authorization, exact Origin validation, expiry, credential
   revocation, private listener scope, and Funnel-disabled requirements remain
   unchanged.
+
+## Remembered private session decision (2026-08-30)
+
+- The user requires each terminal page to keep one stable, simple session ID
+  across reloads and network reconnects. A page changes identity only after its
+  explicit **New Session** action succeeds.
+- Protocol 0.2 uses a cryptographically random 60-bit Crockford Base32 locator
+  rendered as `xxxx-xxxx-xxxx`. The ID is metadata, not a secret or bearer token;
+  a successfully authenticated, unexpired originating credential is still
+  required to reopen it.
+- The browser represents the ID only in the URL fragment
+  `#/s/xxxx-xxxx-xxxx`, so it is not sent in an HTTP request to Vercel. Browser
+  persistence contains credential material and non-secret session metadata as
+  already contracted, but never terminal plaintext or replay chunks.
+- The Windows agent owns a bounded 262,144-byte volatile output-history ring
+  per running session and a 16,777,216-byte agent-wide history budget. Reopen
+  replays an offset-labelled snapshot before live
+  output. Truncation is explicit; output ordering and concurrent attachment are
+  fail-closed. History is never written to disk, logs, Vercel, a service worker,
+  analytics, crash reporting, or the control plane.
+- Network loss and per-connection authorization expiry detach rather than
+  destroy a running session. Explicit New Session/close, credential expiry or
+  revocation, process exit, unrecoverable resource/backpressure failure, and
+  agent shutdown/restart terminate the session and discard its retained
+  history.
+- Version 0.2 preserves one terminal per authenticated WebSocket and the
+  no-fixed-count-cap decision. It replaces version 0.1's 120-second one-time
+  resume grant with authenticated same-credential reopen and therefore is a
+  breaking, coordinated consumer update.

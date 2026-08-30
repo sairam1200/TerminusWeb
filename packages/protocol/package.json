@@ -1,10 +1,10 @@
 {
   "name": "@terminus/protocol-contract",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "verify": "node scripts/verify-contract.mjs"
+    "verify": "node scripts/verify-contract.mjs && node scripts/verify-contract-0.2.mjs"
   },
   "engines": {
     "node": ">=20"
