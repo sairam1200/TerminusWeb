@@ -195,13 +195,13 @@ func (e *Endpoint) RevokeCredential(ctx context.Context, credentialID string) er
 		connections = append(connections, connection)
 	}
 	e.mu.Unlock()
-	sessionErr := e.sessions.revokeCredential(credentialID)
+	closeTickets := e.sessions.fenceCredentialRevocation(credentialID)
 	for _, connection := range connections {
 		if connection.credentialID() == credentialID {
 			connection.fail(protocol.NewError(protocol.AuthenticationFailed, 1008, nil))
 		}
 	}
-	return sessionErr
+	return e.sessions.finishCloseTickets(closeTickets)
 }
 
 func (e *Endpoint) bindCredential(connection *connection, credential Credential) bool {

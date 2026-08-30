@@ -1045,10 +1045,164 @@ func TestCredentialRevocationClosesAllAuthorizationsAndSessions(t *testing.T) {
 		}
 	}
 	for _, client := range clients {
-		client.read("session_closed")
 		if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
 			t.Fatalf("code = %s", got)
 		}
+	}
+}
+
+func TestCredentialRevocationSendsAuthenticationFailureBeforeBlockingTerminalClose(t *testing.T) {
+	inner := &fakeSession{output: make(chan []byte, 4), closed: make(chan struct{})}
+	blocking := &blockingCloseSession{fakeSession: inner, closeStarted: make(chan struct{}), releaseClose: make(chan struct{})}
+	store := newMemoryCredentialStore()
+	endpoint, err := New(Config{
+		AllowedOrigin: testOrigin, AgentID: testAgentID, Terminal: &blockingCloseAdapter{session: blocking}, Credentials: store,
+		ApprovePairing: func(context.Context, PairingApproval) bool { return true }, ResolveDevice: func(*http.Request) (string, error) { return "blocked-revocation-device", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	client, credential := pairAndAuthorize(t, endpoint, server)
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	client.read("session_opened")
+
+	revokeDone := make(chan error, 1)
+	go func() { revokeDone <- endpoint.RevokeCredential(context.Background(), credential.ID) }()
+	select {
+	case <-blocking.closeStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("credential revocation did not reach terminal cleanup")
+	}
+	if err := client.ws.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
+		t.Fatalf("code = %s, want %s", got, protocol.AuthenticationFailed)
+	}
+	select {
+	case err := <-revokeDone:
+		t.Fatalf("revocation returned before blocked terminal cleanup was released: %v", err)
+	default:
+	}
+	close(blocking.releaseClose)
+	if err := awaitTestError(t, "credential revocation cleanup", revokeDone); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplayStopsAtCloseFenceWhileTerminalCleanupIsBlocked(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger func(*sessionRegistry, *managedSession, *blockingCloseSession) <-chan error
+	}{
+		{
+			name: "credential revocation",
+			trigger: func(registry *sessionRegistry, managed *managedSession, _ *blockingCloseSession) <-chan error {
+				result := make(chan error, 1)
+				go func() { result <- registry.revokeCredential(managed.credentialID) }()
+				return result
+			},
+		},
+		{
+			name: "process exit",
+			trigger: func(_ *sessionRegistry, managed *managedSession, blocking *blockingCloseSession) <-chan error {
+				result := make(chan error, 1)
+				go func() {
+					blocking.fakeSession.once.Do(func() { close(blocking.fakeSession.closed) })
+					<-managed.closeDone
+					result <- managed.closeErr
+				}()
+				return result
+			},
+		},
+		{
+			name: "agent shutdown",
+			trigger: func(registry *sessionRegistry, _ *managedSession, _ *blockingCloseSession) <-chan error {
+				result := make(chan error, 1)
+				go func() { result <- registry.shutdown() }()
+				return result
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			inner := &fakeSession{output: make(chan []byte, 4), closed: make(chan struct{})}
+			blocking := &blockingCloseSession{fakeSession: inner, closeStarted: make(chan struct{}), releaseClose: make(chan struct{})}
+			registry := sessionRegistry{adapter: &blockingCloseAdapter{session: blocking}, now: time.Now}
+			credentialID := fmt.Sprintf("30000000-0000-4000-8000-%012d", 600+index)
+			firstOwner := testRegistryOwner(credentialID)
+			id, err := registry.open(firstOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := registry.detach(firstOwner, id); err != nil {
+				t.Fatal(err)
+			}
+			inner.output <- []byte("first-history-frame")
+			inner.output <- []byte("second-history-frame")
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				registry.mu.Lock()
+				managed := registry.active[id]
+				ready := managed != nil && managed.history.Len() == 2
+				registry.mu.Unlock()
+				if ready {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("terminal output did not reach the replay history")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			reopener := testRegistryOwner(credentialID)
+			reopener.id = fmt.Sprintf("10000000-0000-4000-8000-%012d", 600+index)
+			reopener.machine = protocol.NewMachine(protocol.ConnectionReady, protocol.SessionReopening, 0, 0)
+			reopener.writes = make(chan outbound)
+			snapshot, err := registry.beginReopen(reopener, id, protocol.Dimensions{Columns: 80, Rows: 24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayDone := make(chan error, 1)
+			go func() { replayDone <- registry.replay(reopener, snapshot) }()
+			var blockedChunk outbound
+			for _, want := range []string{"session_reopened", "history_begin", "history_chunk"} {
+				select {
+				case item := <-reopener.writes:
+					if item.frame.Type != want {
+						t.Fatalf("replay frame = %s, want %s", item.frame.Type, want)
+					}
+					if want == "history_chunk" {
+						blockedChunk = item
+					} else {
+						item.result <- nil
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatalf("replay did not emit %s", want)
+				}
+			}
+			closeDone := test.trigger(&registry, snapshot.managed, blocking)
+			select {
+			case <-blocking.closeStarted:
+			case <-time.After(3 * time.Second):
+				t.Fatal("terminal cleanup did not reach the blocking close")
+			}
+			blockedChunk.result <- nil
+			if err := awaitTestError(t, "fenced replay", replayDone); err == nil {
+				t.Fatal("replay completed after its session was fenced closed")
+			}
+			select {
+			case item := <-reopener.writes:
+				t.Fatalf("replay emitted %s after the close fence", item.frame.Type)
+			default:
+			}
+			close(blocking.releaseClose)
+			if err := awaitTestError(t, "blocked terminal cleanup", closeDone); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

@@ -73,6 +73,14 @@ type reopenSnapshot struct {
 	frames    []historyFrame
 }
 
+type sessionCloseTicket struct {
+	managed *managedSession
+	owner   *connection
+	reason  string
+	notify  bool
+	first   bool
+}
+
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
 	credentialID := owner.credentialID()
 	r.mu.Lock()
@@ -276,21 +284,21 @@ func (r *sessionRegistry) snapshotLocked(managed *managedSession) reopenSnapshot
 
 func (r *sessionRegistry) replay(owner *connection, snapshot reopenSnapshot) error {
 	owner.setOutputOffset(snapshot.end)
-	if err := owner.send("session_reopened", protocol.SessionIDPayload{SessionID: snapshot.id}); err != nil {
+	if err := r.sendReplay(owner, snapshot.managed, "session_reopened", protocol.SessionIDPayload{SessionID: snapshot.id}); err != nil {
 		r.releaseReopen(owner, snapshot.managed)
 		return err
 	}
-	if err := owner.send("history_begin", protocol.HistoryBeginPayload{SessionID: snapshot.id, StartOffset: snapshot.start, EndOffset: snapshot.end, Truncated: snapshot.truncated}); err != nil {
+	if err := r.sendReplay(owner, snapshot.managed, "history_begin", protocol.HistoryBeginPayload{SessionID: snapshot.id, StartOffset: snapshot.start, EndOffset: snapshot.end, Truncated: snapshot.truncated}); err != nil {
 		r.releaseReopen(owner, snapshot.managed)
 		return err
 	}
 	for _, frame := range snapshot.frames {
-		if err := owner.send("history_chunk", protocol.HistoryChunkPayload{SessionID: snapshot.id, Offset: frame.offset, Data: protocol.EncodeBase64(frame.data)}); err != nil {
+		if err := r.sendReplay(owner, snapshot.managed, "history_chunk", protocol.HistoryChunkPayload{SessionID: snapshot.id, Offset: frame.offset, Data: protocol.EncodeBase64(frame.data)}); err != nil {
 			r.releaseReopen(owner, snapshot.managed)
 			return err
 		}
 	}
-	if err := owner.send("history_end", protocol.HistoryEndPayload{SessionID: snapshot.id, EndOffset: snapshot.end}); err != nil {
+	if err := r.sendReplay(owner, snapshot.managed, "history_end", protocol.HistoryEndPayload{SessionID: snapshot.id, EndOffset: snapshot.end}); err != nil {
 		r.releaseReopen(owner, snapshot.managed)
 		return err
 	}
@@ -325,13 +333,23 @@ func (r *sessionRegistry) replay(owner *connection, snapshot reopenSnapshot) err
 			return protocol.NewError(protocol.BackpressureLimit, 1008, errors.New("replay history is no longer contiguous"))
 		}
 		for _, frame := range frames {
-			if err := owner.send("terminal_output", protocol.TerminalOutputPayload{SessionID: snapshot.id, Offset: frame.offset, Data: protocol.EncodeBase64(frame.data)}); err != nil {
+			if err := r.sendReplay(owner, snapshot.managed, "terminal_output", protocol.TerminalOutputPayload{SessionID: snapshot.id, Offset: frame.offset, Data: protocol.EncodeBase64(frame.data)}); err != nil {
 				r.releaseReopen(owner, managed)
 				return err
 			}
 			cursor = frame.offset + uint64(len(frame.data))
 		}
 	}
+}
+
+func (r *sessionRegistry) sendReplay(owner *connection, managed *managedSession, messageType string, payload any) error {
+	r.mu.Lock()
+	allowed := r.active[managed.id] == managed && !managed.closed && managed.owner == owner && managed.replaying
+	r.mu.Unlock()
+	if !allowed {
+		return errors.New("session replay lost ownership")
+	}
+	return owner.send(messageType, payload)
 }
 
 func historyRangeLocked(managed *managedSession, start, end uint64) ([]historyFrame, bool) {
@@ -369,14 +387,23 @@ func (r *sessionRegistry) releaseReopen(owner *connection, managed *managedSessi
 }
 
 func (r *sessionRegistry) revokeCredential(credentialID string) error {
+	tickets := r.fenceCredentialRevocation(credentialID)
+	return r.finishCloseTickets(tickets)
+}
+
+func (r *sessionRegistry) fenceCredentialRevocation(credentialID string) []sessionCloseTicket {
 	r.mu.Lock()
 	if r.revokedCredentials == nil {
 		r.revokedCredentials = make(map[string]struct{})
 	}
 	r.revokedCredentials[credentialID] = struct{}{}
 	managed := r.sessionsForCredentialLocked(credentialID)
+	tickets := make([]sessionCloseTicket, 0, len(managed))
+	for _, session := range managed {
+		tickets = append(tickets, r.fenceManagedLocked(session, "credential_revoked", false))
+	}
 	r.mu.Unlock()
-	return r.closeSessions(managed, "credential_revoked")
+	return tickets
 }
 
 func (r *sessionRegistry) expireCredential(credentialID string) error {
@@ -433,21 +460,15 @@ func (r *sessionRegistry) shutdown() error {
 	for open := range r.pending {
 		pending = append(pending, open.cancel)
 	}
-	managed := make([]*managedSession, 0, len(r.active))
+	tickets := make([]sessionCloseTicket, 0, len(r.active))
 	for _, session := range r.active {
-		managed = append(managed, session)
+		tickets = append(tickets, r.fenceManagedLocked(session, "agent_shutdown", false))
 	}
 	r.mu.Unlock()
 	for _, cancel := range pending {
 		cancel()
 	}
-	var errs []error
-	for _, session := range managed {
-		if err := r.closeManagedMode(session, "agent_shutdown", false); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	return r.finishCloseTickets(tickets)
 }
 
 func (r *sessionRegistry) disconnected(owner *connection, destroy ...bool) {
@@ -590,20 +611,43 @@ func (r *sessionRegistry) closeManaged(managed *managedSession, reason string) e
 
 func (r *sessionRegistry) closeManagedMode(managed *managedSession, reason string, notify bool) error {
 	r.mu.Lock()
+	ticket := r.fenceManagedLocked(managed, reason, notify)
+	r.mu.Unlock()
+	return r.finishCloseTicket(ticket)
+}
+
+func (r *sessionRegistry) fenceManagedLocked(managed *managedSession, reason string, notify bool) sessionCloseTicket {
+	ticket := sessionCloseTicket{managed: managed, reason: reason, notify: notify}
 	if managed.closed {
-		done := managed.closeDone
-		r.mu.Unlock()
-		<-done
+		return ticket
+	}
+	managed.closed = true
+	ticket.owner = managed.owner
+	ticket.first = true
+	managed.owner = nil
+	r.removeHistoryLocked(managed)
+	return ticket
+}
+
+func (r *sessionRegistry) finishCloseTickets(tickets []sessionCloseTicket) error {
+	var errs []error
+	for _, ticket := range tickets {
+		if err := r.finishCloseTicket(ticket); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *sessionRegistry) finishCloseTicket(ticket sessionCloseTicket) error {
+	managed := ticket.managed
+	if !ticket.first {
+		<-managed.closeDone
 		r.mu.Lock()
 		err := managed.closeErr
 		r.mu.Unlock()
 		return err
 	}
-	managed.closed = true
-	owner := managed.owner
-	managed.owner = nil
-	r.removeHistoryLocked(managed)
-	r.mu.Unlock()
 	managed.cancel()
 	err := managed.terminal.Close()
 	r.mu.Lock()
@@ -612,8 +656,8 @@ func (r *sessionRegistry) closeManagedMode(managed *managedSession, reason strin
 		delete(r.active, managed.id)
 	}
 	r.mu.Unlock()
-	if notify && owner != nil && owner.sessionState() == protocol.SessionOpen {
-		_ = owner.send("session_closed", protocol.SessionClosedPayload{SessionID: managed.id, Reason: reason})
+	if ticket.notify && ticket.owner != nil && ticket.owner.sessionState() == protocol.SessionOpen {
+		_ = ticket.owner.send("session_closed", protocol.SessionClosedPayload{SessionID: managed.id, Reason: ticket.reason})
 	}
 	close(managed.closeDone)
 	return err
