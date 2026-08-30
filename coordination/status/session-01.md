@@ -313,3 +313,10 @@
 
 - Queue commit `12e6dc93399c8392343a9e856708ae5f81521d14` makes S01-002 depend on both S06-002 and S06-005. The integration manifest therefore cannot select the superseded pre-remediation Windows-agent product merely because the original vertical-slice gate passed; Session 06 must independently verify exact S03-006 behavior first.
 - No task state, product file, integration, push, deployment, certificate, or network state changed.
+
+## Browser protocol owner handoff (2026-08-30)
+
+- S02-002 product/evidence `16e850a34b56a315fb78c137ddae6d38220180ea` and status handoff `c3c9786d987fa03a1d723d6d4574daf2c1be564d` are owner/reviewer `done`. Named reviewer `/root/s06_006_origin` returned PASS with no severity findings.
+- Focused adapter 11/11, full web 42/42, canonical protocol 22 transcripts/27 fixtures/1 positive vector/4 negative mutations, typecheck, lint, targeted Prettier, configured production build, exact CSP, diff, ownership, and secret checks passed. The new regression performs one synthetic pairing, reloads with a fresh store/adapter, reuses the non-extractable IndexedDB credential, authenticates/opens, and emits no second pairing request.
+- Generated Next HTML checksum is run-specific because build identity changes between exact builds; it is not treated as an exact-source reproducibility hash. Live Chrome Connect/reconnect and physical mobile certificate reuse remain explicitly unclaimed pending the action-time confirmation and Session 06 gates.
+- Queue commit `fd56e75f97f9ed4ad559aa653984bdefc8ed7037` marks S02-002 owner `done` and S05-002 `ready`. No live authentication, terminal session, integration, push, deployment, certificate, or network mutation occurred in this queue transition.
