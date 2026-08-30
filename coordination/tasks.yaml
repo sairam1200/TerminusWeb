@@ -24,7 +24,7 @@ tasks:
     state: blocked
     title: Integrate browser terminal with protocol 0.1
     depends_on: [S01-001, S02-001, S03-004, S05-005, S05-006, S06-006]
-    evidence: Shared fixtures pass and malformed frames fail closed.
+    evidence: Shared fixtures pass and malformed frames fail closed; after one per-device certificate installation/selection and pairing, reconnect/resume silently reuses the existing identity without another certificate import, selection, or pairing prompt.
 
   - id: S03-001
     owner: session_03
@@ -80,7 +80,7 @@ tasks:
     state: blocked
     title: Verify first end-to-end private terminal vertical slice
     depends_on: [S01-001, S02-002, S03-002, S05-002, S06-001]
-    evidence: Exact task commit SHAs, allowed and denied paths, browser matrix, logs, and pre-integration pass/fail report.
+    evidence: Exact task commit SHAs, allowed and denied paths, browser matrix, logs, and pre-integration pass/fail report; reconnect/resume proves the once-installed/selected device identity is silently reused without another certificate or pairing prompt.
 
   - id: S04-002
     owner: session_04
@@ -105,14 +105,14 @@ tasks:
 
   - id: S05-005
     owner: session_05
-    state: blocked
+    state: ready
     title: Review TLS/private publication design and prove private-only access
     depends_on: [S03-004, S05-001]
     evidence: Read-only exact-design review explicitly deciding Tailscale Serve TLS termination versus raw-TCP/passthrough for end-to-end browser mTLS, then proving intended private access, denied LAN/public access, existing browser/OS certificate trust, Funnel disabled, and separation of Tailscale policy from application pairing/authentication; no live mutation.
 
   - id: S03-004
     owner: session_03
-    state: ready
+    state: done
     title: Run the authorized private integration host with supplied trusted inputs
     depends_on: [S03-003, S06-006]
     requires_user_authorization: true
@@ -145,7 +145,7 @@ tasks:
 
   - id: S05-006
     owner: session_05
-    state: blocked
+    state: ready
     title: Configure authorized raw-TCP private Serve and prove allowed/denied paths
     depends_on: [S03-004, S05-001]
     requires_user_authorization: true
