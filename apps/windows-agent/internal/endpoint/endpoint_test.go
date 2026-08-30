@@ -54,6 +54,37 @@ type ignoringContextOpenAdapter struct {
 	sessions  []*fakeSession
 }
 
+// lateTerminalAfterCancellationAdapter models a broken terminal adapter that
+// observes cancellation but still creates and returns a terminal. The endpoint
+// must close that late terminal instead of registering it.
+type lateTerminalAfterCancellationAdapter struct {
+	started   chan struct{}
+	cancelled chan struct{}
+	created   chan *fakeSession
+}
+
+func newLateTerminalAfterCancellationAdapter() *lateTerminalAfterCancellationAdapter {
+	return &lateTerminalAfterCancellationAdapter{
+		started:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+		created:   make(chan *fakeSession, 1),
+	}
+}
+
+func (a *lateTerminalAfterCancellationAdapter) Open(ctx context.Context, config terminal.Config) (terminal.Session, error) {
+	close(a.started)
+	<-ctx.Done()
+	close(a.cancelled)
+	session := &fakeSession{
+		output:  make(chan []byte, 4),
+		closed:  make(chan struct{}),
+		columns: config.Columns,
+		rows:    config.Rows,
+	}
+	a.created <- session
+	return session, nil
+}
+
 func newIgnoringContextOpenAdapter(stallFrom, capacity int) *ignoringContextOpenAdapter {
 	return &ignoringContextOpenAdapter{
 		stallFrom: stallFrom,
@@ -627,6 +658,70 @@ func TestCredentialRevocationClosesAllAuthorizationsAndSessions(t *testing.T) {
 		if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
 			t.Fatalf("code = %s", got)
 		}
+	}
+}
+
+func TestCredentialRevocationWinsAgainstStalledOpenAndClosesLateTerminal(t *testing.T) {
+	adapter := newLateTerminalAfterCancellationAdapter()
+	store := newMemoryCredentialStore()
+	endpoint, err := New(Config{
+		AllowedOrigin:  testOrigin,
+		AgentID:        testAgentID,
+		Terminal:       adapter,
+		Credentials:    store,
+		ApprovePairing: func(context.Context, PairingApproval) bool { return true },
+		ResolveDevice:  func(*http.Request) (string, error) { return "stalled-open-revocation-device", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	client, credential := pairAndAuthorize(t, endpoint, server)
+	defer client.ws.Close()
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	select {
+	case <-adapter.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("terminal creation did not reach the stalled adapter")
+	}
+
+	revokeDone := make(chan error, 1)
+	go func() { revokeDone <- endpoint.RevokeCredential(context.Background(), credential.ID) }()
+	if err := awaitTestError(t, "credential revocation during stalled open", revokeDone); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.ws.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	failure := client.read("error").Value.(*protocol.ErrorPayload)
+	if failure.Code != protocol.AuthenticationFailed {
+		t.Fatalf("revocation error = %s, want %s (and not %s)", failure.Code, protocol.AuthenticationFailed, protocol.SessionOpenFailed)
+	}
+	if !failure.Fatal {
+		t.Fatal("revocation error was not fatal")
+	}
+
+	select {
+	case <-adapter.cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("connection shutdown did not cancel the pending terminal open")
+	}
+	var late *fakeSession
+	select {
+	case late = <-adapter.created:
+	case <-time.After(3 * time.Second):
+		t.Fatal("adapter did not return its late terminal")
+	}
+	requireTestSessionClosed(t, "revocation revalidation", late)
+	endpoint.sessions.mu.Lock()
+	active, pending := len(endpoint.sessions.active), len(endpoint.sessions.pending)
+	endpoint.sessions.mu.Unlock()
+	if active != 0 || pending != 0 {
+		t.Fatalf("revoked admission accounting: active=%d pending=%d", active, pending)
 	}
 }
 

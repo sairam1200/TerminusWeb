@@ -225,12 +225,12 @@ func (r *sessionRegistry) revokeCredential(credentialID string) error {
 		r.revokedCredentials = make(map[string]struct{})
 	}
 	r.revokedCredentials[credentialID] = struct{}{}
-	pending := make([]context.CancelFunc, 0)
-	for open := range r.pending {
-		if open.credentialID == credentialID {
-			pending = append(pending, open.cancel)
-		}
-	}
+	// Endpoint.RevokeCredential emits the generic authentication failure before
+	// connection shutdown calls disconnected and cancels pending opens. Doing
+	// that cancellation here could let the open path win connection.fail with
+	// SESSION_OPEN_FAILED. The revoked marker below still makes the final
+	// admission check reject and close a terminal returned by an adapter that
+	// ignores cancellation.
 	managed := make([]*managedSession, 0)
 	for _, session := range r.active {
 		if session.credentialID == credentialID {
@@ -238,9 +238,6 @@ func (r *sessionRegistry) revokeCredential(credentialID string) error {
 		}
 	}
 	r.mu.Unlock()
-	for _, cancel := range pending {
-		cancel()
-	}
 	var errs []error
 	for _, session := range managed {
 		if err := r.closeManaged(session, "protocol_error"); err != nil {
