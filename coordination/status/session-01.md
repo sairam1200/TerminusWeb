@@ -379,3 +379,11 @@
 - Exact protocol verification, repeated agent adversarial tests, full/vet/real-ConPTY evidence, web focused/full/type/lint/build, and direct browser-to-agent source boundaries pass. No unresolved Critical, High, or Medium product finding remains in this owner review.
 - Live Chrome/mobile certificate persistence, named wrong-tailnet peer/full policy, external-public vantage, Go race, controlled host exhaustion, and exact deployed-candidate evidence remain explicit release gaps.
 - Queue commit `5d69505ec69612460f40c827132d828e0ba7d46b` marks S05-002 owner `done` and S06-002 `ready`. No live authentication, product repair, integration, push, deployment, certificate, or network mutation occurred in this queue transition.
+
+## Remembered-session consumer handoff reconciliation (2026-08-30)
+
+- S01-005 exact cumulative protocol/security product `f9a70299974734c3eeb920697d2dfa4717148a9a` and status handoff `14a613b2fd5149cd7f3f5fd0fb17a2cbce57f90c` remain the authoritative protocol 0.2 input.
+- S02-005 exact cumulative product `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9` and status handoff `70666fac1fc9f696f630e91f947028b6c499a2ab` pass product-to-handoff ancestry, `git show --check`, exact author identity, and committed handoff audit. Named independent final reviewer `/root/s06_006_origin` returned PASS with no findings after the New Session retry-recovery fix.
+- S03-007 exact cumulative product `92a29e1673751893d3ef0b5ee9c937b91d0f93d0` and status handoff `a1a5c62874e2551ade3d994c056167007e8cdb64` pass product-to-handoff ancestry, `git show --check`, exact author identity, and committed handoff audit. Named independent final reviewer `/root/s03_004_host/s03_007_fresh_review` returned PASS with no findings after replay/cleanup fencing remediation.
+- Queue/request commit `464ce763890ef305cc4e4d4dab423fd86796bb12` marks S02-005 and S03-007 owner `done`, transitions S05-008 to `ready`, and records the immutable exact-SHA security-review request. These owner results are not Session 06 `verified` evidence.
+- The live 0.1 integration host remains stopped. No host, browser, pairing material, certificate, Tailscale route/policy, Funnel, integration, push, or deployment state changed during this reconciliation.
