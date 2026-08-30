@@ -23,6 +23,9 @@ array order is oldest-to-newest retained history. Appends first enforce the
 262,144-byte target-session limit and then evict globally oldest bytes until
 the 16,777,216-byte agent budget is met. Eviction marks truncation and never
 closes a running session or establishes a session-count limit.
+The uniform 64-session case reaches the global limit using only valid
+per-session states; the verifier rejects any seeded state that already exceeds
+either limit.
 
 `accepted-0.2.json.pageLifecycleCases` fixes browser fragment behavior around
 **New Session**: replace only after close acknowledgment plus a fresh

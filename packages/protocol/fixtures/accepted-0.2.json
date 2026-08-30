@@ -107,7 +107,7 @@
       "initialFragment": "#/s/k7m4-p2q9-wxyz",
       "closeAcknowledged": false,
       "newOpenAttempted": false,
-      "expected": { "fragment": "#/s/k7m4-p2q9-wxyz", "state": "connected" }
+      "expected": { "fragment": "#/s/k7m4-p2q9-wxyz", "state": "new_session_error" }
     }
   ],
   "retentionCases": [
@@ -119,16 +119,9 @@
     },
     {
       "id": "v02-agent-history-budget-evicts-globally-oldest-byte",
-      "initial": [
-        { "sessionId": "abcd-efgh-jkmn", "startOffset": 0, "bytes": 8388608 },
-        { "sessionId": "k7m4-p2q9-wxyz", "startOffset": 0, "bytes": 8388608 }
-      ],
-      "append": { "sessionId": "rstv-wxyz-2345", "bytes": 1 },
-      "expected": [
-        { "sessionId": "abcd-efgh-jkmn", "startOffset": 1, "bytes": 8388607, "truncated": true },
-        { "sessionId": "k7m4-p2q9-wxyz", "startOffset": 0, "bytes": 8388608, "truncated": false },
-        { "sessionId": "rstv-wxyz-2345", "startOffset": 0, "bytes": 1, "truncated": false }
-      ]
+      "uniformInitial": { "sessionCount": 64, "bytesEach": 262144, "startOffset": 0 },
+      "appendNewSessionBytes": 1,
+      "expectedUniform": { "sessionCount": 65, "agentBytes": 16777216, "oldestStartOffset": 1, "oldestBytes": 262143, "oldestTruncated": true, "newestBytes": 1, "closedSessions": 0 }
     },
     {
       "id": "v02-history-within-budgets-does-not-evict-or-close",

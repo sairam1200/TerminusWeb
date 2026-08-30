@@ -172,6 +172,24 @@ function validateTranscript(item) {
 }
 
 function validateRetentionCase(item) {
+  if (item.uniformInitial) {
+    const initial = item.uniformInitial;
+    if (!Number.isSafeInteger(initial.sessionCount) || initial.sessionCount < 1 || !Number.isSafeInteger(initial.bytesEach) || initial.bytesEach < 0 || initial.bytesEach > PER_SESSION_HISTORY_BYTES || !offset(initial.startOffset) || !Number.isSafeInteger(item.appendNewSessionBytes) || item.appendNewSessionBytes < 1 || item.appendNewSessionBytes > PER_SESSION_HISTORY_BYTES) return false;
+    const initialTotal = initial.sessionCount * initial.bytesEach;
+    if (!Number.isSafeInteger(initialTotal) || initialTotal > AGENT_HISTORY_BYTES) return false;
+    const excess = Math.max(0, initialTotal + item.appendNewSessionBytes - AGENT_HISTORY_BYTES);
+    const actual = {
+      sessionCount: initial.sessionCount + 1,
+      agentBytes: initialTotal + item.appendNewSessionBytes - excess,
+      oldestStartOffset: initial.startOffset + excess,
+      oldestBytes: initial.bytesEach - excess,
+      oldestTruncated: excess > 0,
+      newestBytes: item.appendNewSessionBytes,
+      closedSessions: 0,
+    };
+    return excess <= initial.bytesEach && JSON.stringify(actual) === JSON.stringify(item.expectedUniform);
+  }
+  if (!Array.isArray(item.initial) || item.initial.some((entry) => !SESSION.test(entry.sessionId) || !offset(entry.startOffset) || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || entry.bytes > PER_SESSION_HISTORY_BYTES) || item.initial.reduce((sum, entry) => sum + entry.bytes, 0) > AGENT_HISTORY_BYTES) return false;
   const entries = item.initial.map((entry) => ({ ...entry, truncated: entry.startOffset > 0 }));
   let target = entries.find((entry) => entry.sessionId === item.append.sessionId);
   if (!target) {
@@ -210,6 +228,8 @@ function validatePageLifecycleCase(item) {
     } else if (item.newOpenAttempted && item.openFailed) {
       state = 'closed_error';
     }
+  } else {
+    state = 'new_session_error';
   }
   const actual = { fragment, ...(oldReopenCode ? { oldReopenCode } : {}), state };
   return JSON.stringify(actual) === JSON.stringify(item.expected);
