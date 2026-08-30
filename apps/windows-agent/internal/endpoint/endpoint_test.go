@@ -40,6 +40,59 @@ type fakeAdapter struct {
 	sessions []*fakeSession
 }
 
+// ignoringContextOpenAdapter deliberately models a terminal implementation
+// that does not return when its context is cancelled. Tests release the
+// adapter explicitly so they can prove registry operations remain independent
+// and that any terminal created after admission is invalidated is closed.
+type ignoringContextOpenAdapter struct {
+	mu        sync.Mutex
+	calls     int
+	stallFrom int
+	started   chan int
+	release   chan struct{}
+	releaseMu sync.Once
+	sessions  []*fakeSession
+}
+
+func newIgnoringContextOpenAdapter(stallFrom, capacity int) *ignoringContextOpenAdapter {
+	return &ignoringContextOpenAdapter{
+		stallFrom: stallFrom,
+		started:   make(chan int, capacity),
+		release:   make(chan struct{}),
+	}
+}
+
+func (a *ignoringContextOpenAdapter) Open(_ context.Context, config terminal.Config) (terminal.Session, error) {
+	a.mu.Lock()
+	a.calls++
+	call := a.calls
+	a.mu.Unlock()
+	if call >= a.stallFrom {
+		a.started <- call
+		<-a.release
+	}
+	session := &fakeSession{
+		output:  make(chan []byte, 4),
+		closed:  make(chan struct{}),
+		columns: config.Columns,
+		rows:    config.Rows,
+	}
+	a.mu.Lock()
+	a.sessions = append(a.sessions, session)
+	a.mu.Unlock()
+	return session, nil
+}
+
+func (a *ignoringContextOpenAdapter) unblock() {
+	a.releaseMu.Do(func() { close(a.release) })
+}
+
+func (a *ignoringContextOpenAdapter) snapshot() []*fakeSession {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]*fakeSession(nil), a.sessions...)
+}
+
 type failingOpenAdapter struct{ err error }
 
 func (a failingOpenAdapter) Open(context.Context, terminal.Config) (terminal.Session, error) {
@@ -163,6 +216,34 @@ func waitSessionState(t *testing.T, session *fakeSession, input string, columns,
 	t.Fatalf("session state = %q %dx%d, want %q %dx%d", gotInput, gotColumns, gotRows, input, columns, rows)
 }
 
+func testRegistryOwner(credentialID string) *connection {
+	return &connection{
+		credential: Credential{ID: credentialID},
+		done:       make(chan struct{}),
+		machine:    protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0),
+	}
+}
+
+func awaitTestError(t *testing.T, label string, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s did not complete", label)
+		return nil
+	}
+}
+
+func requireTestSessionClosed(t *testing.T, label string, session *fakeSession) {
+	t.Helper()
+	select {
+	case <-session.closed:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s left a terminal active", label)
+	}
+}
+
 type testClient struct {
 	t        *testing.T
 	ws       *websocket.Conn
@@ -258,6 +339,46 @@ func authorizeExisting(t *testing.T, server *httptest.Server, credential Credent
 	client.send("auth_response", protocol.AuthResponsePayload{ChallengeID: challenge.ChallengeID, CredentialID: credential.ID, Proof: protocol.EncodeBase64(authProof(credential.Secret[:], connectionID, challenge.ChallengeID, challengeBytes))})
 	client.read("auth_result")
 	return client
+}
+
+// This proves only the server-side once-per-device credential behavior.
+// Browser certificate import, selection, and persistence remain external
+// platform behavior and are not asserted by this test.
+func TestStoredCredentialReconnectDoesNotRepeatLocalPairingApproval(t *testing.T) {
+	adapter := &fakeAdapter{}
+	store := newMemoryCredentialStore()
+	var approvals atomic.Int64
+	endpoint, err := New(Config{
+		AllowedOrigin: testOrigin,
+		AgentID:       testAgentID,
+		Terminal:      adapter,
+		Credentials:   store,
+		ApprovePairing: func(context.Context, PairingApproval) bool {
+			approvals.Add(1)
+			return true
+		},
+		ResolveDevice: func(*http.Request) (string, error) { return "credential-reuse-device", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	if got := approvals.Load(); got != 1 {
+		t.Fatalf("local pairing approvals = %d, want 1 after initial pairing", got)
+	}
+	if err := first.ws.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reconnected := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000098")
+	defer reconnected.ws.Close()
+	if got := approvals.Load(); got != 1 {
+		t.Fatalf("local pairing approvals = %d, want 1 after stored-credential reconnect", got)
+	}
 }
 
 func TestPrivateWSSLifecycleDetachResumeAndCleanup(t *testing.T) {
@@ -831,6 +952,260 @@ func TestSessionRegistryConcurrentAdmissionHasNoFixedCountLimit(t *testing.T) {
 		t.Fatalf("created sessions = %d, want %d", created, attempts)
 	}
 	if err := registry.close("agent_shutdown"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStalledOpenDoesNotBlockUnrelatedSessionLifecycle(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation func(*sessionRegistry, *connection, string) error
+		verify    func(*testing.T, *fakeSession)
+	}{
+		{
+			name: "input",
+			operation: func(registry *sessionRegistry, owner *connection, id string) error {
+				return registry.input(owner, id, []byte{0})
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				session.mu.Lock()
+				length := session.input.Len()
+				session.mu.Unlock()
+				if length != 1 {
+					t.Fatalf("input length = %d, want 1", length)
+				}
+			},
+		},
+		{
+			name: "resize",
+			operation: func(registry *sessionRegistry, owner *connection, id string) error {
+				return registry.resize(owner, id, protocol.Dimensions{Columns: 101, Rows: 31})
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				session.mu.Lock()
+				columns, rows := session.columns, session.rows
+				session.mu.Unlock()
+				if columns != 101 || rows != 31 {
+					t.Fatalf("dimensions = %dx%d, want 101x31", columns, rows)
+				}
+			},
+		},
+		{
+			name: "close",
+			operation: func(registry *sessionRegistry, owner *connection, id string) error {
+				return registry.closeBy(owner, id, "user_request")
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				requireTestSessionClosed(t, "close", session)
+			},
+		},
+		{
+			name: "disconnect cleanup",
+			operation: func(registry *sessionRegistry, owner *connection, _ string) error {
+				registry.disconnected(owner)
+				return nil
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				requireTestSessionClosed(t, "disconnect cleanup", session)
+			},
+		},
+		{
+			name: "credential revocation",
+			operation: func(registry *sessionRegistry, owner *connection, _ string) error {
+				return registry.revokeCredential(owner.credentialID())
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				requireTestSessionClosed(t, "credential revocation", session)
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := newIgnoringContextOpenAdapter(2, 1)
+			t.Cleanup(adapter.unblock)
+			registry := sessionRegistry{adapter: adapter, now: time.Now}
+			firstOwner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 200+index))
+			secondOwner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 300+index))
+			firstID, err := registry.open(firstOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstSession := adapter.snapshot()[0]
+
+			openDone := make(chan error, 1)
+			go func() {
+				_, openErr := registry.open(secondOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+				openDone <- openErr
+			}()
+			select {
+			case <-adapter.started:
+			case <-time.After(3 * time.Second):
+				t.Fatal("second terminal creation did not reach the adapter")
+			}
+
+			operationDone := make(chan error, 1)
+			go func() { operationDone <- test.operation(&registry, firstOwner, firstID) }()
+			if err := awaitTestError(t, test.name, operationDone); err != nil {
+				t.Fatal(err)
+			}
+			test.verify(t, firstSession)
+
+			adapter.unblock()
+			if err := awaitTestError(t, "stalled terminal creation", openDone); err != nil {
+				t.Fatal(err)
+			}
+			if err := registry.shutdown(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestStalledOpenDoesNotBlockShutdownAndLateTerminalIsClosed(t *testing.T) {
+	adapter := newIgnoringContextOpenAdapter(2, 1)
+	t.Cleanup(adapter.unblock)
+	registry := sessionRegistry{adapter: adapter, now: time.Now}
+	firstOwner := testRegistryOwner("30000000-0000-4000-8000-000000000401")
+	secondOwner := testRegistryOwner("30000000-0000-4000-8000-000000000402")
+	if _, err := registry.open(firstOwner, protocol.Dimensions{Columns: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	firstSession := adapter.snapshot()[0]
+	openDone := make(chan error, 1)
+	go func() {
+		_, err := registry.open(secondOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+		openDone <- err
+	}()
+	select {
+	case <-adapter.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("second terminal creation did not reach the adapter")
+	}
+
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- registry.shutdown() }()
+	if err := awaitTestError(t, "shutdown", shutdownDone); err != nil {
+		t.Fatal(err)
+	}
+	requireTestSessionClosed(t, "shutdown", firstSession)
+
+	adapter.unblock()
+	if err := awaitTestError(t, "late terminal creation", openDone); err == nil {
+		t.Fatal("terminal created after shutdown was admitted")
+	}
+	sessions := adapter.snapshot()
+	if len(sessions) != 2 {
+		t.Fatalf("created sessions = %d, want 2", len(sessions))
+	}
+	requireTestSessionClosed(t, "shutdown revalidation", sessions[1])
+	registry.mu.Lock()
+	active, pending := len(registry.active), len(registry.pending)
+	registry.mu.Unlock()
+	if active != 0 || pending != 0 {
+		t.Fatalf("shutdown accounting: active=%d pending=%d", active, pending)
+	}
+}
+
+func TestLateTerminalIsClosedAfterOwnerOrCredentialInvalidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		invalidate func(*sessionRegistry, *connection) error
+	}{
+		{
+			name: "owner disconnect",
+			invalidate: func(registry *sessionRegistry, owner *connection) error {
+				close(owner.done)
+				registry.disconnected(owner)
+				return nil
+			},
+		},
+		{
+			name: "credential revocation",
+			invalidate: func(registry *sessionRegistry, owner *connection) error {
+				return registry.revokeCredential(owner.credentialID())
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := newIgnoringContextOpenAdapter(1, 1)
+			t.Cleanup(adapter.unblock)
+			registry := sessionRegistry{adapter: adapter, now: time.Now}
+			owner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 500+index))
+			openDone := make(chan error, 1)
+			go func() {
+				_, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24})
+				openDone <- err
+			}()
+			select {
+			case <-adapter.started:
+			case <-time.After(3 * time.Second):
+				t.Fatal("terminal creation did not reach the adapter")
+			}
+
+			invalidateDone := make(chan error, 1)
+			go func() { invalidateDone <- test.invalidate(&registry, owner) }()
+			if err := awaitTestError(t, test.name, invalidateDone); err != nil {
+				t.Fatal(err)
+			}
+			adapter.unblock()
+			if err := awaitTestError(t, "invalidated terminal creation", openDone); err == nil {
+				t.Fatal("terminal created after admission invalidation was admitted")
+			}
+			sessions := adapter.snapshot()
+			if len(sessions) != 1 {
+				t.Fatalf("created sessions = %d, want 1", len(sessions))
+			}
+			requireTestSessionClosed(t, test.name, sessions[0])
+			registry.mu.Lock()
+			active, pending := len(registry.active), len(registry.pending)
+			registry.mu.Unlock()
+			if active != 0 || pending != 0 {
+				t.Fatalf("invalidated admission accounting: active=%d pending=%d", active, pending)
+			}
+		})
+	}
+}
+
+func TestConcurrentStalledAdmissionsHaveNoFixedCountLimit(t *testing.T) {
+	const attempts = 24
+	adapter := newIgnoringContextOpenAdapter(1, attempts)
+	t.Cleanup(adapter.unblock)
+	registry := sessionRegistry{adapter: adapter, now: time.Now}
+	results := make(chan error, attempts)
+	for index := 0; index < attempts; index++ {
+		index := index
+		go func() {
+			owner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 600+index))
+			_, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24})
+			results <- err
+		}()
+	}
+	for index := 0; index < attempts; index++ {
+		select {
+		case <-adapter.started:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("terminal creation %d of %d did not reach the adapter", index+1, attempts)
+		}
+	}
+	adapter.unblock()
+	for index := 0; index < attempts; index++ {
+		if err := awaitTestError(t, "concurrent terminal creation", results); err != nil {
+			t.Fatalf("concurrent open %d failed: %v", index, err)
+		}
+	}
+	registry.mu.Lock()
+	active, pending := len(registry.active), len(registry.pending)
+	registry.mu.Unlock()
+	if active != attempts || pending != 0 {
+		t.Fatalf("admission accounting: active=%d pending=%d, want %d/0", active, pending, attempts)
+	}
+	if created := len(adapter.snapshot()); created != attempts {
+		t.Fatalf("created sessions = %d, want %d", created, attempts)
+	}
+	if err := registry.shutdown(); err != nil {
 		t.Fatal(err)
 	}
 }

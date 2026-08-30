@@ -14,11 +14,19 @@ import (
 )
 
 type sessionRegistry struct {
-	mu           sync.Mutex
-	adapter      terminal.Adapter
-	now          func() time.Time
-	active       map[string]*managedSession
-	shuttingDown bool
+	mu                 sync.Mutex
+	adapter            terminal.Adapter
+	now                func() time.Time
+	active             map[string]*managedSession
+	pending            map[*pendingSessionOpen]struct{}
+	revokedCredentials map[string]struct{}
+	shuttingDown       bool
+}
+
+type pendingSessionOpen struct {
+	owner        *connection
+	credentialID string
+	cancel       context.CancelFunc
 }
 
 type managedSession struct {
@@ -39,32 +47,41 @@ type managedSession struct {
 }
 
 func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions) (string, error) {
+	credentialID := owner.credentialID()
 	r.mu.Lock()
-	if r.shuttingDown {
+	if err := r.admissionError(owner, credentialID); err != nil {
 		r.mu.Unlock()
-		return "", errors.New("terminal session admission is unavailable")
-	}
-	select {
-	case <-owner.done:
-		r.mu.Unlock()
-		return "", errors.New("terminal session connection is closed")
-	default:
+		return "", err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	pending := &pendingSessionOpen{owner: owner, credentialID: credentialID, cancel: cancel}
+	if r.pending == nil {
+		r.pending = make(map[*pendingSessionOpen]struct{})
+	}
+	r.pending[pending] = struct{}{}
+	r.mu.Unlock()
+
 	session, err := r.adapter.Open(ctx, terminal.Config{Columns: dimensions.Columns, Rows: dimensions.Rows})
 	if err != nil {
 		cancel()
-		r.mu.Unlock()
+		r.removePending(pending)
 		return "", err
 	}
 	id, err := randomUUID()
 	if err != nil {
 		_ = session.Close()
 		cancel()
-		r.mu.Unlock()
+		r.removePending(pending)
 		return "", err
 	}
-	managed := &managedSession{id: id, credentialID: owner.credentialID(), terminal: session, cancel: cancel, owner: owner, closeDone: make(chan struct{})}
+	managed := &managedSession{id: id, credentialID: credentialID, terminal: session, cancel: cancel, owner: owner, closeDone: make(chan struct{})}
+	r.mu.Lock()
+	delete(r.pending, pending)
+	if err := r.admissionError(owner, credentialID); err != nil {
+		r.mu.Unlock()
+		cancel()
+		return "", errors.Join(err, session.Close())
+	}
 	if r.active == nil {
 		r.active = make(map[string]*managedSession)
 	}
@@ -72,6 +89,30 @@ func (r *sessionRegistry) open(owner *connection, dimensions protocol.Dimensions
 	r.mu.Unlock()
 	go r.copyOutput(managed)
 	return id, nil
+}
+
+// admissionError must be called with r.mu held. Keeping the final validation
+// and registration under one lock prevents shutdown, disconnect, or revocation
+// from missing a terminal whose potentially blocking creation ran unlocked.
+func (r *sessionRegistry) admissionError(owner *connection, credentialID string) error {
+	if r.shuttingDown {
+		return errors.New("terminal session admission is unavailable")
+	}
+	if _, revoked := r.revokedCredentials[credentialID]; revoked {
+		return errors.New("terminal session credential is revoked")
+	}
+	select {
+	case <-owner.done:
+		return errors.New("terminal session connection is closed")
+	default:
+		return nil
+	}
+}
+
+func (r *sessionRegistry) removePending(pending *pendingSessionOpen) {
+	r.mu.Lock()
+	delete(r.pending, pending)
+	r.mu.Unlock()
 }
 
 func (r *sessionRegistry) input(owner *connection, id string, data []byte) error {
@@ -180,6 +221,16 @@ func (r *sessionRegistry) abortTransition(id string) {
 
 func (r *sessionRegistry) revokeCredential(credentialID string) error {
 	r.mu.Lock()
+	if r.revokedCredentials == nil {
+		r.revokedCredentials = make(map[string]struct{})
+	}
+	r.revokedCredentials[credentialID] = struct{}{}
+	pending := make([]context.CancelFunc, 0)
+	for open := range r.pending {
+		if open.credentialID == credentialID {
+			pending = append(pending, open.cancel)
+		}
+	}
 	managed := make([]*managedSession, 0)
 	for _, session := range r.active {
 		if session.credentialID == credentialID {
@@ -187,6 +238,9 @@ func (r *sessionRegistry) revokeCredential(credentialID string) error {
 		}
 	}
 	r.mu.Unlock()
+	for _, cancel := range pending {
+		cancel()
+	}
 	var errs []error
 	for _, session := range managed {
 		if err := r.closeManaged(session, "protocol_error"); err != nil {
@@ -225,11 +279,18 @@ func (r *sessionRegistry) close(reason string) error {
 func (r *sessionRegistry) shutdown() error {
 	r.mu.Lock()
 	r.shuttingDown = true
+	pending := make([]context.CancelFunc, 0, len(r.pending))
+	for open := range r.pending {
+		pending = append(pending, open.cancel)
+	}
 	managed := make([]*managedSession, 0, len(r.active))
 	for _, session := range r.active {
 		managed = append(managed, session)
 	}
 	r.mu.Unlock()
+	for _, cancel := range pending {
+		cancel()
+	}
 	var errs []error
 	for _, session := range managed {
 		if err := r.closeManagedMode(session, "agent_shutdown", false); err != nil {
@@ -241,6 +302,12 @@ func (r *sessionRegistry) shutdown() error {
 
 func (r *sessionRegistry) disconnected(owner *connection) {
 	r.mu.Lock()
+	pending := make([]context.CancelFunc, 0)
+	for open := range r.pending {
+		if open.owner == owner {
+			pending = append(pending, open.cancel)
+		}
+	}
 	managed := make([]*managedSession, 0, 1)
 	for _, session := range r.active {
 		if session.owner == owner && !session.detached {
@@ -248,6 +315,9 @@ func (r *sessionRegistry) disconnected(owner *connection) {
 		}
 	}
 	r.mu.Unlock()
+	for _, cancel := range pending {
+		cancel()
+	}
 	for _, session := range managed {
 		_ = r.closeManaged(session, "protocol_error")
 	}
