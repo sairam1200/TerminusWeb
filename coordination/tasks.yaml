@@ -21,7 +21,7 @@ tasks:
 
   - id: S02-002
     owner: session_02
-    state: ready
+    state: done
     title: Integrate browser terminal with protocol 0.1
     depends_on: [S01-001, S02-001, S03-004, S05-005, S05-006, S06-006]
     evidence: Shared fixtures pass and malformed frames fail closed; after one per-device certificate installation/selection and pairing, reconnect/resume silently reuses the existing identity without another certificate import, selection, or pairing prompt.
@@ -56,7 +56,7 @@ tasks:
 
   - id: S05-002
     owner: session_05
-    state: blocked
+    state: ready
     title: Review protocol 0.1 and both consumer implementations
     depends_on: [S01-001, S02-002, S03-002, S05-001]
     evidence: Independent first-slice findings with reproducible cases and severity.
