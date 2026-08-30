@@ -197,3 +197,14 @@
 - Scope: no protocol/schema change, terminal plaintext, pairing-code output, certificate generation/installation, Tailscale/DNS/firewall/grant/Funnel change, LAN/public listener, deployment, merge, or push occurred.
 - Product/task commit: `0446e685489d2e9d09715d6cc5ba011a5471a540` (cumulative; includes `b8bde676059d75b571deb3d8c0cbfe5d5f619ee1`).
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S03-006 exact-host runtime follow-up (2026-08-30)
+
+- The earlier S03-004 process PID 5384 was stopped with Ctrl+C only after netstat showed no established client. The attached `go run` wrapper reported the expected interrupt exit, and a read-only netstat check proved the old 8443 listener was closed before replacement.
+- A new non-elevated host was started from clean branch HEAD `4ca86bbefe56ade1911bcc347d81d0e460e7fcfe`, whose `apps/windows-agent` source contains exact reviewed S03-006 product `0446e685489d2e9d09715d6cc5ba011a5471a540`. Inputs, Origin, hostname, port, protected-store path, and device label are unchanged; no pairing-code flag was used.
+- Current runtime: attached operator session, process `integration-host` PID 24048, listener exactly `127.0.0.1:8443`; no wildcard/LAN listener.
+- Existing installed Terminus ClientAuth identity over the tailnet-only raw-TCP path: `/healthz` returned `ok` and HTTP 200 with TLS 1.3.
+- No client certificate: curl failed closed with exit 56 and HTTP status 000.
+- New host output contains only the fixed listener/health metadata and generic loopback TLS handshake rejection/EOF events. No terminal plaintext, command, pairing material, credential, proof, token, private key, PFX password, or reusable hash appeared.
+- No certificate generation/installation, Tailscale/Serve/Funnel/DNS/firewall/grant mutation, public/LAN exposure, product-code change, merge, push, or deployment occurred in this runtime replacement.
+- Runtime follow-up commit: resolve from branch HEAD after this status-only commit.
