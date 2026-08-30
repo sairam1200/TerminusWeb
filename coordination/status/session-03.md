@@ -168,3 +168,32 @@
 - Scope: no Tailscale/DNS/firewall/grant/Funnel change, certificate generation/installation, LAN/public listener, deployment, merge, push, terminal input, or pairing-code output occurred. The primary host remains live for downstream owner and verifier checks.
 - Product/task commit: `ce5ac98b8a79abd42fee6083345709c77aaf669c`.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S03-006 stalled-open isolation handoff (2026-08-30)
+
+- Current task: `S03-006` — Keep stalled terminal creation from blocking unrelated session lifecycle.
+- State: owner/reviewer `done`; Session 01 owns the queue transition and Session 06 owns later `verified` evidence.
+- Queue assignment: Session 01 commits `e9b6dd023178c18638e03b96cfd0543670c7d7f3` / `4dba7fe`; exact dependencies S03-005 product `e13c4c8d2659125476c7458b45720892ee49fc24` and S05-007 review product/status `cec6ea3467e1a8b3eb31920280b91eb30c60fa7a` / `d34243a93c30690f3a450924976046133c0aad13` were owner-done.
+- Finding remediated: `S05-007-AVAIL-001`. `Adapter.Open` no longer runs under the registry-wide mutex. Each open registers a cancellable pending admission, creates the terminal unlocked, then atomically revalidates permanent shutdown, owner connection state, and credential revocation before registration. An invalid late terminal is canceled and closed without becoming active.
+- Lifecycle behavior: unrelated input, resize, close, disconnect cleanup, credential revocation, and shutdown remain prompt while an adapter ignores cancellation. Disconnect and shutdown cancel matching pending contexts without waiting. Endpoint credential revocation records the revoked credential and closes active sessions, emits fatal generic `AUTHENTICATION_FAILED`, then connection shutdown/disconnect cancels the pending open; this prevents `SESSION_OPEN_FAILED` from winning `failOnce`. A late-returning broken adapter is still closed by final revalidation.
+- No-cap behavior: 24 simultaneous stalled admissions all reached the adapter and were admitted after release; no count predicate, capacity reservation, eighth/ninth boundary, or replacement fixed limit was added.
+- Files changed: `apps/windows-agent/internal/endpoint/session.go` and `apps/windows-agent/internal/endpoint/endpoint_test.go` only.
+- Independent test authors:
+  - `/root/s03_004_host/s03_004_review` owned only `endpoint_test.go` for the base remediation: deterministic channel-barrier coverage for stalled open versus input/resize/close/disconnect/revocation/shutdown, invalid late return, 24 concurrent admissions, and stored-credential reconnect.
+  - `/root/s05_005_independent` owned only the endpoint-level revocation/open ordering test: fatal `AUTHENTICATION_FAILED` (not `SESSION_OPEN_FAILED`), prompt cancellation through disconnect, late terminal closed, and active/pending counts zero.
+- Once-per-device acceptance: `TestStoredCredentialReconnectDoesNotRepeatLocalPairingApproval` pairs once, closes the first WSS connection, authenticates a new connection with the stored credential challenge/proof, and proves the local approval callback remains exactly one. Browser certificate import/selection/persistence is explicitly outside this server test and remains Session 02/06 physical-browser evidence.
+- Owner commands/evidence on non-elevated Microsoft Windows NT `10.0.26200.0` with Go `1.26.7` Windows AMD64:
+  - Four new stalled-open groups once and `-short -count=20`: PASS.
+  - Stored-credential reconnect test `-count=20`: PASS.
+  - Endpoint-level revocation/open ordering test `-count=20`: PASS.
+  - `go vet ./...`: PASS.
+  - `go test -count=1 ./...`: PASS across integration host, endpoint, protocol, and real Windows ConPTY/process-cleanup suites.
+  - `go test -short -count=20 ./internal/endpoint`: PASS in 26.462 seconds on the cumulative product.
+  - `gofmt -d` on both changed files, `git diff --check`, product `git show --check`, changed-path ownership review, fixed-cap scan, and credential/plaintext scan: PASS.
+  - `CGO_ENABLED=1 go test -race ...`: unavailable; the installed toolchain reported `runtime/race: package testmain: cannot find package`, default CGO is disabled, and `where.exe gcc` found no compiler. No compiler was installed. Deterministic barrier suites and repeated synchronized tests are the applicable local concurrency evidence.
+- Product history: immutable intermediate `b8bde676059d75b571deb3d8c0cbfe5d5f619ee1` introduced unlocked creation/revalidation and the base tests. A pre-review owner audit found the revocation failure-order race; cumulative follow-up `0446e685489d2e9d09715d6cc5ba011a5471a540` preserves authentication-failure ordering and adds the independent endpoint-level regression without rewriting the intermediate commit.
+- Independent reviewer/evidence: `/root/s03_006_independent` reviewed exact cumulative product `0446e685489d2e9d09715d6cc5ba011a5471a540` and returned PASS with no findings. The reviewer reproduced the focused seven-test suite `-count=20`, endpoint short suite `-count=20`, vet, full Go/real-Windows suite, formatting, diff/ownership, author, and secret checks; static race/deadlock review confirmed atomic registration, prompt lifecycle operations, permanent revocation/shutdown rejection, late cleanup, one-time approval reuse, and no fixed cap. Race-build unavailability was independently retained.
+- Live boundary: the existing S03-004 PID 5384 remained loopback-only and untouched while the source fix was made; it still runs the earlier compiled binary at this handoff. Replacement with the exact cumulative source and repeat mTLS allow/deny/listener checks must be coordinated after this status commit so downstream sessions are not interrupted mid-check.
+- Scope: no protocol/schema change, terminal plaintext, pairing-code output, certificate generation/installation, Tailscale/DNS/firewall/grant/Funnel change, LAN/public listener, deployment, merge, or push occurred.
+- Product/task commit: `0446e685489d2e9d09715d6cc5ba011a5471a540` (cumulative; includes `b8bde676059d75b571deb3d8c0cbfe5d5f619ee1`).
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
