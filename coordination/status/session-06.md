@@ -1,5 +1,35 @@
 # Session 06 Status
 
+## S06-006 production Origin freeze
+
+- Current task: `S06-006` — Freeze the authorized production HTTPS Origin for the current web source.
+- State: owner verification complete; independent review of exact evidence commit requested from the coordinator before a `done` queue transition.
+- Branch: `session/06-verification-release`.
+- Exact input: detached, clean web product `bf7ca71b437907e7d25251e54d59355440797ad4`.
+- Frozen configuration: HTTPS Origin `https://terminus-web.vercel.app`; private WSS destination `wss://sai.tailf8dcea.ts.net`; Vercel project `gaddr/terminus-web`; Root Directory `apps/web`; Node `24.x`; production branch `main`; no build-command override.
+- Files changed:
+  - `infrastructure/vercel/S06-006-production-origin-evidence.md`: immutable, secret-free local build, generated CSP/configuration, live HTTPS/Vercel, browser-render, and failed-Preview identity evidence.
+- Commands/evidence:
+  - `npm ci`: sandbox `spawn EPERM`; unchanged approved rerun exit 0, 443 packages, 0 vulnerabilities.
+  - `npm run typecheck`: exit 0. `npm run lint`: exit 0.
+  - `npx vitest run --reporter=verbose`: sandbox `spawn EPERM`; unchanged approved rerun exit 0, 7 files/41 tests, 0 skipped.
+  - Process-scoped exact Origin/WSS `npm run build`: sandbox compiled then `spawn EPERM` at the TypeScript worker; unchanged approved rerun exit 0 and statically generated `/`, `/_not-found`, and `/manifest.webmanifest`.
+  - Generated `.next/routes-manifest.json` contains exact `connect-src 'self' wss://sai.tailf8dcea.ts.net`; prerender/server output embeds that endpoint and exact expected Origin. Manifest SHA-256: `4C1AE9980DF5CCDC2A0FCC68E8C64572E69E8C8489A037438334BFF7B104016B`.
+  - `npm run format:check`: exit 1 on 32 unchanged files because this Windows checkout is `i/lf w/crlf` under system `core.autocrlf=true`. The product worktree remained clean; `git diff --exit-code` and `git diff --check` exited 0. No product file was rewritten.
+  - Authenticated read-only Vercel CLI/API: project/root/runtime/default build settings and `productionBranch=main` independently reproduced.
+  - Live `curl` returned HTTPS 200, Vercel/HSTS headers, and the exact private WSS CSP. Playwright Chromium rendered desktop and `390 x 844` mobile snapshots with 0 console errors/warnings; this is asset evidence only.
+  - Stable alias deployment `dpl_9h1hGq6DPsQykoBkVogqcbUxxv2u` is READY but serves older ancestor `5762f5865608596c8198d583a2dbd394ac973a7b`, not `bf7ca71...`; no deployment claim is made for the candidate.
+  - Failed Preview `dpl_988Hz8bhsduMSowLoTKZBBJjRxiU` cloned `aa09734` and failed with no `pages` or `app` directory. Git confirms `aa09734...` has only `apps/web/.gitkeep` and no package manifest, so it is not web source.
+- Evidence classification: exact local real-code gates plus real read-only Vercel/HTTPS/Chromium metadata. No terminal path, mTLS/client-CA, mobile Firefox/Chrome/Safari, physical device, Tailscale, ConPTY, or certificate behavior is claimed.
+- Independent reviewer/evidence: requested from coordinator for exact product `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5`; verdict pending at handoff time.
+- Assumptions/limitations: the task freezes an Origin and proves deployability; it intentionally does not deploy. Candidate deployment remains gated on the verified integration candidate.
+- Blockers/requests: independent review is the only remaining owner-`done` gate. Session 01 owns any queue transition.
+- Product/task commit: `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5`.
+- Handoff commit: resolve from branch HEAD after this status-only commit.
+- Safety: lock `VERCEL-20260830-01` stayed read-only. No deploy, promotion, push, merge, setting/env, DNS/Tailscale/certificate, or browser-login mutation.
+
+## Prior S06-001 handoff
+
 - Current task: S06-001 — Create independent contract and browser verification harness
 - State: done; handoff ready for Session 01 queue review
 - Branch: `session/06-verification-release`
