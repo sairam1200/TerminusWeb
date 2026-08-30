@@ -195,21 +195,21 @@ tasks:
 
   - id: S01-005
     owner: session_01
-    state: in_progress
+    state: done
     title: Freeze remembered-session and bounded-history contract version 0.2
     depends_on: [S01-004]
     evidence: Versioned schema, state machine, fixtures, security rules, short opaque session identifiers, credential/source-device-bound reopen, bounded volatile history replay, fragment-route privacy, and explicit compatibility notes.
 
   - id: S02-005
     owner: session_02
-    state: blocked
+    state: ready
     title: Implement remembered session pages and explicit New Session behavior
     depends_on: [S01-005, S02-002]
     evidence: Each page receives a simple unique session ID in a URL fragment; reload/reconnect of the same ID restores bounded history without storing terminal plaintext; New Session closes the old session and replaces the fragment; unknown/in-use IDs fail closed and pairing is not repeated.
 
   - id: S03-007
     owner: session_03
-    state: blocked
+    state: ready
     title: Implement credential-bound remembered sessions and bounded history replay
     depends_on: [S01-005, S03-006]
     evidence: Cryptographically random simple IDs, atomic same-credential/source-device reopen, bounded volatile per-session and agent-wide history with ordered offsets, disconnect retention, explicit close/new-session deletion, uniform rejection, concurrency tests, and deterministic ConPTY cleanup.
