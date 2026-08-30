@@ -287,3 +287,10 @@
 - Finding `S05-007-AVAIL-001` is Medium and release-blocking: exact S03 product `e13c4c8d2659125476c7458b45720892ee49fc24` holds the registry-wide mutex across synchronous `Adapter.Open`, so one stalled terminal creation blocks unrelated cleanup, revocation, and shutdown. Reviewer overlay tests passed 3/3 and 10 repeated runs; full exact S03 tests and focused S02 tests passed. Actual OS exhaustion was not induced or claimed.
 - Queue commit `e9b6dd023178c18638e03b96cfd0543670c7d7f3` marks S05-007 owner `done`, adds ready owner task S03-006 for lock-free terminal creation with atomic admission revalidation/cleanup, and makes S06-005 depend on the remediation. It does not restore a fixed numeric session cap.
 - No product repair, merge, push, deployment, certificate, listener, or Tailscale mutation occurred in this queue transition.
+
+## Authorized private endpoint ready (2026-08-30)
+
+- Session 03 product/evidence `ce5ac98b8a79abd42fee6083345709c77aaf669c` and status handoff `ec1e6520acfb7775b1ce20da5b83719c6df3d4c4` complete S03-004 with an exact independent reviewer PASS.
+- The non-elevated host is live only on `127.0.0.1:8443`; the pre-existing tailnet-only raw-TCP route forwards private 443 to that loopback port. The existing installed ClientAuth identity returned TLS 1.3 HTTP 200 `ok`; no-client-certificate requests failed before HTTP. A separate loopback lifecycle instance shut down cleanly. No new certificate was needed or generated.
+- User requirement: certificate installation/selection and pairing occur once per device. Automatic WebSocket reconnect/resume may occur, but it must silently reuse the existing device identity without another import, certificate selection, or pairing prompt. Queue commit `8e87e8f422bc10f77573e41555d6d46d237431ad` adds this acceptance evidence to S02-002 and S06-002.
+- The same queue commit marks S03-004 owner `done` and makes S05-005/S05-006 `ready`. No integration, push, deployment, DNS, policy, Serve/Funnel, certificate, or public-exposure mutation was performed by Session 01.
