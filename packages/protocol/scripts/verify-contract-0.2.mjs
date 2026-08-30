@@ -14,6 +14,8 @@ const SESSION = /^[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]
 const TIMESTAMP = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$/;
 const B64 = /^[A-Za-z0-9_-]+$/;
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+const PER_SESSION_HISTORY_BYTES = 262144;
+const AGENT_HISTORY_BYTES = 16777216;
 
 const decode = (value) => Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 const canonicalB64 = (value, bytes) => typeof value === 'string' && B64.test(value) && !value.includes('=') && decode(value).length === bytes && decode(value).toString('base64url') === value;
@@ -114,7 +116,7 @@ function validateTranscript(item) {
   let session = item.initial.sessionState;
   let nextOutputOffset = item.initial.nextOutputOffset ?? 0;
   let history = item.initial.history ? { ...item.initial.history } : null;
-  let sessionId;
+  let sessionId = item.initial.sessionId;
   let connectionId;
   const next = { ...item.initial.nextSequence };
   for (let index = 0; index < item.frames.length; index += 1) {
@@ -135,13 +137,16 @@ function validateTranscript(item) {
     next[spec.direction] += 1;
     if (frame.payload.sessionId !== undefined) {
       if (sessionId === undefined) sessionId = frame.payload.sessionId;
-      if (sessionId !== frame.payload.sessionId) return { code: 'SCHEMA_INVALID', atFrame: index };
+      if (sessionId !== frame.payload.sessionId) {
+        const code = ['history_begin', 'history_chunk', 'history_end', 'terminal_output'].includes(frame.type) ? 'OUTPUT_OFFSET_INVALID' : 'SCHEMA_INVALID';
+        return { code, atFrame: index };
+      }
     }
     if (frame.type === 'terminal_input' && decode(frame.payload.data).length > 16384) return { code: 'PAYLOAD_TOO_LARGE', atFrame: index };
     if (['terminal_output', 'history_chunk'].includes(frame.type) && decode(frame.payload.data).length > 32768) return { code: 'PAYLOAD_TOO_LARGE', atFrame: index };
-    if (frame.type === 'reopen_session' && item.context?.reopenAllowed === false) return { code: 'SESSION_REOPEN_REJECTED', atFrame: index };
+    if (frame.type === 'reopen_session' && item.context?.reopenDecision !== 'allow') return { code: 'SESSION_REOPEN_REJECTED', atFrame: index };
     if (frame.type === 'history_begin') {
-      if (history || frame.payload.startOffset > frame.payload.endOffset || (!frame.payload.truncated && frame.payload.startOffset !== 0) || frame.payload.endOffset !== nextOutputOffset) return { code: 'OUTPUT_OFFSET_INVALID', atFrame: index };
+      if (history || frame.payload.startOffset > frame.payload.endOffset || frame.payload.endOffset - frame.payload.startOffset > PER_SESSION_HISTORY_BYTES || (!frame.payload.truncated && frame.payload.startOffset !== 0) || frame.payload.endOffset !== nextOutputOffset) return { code: 'OUTPUT_OFFSET_INVALID', atFrame: index };
       history = { begun: true, cursor: frame.payload.startOffset, endOffset: frame.payload.endOffset };
     }
     if (frame.type === 'history_chunk') {
@@ -166,6 +171,50 @@ function validateTranscript(item) {
   return { connectionState: connection, sessionState: session, nextOutputOffset };
 }
 
+function validateRetentionCase(item) {
+  const entries = item.initial.map((entry) => ({ ...entry, truncated: entry.startOffset > 0 }));
+  let target = entries.find((entry) => entry.sessionId === item.append.sessionId);
+  if (!target) {
+    target = { sessionId: item.append.sessionId, startOffset: 0, bytes: 0, truncated: false };
+    entries.push(target);
+  }
+  target.bytes += item.append.bytes;
+  if (target.bytes > PER_SESSION_HISTORY_BYTES) {
+    const evicted = target.bytes - PER_SESSION_HISTORY_BYTES;
+    target.startOffset += evicted;
+    target.bytes = PER_SESSION_HISTORY_BYTES;
+    target.truncated = true;
+  }
+  let excess = entries.reduce((sum, entry) => sum + entry.bytes, 0) - AGENT_HISTORY_BYTES;
+  for (const entry of entries) {
+    if (excess <= 0) break;
+    const evicted = Math.min(entry.bytes, excess);
+    entry.startOffset += evicted;
+    entry.bytes -= evicted;
+    entry.truncated ||= evicted > 0;
+    excess -= evicted;
+  }
+  if (excess > 0 || entries.length !== item.expected.length) return false;
+  return entries.every((entry, index) => JSON.stringify(entry) === JSON.stringify(item.expected[index]));
+}
+
+function validatePageLifecycleCase(item) {
+  let fragment = item.initialFragment;
+  let state = 'connected';
+  let oldReopenCode;
+  if (item.closeAcknowledged) {
+    oldReopenCode = 'SESSION_REOPEN_REJECTED';
+    if (item.newOpenAttempted && item.openedSessionId && !item.openFailed) {
+      fragment = `#/s/${item.openedSessionId}`;
+      state = 'connected';
+    } else if (item.newOpenAttempted && item.openFailed) {
+      state = 'closed_error';
+    }
+  }
+  const actual = { fragment, ...(oldReopenCode ? { oldReopenCode } : {}), state };
+  return JSON.stringify(actual) === JSON.stringify(item.expected);
+}
+
 function authenticate(response, vector) {
   if (response.connectionId !== vector.connectionId || response.challengeId !== vector.challengeId || !canonicalB64(response.proof, 32)) return 'AUTHENTICATION_FAILED';
   const expected = crypto.createHmac('sha256', decode(vector.credentialSecret)).update(Buffer.from(vector.messageHex, 'hex')).digest();
@@ -174,8 +223,9 @@ function authenticate(response, vector) {
 }
 
 if (schema.$schema !== 'https://json-schema.org/draft/2020-12/schema' || [machine, accepted, rejected, vectors].some((artifact) => artifact.contractVersion !== '0.2')) throw new Error('0.2 contract version/schema mismatch');
+if (machine.historyLimits?.perSessionBytes !== PER_SESSION_HISTORY_BYTES || machine.historyLimits?.agentBytes !== AGENT_HISTORY_BYTES || machine.historyLimits?.chunkBytes !== 32768 || machine.historyLimits?.eviction !== 'oldest_history_bytes' || machine.historyLimits?.evictionClosesSession !== false) throw new Error('0.2 history limits mismatch');
 const ids = new Set();
-for (const group of [accepted.handshakes, accepted.transcripts, rejected.handshakes, rejected.transcripts]) for (const item of group) { if (!item.id || ids.has(item.id)) throw new Error(`duplicate fixture id: ${item.id}`); ids.add(item.id); }
+for (const group of [accepted.handshakes, accepted.transcripts, accepted.retentionCases, accepted.pageLifecycleCases, rejected.handshakes, rejected.transcripts]) for (const item of group) { if (!item.id || ids.has(item.id)) throw new Error(`duplicate fixture id: ${item.id}`); ids.add(item.id); }
 for (const item of accepted.handshakes) { const result = validateHandshake(item); if (result) throw new Error(`${item.id}: ${result.code}`); }
 for (const item of rejected.handshakes) { const result = validateHandshake(item); if (result) throw new Error(`${item.id}: ${result.code}`); }
 for (const item of accepted.transcripts) {
@@ -186,6 +236,8 @@ for (const item of rejected.transcripts) {
   const result = validateTranscript(item);
   if (result.code !== item.expected.code || result.atFrame !== item.expected.atFrame) throw new Error(`${item.id}: expected ${item.expected.code}@${item.expected.atFrame}, got ${JSON.stringify(result)}`);
 }
+for (const item of accepted.retentionCases) if (!validateRetentionCase(item)) throw new Error(`${item.id}: retention mismatch`);
+for (const item of accepted.pageLifecycleCases) if (!validatePageLifecycleCase(item)) throw new Error(`${item.id}: page lifecycle mismatch`);
 for (const vector of vectors.vectors) {
   const proof = crypto.createHmac('sha256', decode(vector.credentialSecret)).update(Buffer.from(vector.messageHex, 'hex')).digest('base64url');
   if (proof !== vector.proof || authenticate({ connectionId: vector.connectionId, challengeId: vector.challengeId, proof }, vector) !== 'AUTHENTICATED') throw new Error(`auth vector mismatch: ${vector.id}`);

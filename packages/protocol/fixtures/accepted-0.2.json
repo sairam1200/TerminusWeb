@@ -33,7 +33,7 @@
     {
       "id": "v02-reopen-truncated-history-then-live-output",
       "initial": { "connectionState": "READY", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 104 },
-      "context": { "reopenAllowed": true },
+      "context": { "reopenDecision": "allow" },
       "frames": [
         { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "reopen_session", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 0, "payload": { "sessionId": "k7m4-p2q9-wxyz", "dimensions": { "columns": 80, "rows": 24 } } } },
         { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_reopened", "connectionId": "10000000-0000-4000-8000-000000000002", "sequence": 0, "payload": { "sessionId": "k7m4-p2q9-wxyz" } } },
@@ -48,7 +48,7 @@
     {
       "id": "v02-reopen-empty-history",
       "initial": { "connectionState": "READY", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 0 },
-      "context": { "reopenAllowed": true },
+      "context": { "reopenDecision": "allow" },
       "frames": [
         { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "reopen_session", "connectionId": "10000000-0000-4000-8000-000000000003", "sequence": 0, "payload": { "sessionId": "abcd-efgh-jkmn", "dimensions": { "columns": 80, "rows": 24 } } } },
         { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_reopened", "connectionId": "10000000-0000-4000-8000-000000000003", "sequence": 0, "payload": { "sessionId": "abcd-efgh-jkmn" } } },
@@ -74,6 +74,67 @@
         { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "history_end", "connectionId": "10000000-0000-4000-8000-000000000005", "sequence": 1, "payload": { "sessionId": "k7m4-p2q9-wxyz", "endOffset": 32768 } } }
       ],
       "expected": { "connectionState": "READY", "sessionState": "OPEN", "nextOutputOffset": 32768 }
+    },
+    {
+      "id": "v02-fresh-open-after-new-session",
+      "initial": { "connectionState": "READY", "sessionState": "NONE", "nextSequence": { "client_to_agent": 0, "agent_to_client": 0 }, "nextOutputOffset": 0 },
+      "frames": [
+        { "direction": "client_to_agent", "frame": { "version": "0.2", "type": "open_session", "connectionId": "10000000-0000-4000-8000-000000000006", "sequence": 0, "payload": { "shell": "powershell", "dimensions": { "columns": 80, "rows": 24 } } } },
+        { "direction": "agent_to_client", "frame": { "version": "0.2", "type": "session_opened", "connectionId": "10000000-0000-4000-8000-000000000006", "sequence": 0, "payload": { "sessionId": "rstv-wxyz-2345" } } }
+      ],
+      "expected": { "connectionState": "READY", "sessionState": "OPEN", "nextOutputOffset": 0 }
+    }
+  ],
+  "pageLifecycleCases": [
+    {
+      "id": "v02-page-new-session-success-replaces-fragment-after-open",
+      "initialFragment": "#/s/k7m4-p2q9-wxyz",
+      "closeAcknowledged": true,
+      "newOpenAttempted": true,
+      "openedSessionId": "rstv-wxyz-2345",
+      "expected": { "fragment": "#/s/rstv-wxyz-2345", "oldReopenCode": "SESSION_REOPEN_REJECTED", "state": "connected" }
+    },
+    {
+      "id": "v02-page-new-session-open-failure-keeps-old-fragment",
+      "initialFragment": "#/s/k7m4-p2q9-wxyz",
+      "closeAcknowledged": true,
+      "newOpenAttempted": true,
+      "openFailed": true,
+      "expected": { "fragment": "#/s/k7m4-p2q9-wxyz", "oldReopenCode": "SESSION_REOPEN_REJECTED", "state": "closed_error" }
+    },
+    {
+      "id": "v02-page-new-session-close-failure-does-not-open-or-replace",
+      "initialFragment": "#/s/k7m4-p2q9-wxyz",
+      "closeAcknowledged": false,
+      "newOpenAttempted": false,
+      "expected": { "fragment": "#/s/k7m4-p2q9-wxyz", "state": "connected" }
+    }
+  ],
+  "retentionCases": [
+    {
+      "id": "v02-per-session-history-evicts-oldest-byte",
+      "initial": [{ "sessionId": "abcd-efgh-jkmn", "startOffset": 0, "bytes": 262144 }],
+      "append": { "sessionId": "abcd-efgh-jkmn", "bytes": 1 },
+      "expected": [{ "sessionId": "abcd-efgh-jkmn", "startOffset": 1, "bytes": 262144, "truncated": true }]
+    },
+    {
+      "id": "v02-agent-history-budget-evicts-globally-oldest-byte",
+      "initial": [
+        { "sessionId": "abcd-efgh-jkmn", "startOffset": 0, "bytes": 8388608 },
+        { "sessionId": "k7m4-p2q9-wxyz", "startOffset": 0, "bytes": 8388608 }
+      ],
+      "append": { "sessionId": "rstv-wxyz-2345", "bytes": 1 },
+      "expected": [
+        { "sessionId": "abcd-efgh-jkmn", "startOffset": 1, "bytes": 8388607, "truncated": true },
+        { "sessionId": "k7m4-p2q9-wxyz", "startOffset": 0, "bytes": 8388608, "truncated": false },
+        { "sessionId": "rstv-wxyz-2345", "startOffset": 0, "bytes": 1, "truncated": false }
+      ]
+    },
+    {
+      "id": "v02-history-within-budgets-does-not-evict-or-close",
+      "initial": [{ "sessionId": "abcd-efgh-jkmn", "startOffset": 0, "bytes": 10 }],
+      "append": { "sessionId": "abcd-efgh-jkmn", "bytes": 5 },
+      "expected": [{ "sessionId": "abcd-efgh-jkmn", "startOffset": 0, "bytes": 15, "truncated": false }]
     }
   ]
 }

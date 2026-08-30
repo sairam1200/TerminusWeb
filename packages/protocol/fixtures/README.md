@@ -13,6 +13,18 @@ Fixture terminal data is limited to zero/non-text sentinel bytes generated solel
 
 Version 0.2 fixtures use `accepted-0.2.json` and `rejected-0.2.json`. Their
 `initial.nextOutputOffset` and optional `initial.history` fields are verifier
-state, not wire fields. `context.reopenAllowed` models the already-authenticated
-credential/device ownership decision without placing a credential or device
-identifier in a terminal frame.
+state, not wire fields. `context.reopenDecision` independently models allowed,
+unknown, wrong-credential, wrong/missing-source-device, already-attached, and
+closed-ID decisions without placing credential or device identifiers in a
+terminal frame. Every denial has the same wire result.
+
+`accepted-0.2.json.retentionCases` is the canonical internal budget model. Its
+array order is oldest-to-newest retained history. Appends first enforce the
+262,144-byte target-session limit and then evict globally oldest bytes until
+the 16,777,216-byte agent budget is met. Eviction marks truncation and never
+closes a running session or establishes a session-count limit.
+
+`accepted-0.2.json.pageLifecycleCases` fixes browser fragment behavior around
+**New Session**: replace only after close acknowledgment plus a fresh
+`session_opened`; preserve the old fragment on close/open failure; and treat an
+old ID whose close succeeded as no longer reopenable.

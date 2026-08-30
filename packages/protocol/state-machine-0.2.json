@@ -4,6 +4,13 @@
   "sessionInitialState": "NONE",
   "connectionStates": ["NEW", "NEGOTIATING", "UNAUTHENTICATED", "PAIRING", "CHALLENGED", "PROVING", "READY", "CLOSING", "CLOSED"],
   "sessionStates": ["NONE", "OPENING", "OPEN", "DETACHING", "DETACHED", "REOPENING", "REPLAYING", "CLOSING", "CLOSED"],
+  "historyLimits": {
+    "perSessionBytes": 262144,
+    "agentBytes": 16777216,
+    "chunkBytes": 32768,
+    "eviction": "oldest_history_bytes",
+    "evictionClosesSession": false
+  },
   "connectionTransitions": [
     { "id": "c01", "from": "NEW", "direction": "client_to_agent", "message": "hello", "to": "NEGOTIATING" },
     { "id": "c02", "from": "NEGOTIATING", "direction": "agent_to_client", "message": "hello_ack", "to": "UNAUTHENTICATED" },
