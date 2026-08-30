@@ -167,7 +167,7 @@ tasks:
 
   - id: S03-006
     owner: session_03
-    state: ready
+    state: done
     title: Keep stalled terminal creation from blocking unrelated session lifecycle
     depends_on: [S03-005, S05-007]
     evidence: Adapter.Open runs without the registry-wide mutex; admission is atomically revalidated before registration; a terminal created after shutdown, connection invalidation, or credential revocation is closed; deterministic races prove unrelated input, resize, close, disconnect cleanup, revocation, and shutdown remain prompt without a fixed count cap.
@@ -188,7 +188,7 @@ tasks:
 
   - id: S06-005
     owner: session_06
-    state: blocked
+    state: ready
     title: Verify above-eight independent terminal behavior
     depends_on: [S03-006, S02-004, S05-007]
     evidence: Exact-commit automated and real Chrome proof for more than eight independent sessions with no count-based rejection, genuine open-failure guidance, resize/reconnect, non-elevation, revocation, bounded backpressure, and leak-free cleanup.
