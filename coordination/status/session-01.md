@@ -308,3 +308,8 @@
 - Independent live evidence passes the exact raw-TCP tailnet-only route, loopback-only fixed host, two successive existing-identity HTTP 200 responses, exact WSS upgrade, no/unrelated-certificate denial, wrong-Origin 403, wrong-subprotocol 426, direct LAN/tailnet-origin denial, and unchanged pre/post route state. The authorized S03 fixed-host restart changed the time-bound listener PID from 5384 to 24048; the harness's supported process-ID override reproduced the matrix after restart.
 - Wrong-peer/full-policy/device-approval, external-public, physical mobile browser, and complete pairing/reconnect gates remain explicitly unclaimed for Session 06/follow-on verification.
 - Queue commit `3428aaa35ceca06fc21c41a001a370a463235aa5` marks S05-005 and S05-006 owner `done` and S02-002 `ready`. No integration, push, deployment, certificate, route, Funnel, DNS, or policy mutation occurred in this queue transition.
+
+## Integration dependency hardening (2026-08-30)
+
+- Queue commit `12e6dc93399c8392343a9e856708ae5f81521d14` makes S01-002 depend on both S06-002 and S06-005. The integration manifest therefore cannot select the superseded pre-remediation Windows-agent product merely because the original vertical-slice gate passed; Session 06 must independently verify exact S03-006 behavior first.
+- No task state, product file, integration, push, deployment, certificate, or network state changed.
