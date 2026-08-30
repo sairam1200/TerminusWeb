@@ -1,32 +1,68 @@
 # Session 02 Status
 
-- Current task: `S02-002` - Integrate browser terminal with protocol 0.1
-- State: owner/reviewer `done`; Session 06 live authentication/reconnect
-  verification remains pending action-time user confirmation
+- Current task: `S02-005` - Implement remembered session pages and explicit
+  New Session behavior
+- State: owner/reviewer `done`; Session 06 integrated verification remains
+  pending
 - Branch: `session/02-web-renderer`
-- Files changed: `apps/web/terminal/protocolTerminalAdapter.test.ts` and
-  `apps/web/evidence/S02-002-browser-integration-20260830.md`
-- Commands/evidence: focused adapter tests passed 11/11; full web tests passed
-  42/42 across 7 files; protocol 0.1 verifier passed 22 transcripts, 27
-  fixtures, 1 positive auth vector, and 4 negative mutations; typecheck, lint,
-  targeted Prettier, exact-Origin/endpoint Next.js production build,
-  `git diff --check`, and product `git show --check` passed.
+- Files changed: Session 02-owned `apps/web/**` protocol consumer, direct
+  adapter, terminal UI/styles, deterministic tests, and evidence report.
+- Commands/evidence: exact protocol 0.2 verifier passed 23 transcripts, 32
+  fixtures, 1 positive auth vector, and 4 negative mutations; focused tests
+  passed 32/32; full web tests passed 60/60 across 9 files; typecheck, lint,
+  targeted Prettier, dependency tree, configured Next.js production build,
+  `git diff --check`, and cumulative `git show --check` passed.
 - Independent reviewer/evidence: `/root/s06_006_origin` reviewed and
-  reproduced exact product
-  `16e850a34b56a315fb78c137ddae6d38220180ea`; PASS with no severity
-  findings.
-- Assumptions: application credential reuse is web-owned and is proven by a
-  fresh IndexedDB store/adapter after one pairing exchange. Client-certificate
-  selection/reuse belongs to the browser/OS TLS stack and requires real-browser
-  evidence.
-- Blockers/requests: clicking **Connect privately** would transmit an
-  authentication proof to the user's private agent and open a real ConPTY
-  session. The action is held pending immediate confirmation and remains a
-  Session 06/live release gate. Physical Android and iPhone Chrome/Firefox
-  behavior also remains outside this owner run.
+  reproduced exact cumulative product
+  `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9`; PASS with no remaining
+  severity findings. The first review found one Medium New Session retry issue
+  on immutable product `cdde0df`; the cumulative follow-up fixed it without
+  rewriting history and the fresh review closed it.
+- Assumptions: the legacy IndexedDB database name is retained only to reuse the
+  existing non-extractable credential across the wire upgrade; all wire frames,
+  HMAC domain separation, and subprotocol selection are strictly 0.2.
+- Blockers/requests: no owner blocker. Deterministic evidence uses JSDOM, fake
+  IndexedDB, and mock WebSockets; physical mobile browsers and live integrated
+  browser/agent behavior remain Session 06 release gates.
 - Product/task commit:
-  `16e850a34b56a315fb78c137ddae6d38220180ea`
+  `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9`
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
+
+## S02-005 remembered-session pages (2026-08-30)
+
+- Authoritative input: queue/request commit
+  `789397bac3c11fed56a1a9a5784fe5ee551138c2`, cumulative protocol/security
+  contract `f9a70299974734c3eeb920697d2dfa4717148a9a`, and Session 01 handoff
+  `14a613b`.
+- Product: immutable implementation commit
+  `cdde0dfbed9cf423c471d4bd0e25a3b9dd672bbe` plus focused review-fix commit
+  `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9`. Integration must consume the
+  cumulative latter SHA.
+- Behavior: exact `terminus.v0_2` transport and 0.2 HMAC domain; canonical
+  `#/s/{id}` fragments; stored-credential same-ID reopen without pairing;
+  clear-before-replay, bounded contiguous history offsets, content-free
+  truncation notice, and fail-closed invalid replay; no terminal persistence;
+  OSC browser-side-effect guards; and accessible responsive New Session UI.
+- New Session: waits for acknowledged old-session closure before a fresh
+  authenticated connection and replaces the fragment only on the new
+  `session_opened`. A close-send rejection restores the still-attached session
+  and contract snapshot for retry. A failed fresh open after acknowledged close
+  retains the old fragment visually but Retry opens a fresh root rather than
+  targeting the destroyed ID.
+- Owner validation: focused Vitest 32/32; full Vitest 60/60 in 9 files;
+  protocol 0.2 verifier 23 transcripts/32 fixtures/auth vectors; typecheck,
+  lint, targeted Prettier, dependency tree, configured Next 16.3.3 build,
+  diff/show checks all PASS. Repository-wide `format:check` retains a baseline
+  failure on 19 untouched files; no cumulative S02-005 file is listed.
+- Independent review: `/root/s06_006_origin` personally reproduced the focused
+  and full tests, typecheck, lint, targeted formatting, configured build,
+  protocol verifier, CSP, scope, and clean-tree checks on exact cumulative
+  `d8a9b52`; final verdict PASS, no remaining findings. The throwing-WebSocket
+  rollback was statically reviewed; the deterministic retry regression drives
+  the explicit backpressure rejection boundary.
+- Scope/limitations: no contract, backend, Windows-agent, certificate,
+  Tailscale, browser, deployment, push, or live endpoint state was mutated.
+  Automated results do not claim physical browser or live integration proof.
 
 ## S02-002 one-time identity and credential reuse follow-up (2026-08-30)
 
