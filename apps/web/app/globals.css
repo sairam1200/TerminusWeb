@@ -110,6 +110,7 @@ button:disabled {
 .workspaceBar,
 .settingsPanel,
 .sessionOpenGuidance,
+.historyNotice,
 .terminalLayout,
 .privacyFooter {
   position: relative;
@@ -462,6 +463,16 @@ button:disabled {
   color: var(--success);
 }
 
+.sessionIdentity {
+  color: #94a3b8;
+}
+
+.sessionIdentity code {
+  color: #cbd5e1;
+  font: inherit;
+  letter-spacing: 0.06em;
+}
+
 .sessionOpenGuidance {
   flex: 0 0 auto;
   margin: 0;
@@ -471,6 +482,16 @@ button:disabled {
   background: color-mix(in srgb, var(--warning) 7%, transparent);
   font-size: 0.68rem;
   line-height: 1.5;
+}
+
+.historyNotice {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.45rem 1.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  color: #94a3b8;
+  background: rgba(6, 6, 10, 0.9);
+  font-size: 0.62rem;
 }
 
 .terminalLayout {

@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   TerminalAdapter,
+  TerminalConnectOptions,
   TerminalConnectionState,
+  TerminalSessionEvent,
 } from "../terminal/adapter";
 import { MockTerminalAdapter } from "../terminal/mockTerminalAdapter";
 import { TerminalShell } from "./TerminalShell";
@@ -18,8 +20,18 @@ const xtermMock = vi.hoisted(() => ({
     return { dispose: xtermMock.inputDispose };
   }),
   open: vi.fn(),
+  oscDispose: vi.fn(),
   options: { fontSize: 14, theme: {} },
+  parser: {
+    registerOscHandler: vi.fn(
+      (...args: [number, (data: string) => boolean]) => {
+        void args;
+        return { dispose: xtermMock.oscDispose };
+      },
+    ),
+  },
   refresh: vi.fn(),
+  reset: vi.fn(),
   resize: vi.fn(),
   rows: 8,
   write: vi.fn(),
@@ -32,7 +44,9 @@ vi.mock("@xterm/xterm", () => ({
     onData = xtermMock.onData;
     open = xtermMock.open;
     options = xtermMock.options;
+    parser = xtermMock.parser;
     refresh = xtermMock.refresh;
+    reset = xtermMock.reset;
     resize = xtermMock.resize;
     rows = xtermMock.rows;
     write = xtermMock.write;
@@ -42,6 +56,7 @@ vi.mock("@xterm/xterm", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   xtermMock.data.listener = undefined;
+  window.history.replaceState(null, "", "/");
 });
 
 describe("TerminalShell", () => {
@@ -173,6 +188,22 @@ describe("TerminalShell", () => {
       expect(screen.getByRole("log")).toHaveAttribute("data-columns", "20");
       expect(screen.getByRole("log")).toHaveAttribute("data-rows", "8");
     });
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1280,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 720,
+    });
+    fireEvent(window, new Event("orientationchange"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("Terminal viewport information"),
+      ).toHaveTextContent("landscape");
+    });
   });
 
   it("exposes an accessible transient pairing flow for the protocol client", async () => {
@@ -262,6 +293,108 @@ describe("TerminalShell", () => {
     await waitFor(() => expect(adapter.detachCalls).toBe(1));
   });
 
+  it("reopens the canonical fragment without pairing and clears before history", async () => {
+    window.history.replaceState(null, "", "/#/s/k7m4-p2q9-wxyz");
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter();
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    await user.click(screen.getByRole("button", { name: "Connect privately" }));
+    expect(adapter.connectOptions).toEqual([{ sessionId: "k7m4-p2q9-wxyz" }]);
+    expect(
+      screen.queryByLabelText("One-time pairing code"),
+    ).not.toBeInTheDocument();
+
+    adapter.emitSession({
+      type: "session-reopened",
+      sessionId: "k7m4-p2q9-wxyz",
+    });
+    adapter.emitSession({
+      type: "history-begin",
+      sessionId: "k7m4-p2q9-wxyz",
+      truncated: true,
+    });
+    adapter.emitOutput("synthetic-history");
+
+    await waitFor(() => {
+      expect(xtermMock.reset).toHaveBeenCalledTimes(1);
+      expect(xtermMock.write).toHaveBeenCalledWith("synthetic-history");
+      expect(
+        screen.getByText("Earlier output is not available."),
+      ).toBeVisible();
+    });
+    expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
+  });
+
+  it("replaces the fragment only after New Session reports its new ID", async () => {
+    window.history.replaceState(null, "", "/#/s/k7m4-p2q9-wxyz");
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter("connected");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    const action = await screen.findByRole("button", { name: "New Session" });
+    await user.click(action);
+    expect(adapter.newSessionCalls).toBe(1);
+    expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
+
+    adapter.emitSession({
+      type: "session-opened",
+      sessionId: "rstv-wxyz-2345",
+    });
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#/s/rstv-wxyz-2345");
+      expect(screen.getByText("rstv-wxyz-2345")).toBeVisible();
+    });
+  });
+
+  it("keeps the old fragment and shows an explicit New Session failure", async () => {
+    window.history.replaceState(null, "", "/#/s/k7m4-p2q9-wxyz");
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter("connected");
+    adapter.newSessionShouldFail = true;
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "New Session" }),
+    );
+
+    expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
+    expect(
+      screen.getByText(
+        "A new session could not open. The session link was not changed. Retry from this page.",
+      ),
+    ).toHaveAttribute("role", "alert");
+  });
+
+  it("fails closed for an invalid remembered-session fragment", async () => {
+    window.history.replaceState(null, "", "/#/s/not-valid");
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter();
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    await user.click(screen.getByRole("button", { name: "Connect privately" }));
+
+    expect(adapter.connectCalls).toBe(0);
+    expect(
+      screen.getByText("This session link is invalid or unavailable."),
+    ).toHaveAttribute("role", "alert");
+    expect(window.location.hash).toBe("#/s/not-valid");
+  });
+
+  it("blocks terminal-controlled browser side effects and never persists output", () => {
+    const localWrite = vi.spyOn(Storage.prototype, "setItem");
+    const adapter = new ProtocolUiAdapter("connected");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+
+    adapter.emitOutput("synthetic-output");
+
+    expect(
+      xtermMock.parser.registerOscHandler.mock.calls.map(([id]) => id),
+    ).toEqual([8, 9, 52, 777]);
+    expect(localWrite).not.toHaveBeenCalled();
+    localWrite.mockRestore();
+  });
+
   it("streams protocol output through the ANSI terminal renderer", () => {
     const adapter = new ProtocolUiAdapter("connected");
     const inputSpy = vi.spyOn(adapter, "sendInput");
@@ -328,15 +461,22 @@ class FailingAdapter implements TerminalAdapter {
 
 class ProtocolUiAdapter implements TerminalAdapter {
   readonly kind = "protocol-client" as const;
-  readonly label = "PRIVATE WSS · PROTOCOL 0.1 · agent.private.invalid";
+  readonly label = "PRIVATE WSS · PROTOCOL 0.2 · agent.private.invalid";
   readonly supportsPairing = true;
   private readonly listeners = new Set<
     (state: TerminalConnectionState) => void
   >();
   private readonly outputListeners = new Set<(output: string) => void>();
+  private readonly sessionListeners = new Set<
+    (event: TerminalSessionEvent) => void
+  >();
   private state: TerminalConnectionState;
+  private sessionId?: string;
   connectCalls = 0;
+  connectOptions: TerminalConnectOptions[] = [];
   detachCalls = 0;
+  newSessionCalls = 0;
+  newSessionShouldFail = false;
 
   constructor(
     initialState: TerminalConnectionState = "disconnected",
@@ -345,9 +485,16 @@ class ProtocolUiAdapter implements TerminalAdapter {
     this.state = initialState;
   }
 
-  async connect(): Promise<void> {
+  async connect(options: TerminalConnectOptions = {}): Promise<void> {
     this.connectCalls += 1;
-    this.setState(this.state === "detached" ? "connected" : "pairing");
+    this.connectOptions.push(options);
+    this.setState(
+      this.state === "detached"
+        ? "connected"
+        : options.sessionId === undefined
+          ? "pairing"
+          : "replaying",
+    );
   }
 
   async detach(): Promise<void> {
@@ -366,6 +513,16 @@ class ProtocolUiAdapter implements TerminalAdapter {
 
   getState(): TerminalConnectionState {
     return this.state;
+  }
+
+  getSessionId(): string | undefined {
+    return this.sessionId;
+  }
+
+  async newSession(): Promise<void> {
+    this.newSessionCalls += 1;
+    if (this.newSessionShouldFail)
+      throw new Error("Synthetic new-session failure");
   }
 
   async pair(pairingCode: string): Promise<void> {
@@ -387,8 +544,20 @@ class ProtocolUiAdapter implements TerminalAdapter {
     return () => this.outputListeners.delete(listener);
   }
 
+  subscribeSession(
+    listener: (event: TerminalSessionEvent) => void,
+  ): () => void {
+    this.sessionListeners.add(listener);
+    return () => this.sessionListeners.delete(listener);
+  }
+
   emitOutput(output: string): void {
     this.outputListeners.forEach((listener) => listener(output));
+  }
+
+  emitSession(event: TerminalSessionEvent): void {
+    this.sessionId = event.sessionId;
+    this.sessionListeners.forEach((listener) => listener(event));
   }
 
   private setState(state: TerminalConnectionState) {

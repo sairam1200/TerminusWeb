@@ -22,10 +22,10 @@ const credentialId = "30000000-0000-4000-8000-000000000001";
 const credentialSecret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const challengeId = "20000000-0000-4000-8000-000000000001";
 const challenge = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8";
-const sessionId = "60000000-0000-4000-8000-000000000001";
+const sessionId = "k7m4-p2q9-wxyz";
 
 describe("ProtocolTerminalAdapter", () => {
-  it("authenticates, opens, exchanges IO/resize/heartbeat, detaches, resumes, and closes", async () => {
+  it("authenticates, opens, exchanges IO/resize/heartbeat, detaches, reopens, replays, and closes", async () => {
     const store = new MemoryCredentialStore(cryptoProvider, () => now);
     await store.saveCredential(
       credentialId,
@@ -41,21 +41,21 @@ describe("ProtocolTerminalAdapter", () => {
     await waitFor(() => expect(sockets).toHaveLength(1));
     const firstSocket = sockets[0] as MockWebSocket;
     expect(firstSocket.url).toBe(endpoint);
-    expect(firstSocket.requestedSubprotocol).toBe("terminus.v0_1");
+    expect(firstSocket.requestedSubprotocol).toBe("terminus.v0_2");
     firstSocket.open();
     await firstConnection;
 
     const hello = firstSocket.sentFrame(0);
     expect(hello).toMatchObject({
-      version: "0.1",
+      version: "0.2",
       type: "hello",
       sequence: 0,
-      payload: { credentialId, supportedVersions: ["0.1"] },
+      payload: { credentialId, supportedVersions: ["0.2"] },
     });
     const connectionId = hello.connectionId;
     await firstSocket.receive(
       agentFrame(connectionId, 0, "hello_ack", {
-        selectedVersion: "0.1",
+        selectedVersion: "0.2",
         agentId: "50000000-0000-4000-8000-000000000001",
       }),
     );
@@ -95,6 +95,7 @@ describe("ProtocolTerminalAdapter", () => {
     await firstSocket.receive(
       agentFrame(connectionId, 4, "terminal_output", {
         sessionId,
+        offset: 0,
         data: "AP8",
       }),
     );
@@ -114,8 +115,6 @@ describe("ProtocolTerminalAdapter", () => {
     await firstSocket.receive(
       agentFrame(connectionId, 6, "session_detached", {
         sessionId,
-        resumeGrant: "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
-        expiresAt: "2026-08-26T12:02:00.000Z",
       }),
     );
     await waitFor(() => expect(adapter.getState()).toBe("detached"));
@@ -128,7 +127,7 @@ describe("ProtocolTerminalAdapter", () => {
     const reconnectHello = secondSocket.sentFrame(0);
     await secondSocket.receive(
       agentFrame(reconnectHello.connectionId, 0, "hello_ack", {
-        selectedVersion: "0.1",
+        selectedVersion: "0.2",
         agentId: "50000000-0000-4000-8000-000000000001",
       }),
     );
@@ -149,11 +148,32 @@ describe("ProtocolTerminalAdapter", () => {
       }),
     );
     await waitFor(() =>
-      expect(secondSocket.sentFrame(2).type).toBe("resume_session"),
+      expect(secondSocket.sentFrame(2).type).toBe("reopen_session"),
     );
     await secondSocket.receive(
-      agentFrame(reconnectHello.connectionId, 3, "session_resumed", {
+      agentFrame(reconnectHello.connectionId, 3, "session_reopened", {
         sessionId,
+      }),
+    );
+    await secondSocket.receive(
+      agentFrame(reconnectHello.connectionId, 4, "history_begin", {
+        sessionId,
+        startOffset: 0,
+        endOffset: 2,
+        truncated: false,
+      }),
+    );
+    await secondSocket.receive(
+      agentFrame(reconnectHello.connectionId, 5, "history_chunk", {
+        sessionId,
+        offset: 0,
+        data: "AP8",
+      }),
+    );
+    await secondSocket.receive(
+      agentFrame(reconnectHello.connectionId, 6, "history_end", {
+        sessionId,
+        endOffset: 2,
       }),
     );
     await waitFor(() => expect(adapter.getState()).toBe("connected"));
@@ -161,7 +181,7 @@ describe("ProtocolTerminalAdapter", () => {
     await adapter.disconnect();
     expect(secondSocket.sentFrame(3).type).toBe("close_session");
     await secondSocket.receive(
-      agentFrame(reconnectHello.connectionId, 4, "session_closed", {
+      agentFrame(reconnectHello.connectionId, 7, "session_closed", {
         sessionId,
         reason: "user_request",
       }),
@@ -193,7 +213,7 @@ describe("ProtocolTerminalAdapter", () => {
     const hello = socket.sentFrame(0);
     await socket.receive(
       agentFrame(hello.connectionId, 0, "hello_ack", {
-        selectedVersion: "0.1",
+        selectedVersion: "0.2",
         agentId: "50000000-0000-4000-8000-000000000001",
       }),
     );
@@ -216,7 +236,134 @@ describe("ProtocolTerminalAdapter", () => {
     expect(adapter.getErrorCode()).toBeUndefined();
   });
 
-  it("captures a fresh resume grant with a monotonic deadline", async () => {
+  it("waits for old-session closure before opening a fresh New Session", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+    const events: string[] = [];
+    adapter.subscribeSession((event) => events.push(event.type));
+
+    const initialConnection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const initialSocket = sockets[0] as MockWebSocket;
+    initialSocket.open();
+    await initialConnection;
+    const firstConnectionId = await authenticate(initialSocket, "open_session");
+    await initialSocket.receive(
+      agentFrame(firstConnectionId, 3, "session_opened", { sessionId }),
+    );
+
+    const replacement = adapter.newSession();
+    await waitFor(() =>
+      expect(initialSocket.sentFrame(3).type).toBe("close_session"),
+    );
+    expect(initialSocket.sentFrame(3)).toMatchObject({
+      type: "close_session",
+      payload: { sessionId, reason: "new_session" },
+    });
+    expect(sockets).toHaveLength(1);
+    await initialSocket.receive(
+      agentFrame(firstConnectionId, 4, "session_closed", {
+        sessionId,
+        reason: "new_session",
+      }),
+    );
+
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const replacementSocket = sockets[1] as MockWebSocket;
+    replacementSocket.open();
+    await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+    const replacementConnectionId = await authenticate(
+      replacementSocket,
+      "open_session",
+    );
+    const replacementSessionId = "rstv-wxyz-2345";
+    await replacementSocket.receive(
+      agentFrame(replacementConnectionId, 3, "session_opened", {
+        sessionId: replacementSessionId,
+      }),
+    );
+
+    await expect(replacement).resolves.toBeUndefined();
+    expect(adapter.getSessionId()).toBe(replacementSessionId);
+    expect(events).toEqual(["session-opened", "session-opened"]);
+  });
+
+  it("rejects New Session when the old transport closes before its acknowledgement", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+
+    const initialConnection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = sockets[0] as MockWebSocket;
+    socket.open();
+    await initialConnection;
+    const connectionId = await authenticate(socket, "open_session");
+    await socket.receive(
+      agentFrame(connectionId, 3, "session_opened", { sessionId }),
+    );
+
+    const replacement = adapter.newSession();
+    await waitFor(() => expect(socket.sent).toHaveLength(4));
+    socket.close(1011);
+
+    await expect(replacement).rejects.toMatchObject({
+      code: "SESSION_OPEN_FAILED",
+    });
+    expect(adapter.getSessionId()).toBe(sessionId);
+    expect(adapter.getState()).toBe("error");
+  });
+
+  it("rejects New Session when its fresh connection cannot open", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+
+    const initialConnection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const initialSocket = sockets[0] as MockWebSocket;
+    initialSocket.open();
+    await initialConnection;
+    const connectionId = await authenticate(initialSocket, "open_session");
+    await initialSocket.receive(
+      agentFrame(connectionId, 3, "session_opened", { sessionId }),
+    );
+
+    const replacement = adapter.newSession();
+    await waitFor(() => expect(initialSocket.sent).toHaveLength(4));
+    await initialSocket.receive(
+      agentFrame(connectionId, 4, "session_closed", {
+        sessionId,
+        reason: "new_session",
+      }),
+    );
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    (sockets[1] as MockWebSocket).error();
+
+    await expect(replacement).rejects.toMatchObject({
+      code: "SESSION_OPEN_FAILED",
+    });
+    expect(adapter.getSessionId()).toBeUndefined();
+    expect(adapter.getState()).toBe("error");
+  });
+
+  it("reopens a detached session with the remembered ID", async () => {
     const clientNow = now + 5 * 60 * 1000;
     const monotonic = { value: 0 };
     const store = new MemoryCredentialStore(cryptoProvider, () => clientNow);
@@ -236,13 +383,12 @@ describe("ProtocolTerminalAdapter", () => {
     await driveToDetached(adapter, sockets);
     expect(adapter.getState()).toBe("detached");
 
-    monotonic.value = 120_001;
     const reconnection = adapter.connect();
     await waitFor(() => expect(sockets).toHaveLength(2));
     const socket = sockets[1] as MockWebSocket;
     socket.open();
     await reconnection;
-    await authenticate(socket, "open_session");
+    await authenticate(socket, "reopen_session");
   });
 
   it("uses a transient pairing code and stores the returned credential as a key", async () => {
@@ -259,7 +405,7 @@ describe("ProtocolTerminalAdapter", () => {
 
     await socket.receive(
       agentFrame(hello.connectionId, 0, "hello_ack", {
-        selectedVersion: "0.1",
+        selectedVersion: "0.2",
         agentId: "50000000-0000-4000-8000-000000000001",
       }),
     );
@@ -303,7 +449,7 @@ describe("ProtocolTerminalAdapter", () => {
     expect(initialHello.payload).not.toHaveProperty("credentialId");
     await initialSocket.receive(
       agentFrame(initialHello.connectionId, 0, "hello_ack", {
-        selectedVersion: "0.1",
+        selectedVersion: "0.2",
         agentId: "50000000-0000-4000-8000-000000000001",
       }),
     );
@@ -336,7 +482,7 @@ describe("ProtocolTerminalAdapter", () => {
     const reloadedStates: string[] = [];
     reloadedAdapter.subscribe((state) => reloadedStates.push(state));
 
-    const reloadedConnection = reloadedAdapter.connect();
+    const reloadedConnection = reloadedAdapter.connect({ sessionId });
     await waitFor(() => expect(reloadedSockets).toHaveLength(1));
     const reloadedSocket = reloadedSockets[0] as MockWebSocket;
     reloadedSocket.open();
@@ -345,7 +491,7 @@ describe("ProtocolTerminalAdapter", () => {
     expect(reloadedHello.payload).toMatchObject({ credentialId });
     await reloadedSocket.receive(
       agentFrame(reloadedHello.connectionId, 0, "hello_ack", {
-        selectedVersion: "0.1",
+        selectedVersion: "0.2",
         agentId: "50000000-0000-4000-8000-000000000001",
       }),
     );
@@ -358,6 +504,18 @@ describe("ProtocolTerminalAdapter", () => {
     );
     await waitFor(() =>
       expect(reloadedSocket.sentFrame(1).type).toBe("auth_response"),
+    );
+    await reloadedSocket.receive(
+      agentFrame(reloadedHello.connectionId, 2, "auth_result", {
+        authenticated: true,
+        authorizationExpiresAt: "2026-08-27T00:00:00.000Z",
+      }),
+    );
+    await waitFor(() =>
+      expect(reloadedSocket.sentFrame(2)).toMatchObject({
+        type: "reopen_session",
+        payload: { sessionId },
+      }),
     );
     expect(reloadedStates).not.toContain("pairing");
     expect(
@@ -381,19 +539,7 @@ describe("ProtocolTerminalAdapter", () => {
     expect(sockets).toHaveLength(0);
   });
 
-  it.each([
-    {
-      label: "a mismatched session",
-      resumedSessionId: "60000000-0000-4000-8000-000000000002",
-      monotonicAtResponse: 0,
-    },
-    {
-      label: "an expired grant",
-      resumedSessionId: sessionId,
-      monotonicAtResponse: 120_001,
-    },
-  ])("rejects session_resumed for $label", async (testCase) => {
-    const monotonic = { value: 0 };
+  it("fails closed on a history offset gap", async () => {
     const store = new MemoryCredentialStore(cryptoProvider, () => now);
     await store.saveCredential(
       credentialId,
@@ -401,23 +547,34 @@ describe("ProtocolTerminalAdapter", () => {
       "2026-09-25T12:00:00.000Z",
     );
     const sockets: MockWebSocket[] = [];
-    const adapter = createAdapter(store, sockets, () => monotonic.value);
-    await driveToDetached(adapter, sockets);
-
-    const reconnection = adapter.connect();
-    await waitFor(() => expect(sockets).toHaveLength(2));
-    const socket = sockets[1] as MockWebSocket;
+    const adapter = createAdapter(store, sockets);
+    const reconnection = adapter.connect({ sessionId });
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = sockets[0] as MockWebSocket;
     socket.open();
     await reconnection;
-    const connectionId = await authenticate(socket, "resume_session");
-
-    monotonic.value = testCase.monotonicAtResponse;
+    const connectionId = await authenticate(socket, "reopen_session");
     await socket.receive(
-      agentFrame(connectionId, 3, "session_resumed", {
-        sessionId: testCase.resumedSessionId,
+      agentFrame(connectionId, 3, "session_reopened", { sessionId }),
+    );
+    await socket.receive(
+      agentFrame(connectionId, 4, "history_begin", {
+        sessionId,
+        startOffset: 0,
+        endOffset: 4,
+        truncated: false,
       }),
     );
-    await waitFor(() => expect(adapter.getErrorCode()).toBe("RESUME_REJECTED"));
+    await socket.receive(
+      agentFrame(connectionId, 5, "history_chunk", {
+        sessionId,
+        offset: 2,
+        data: "AP8",
+      }),
+    );
+    await waitFor(() =>
+      expect(adapter.getErrorCode()).toBe("OUTPUT_OFFSET_INVALID"),
+    );
     await waitFor(() => expect(socket.closeCode).toBe(4008));
   });
 
@@ -476,7 +633,7 @@ describe("ProtocolTerminalAdapter", () => {
       expectedClose: number;
     }> = [
       {
-        input: '{"version":"0.1"',
+        input: '{"version":"0.2"',
         expectedCode: "INVALID_JSON",
         expectedClose: 4007,
       },
@@ -518,7 +675,7 @@ describe("ProtocolTerminalAdapter", () => {
     await connected;
     const hello = socket.sentFrame(0);
     const ack = agentFrame(hello.connectionId, 0, "hello_ack", {
-      selectedVersion: "0.1",
+      selectedVersion: "0.2",
       agentId: "50000000-0000-4000-8000-000000000001",
     });
     await socket.receive(ack);
@@ -564,12 +721,12 @@ function createAdapter(
 
 async function authenticate(
   socket: MockWebSocket,
-  expectedSessionAction: "open_session" | "resume_session",
+  expectedSessionAction: "open_session" | "reopen_session",
 ): Promise<string> {
   const hello = socket.sentFrame(0);
   await socket.receive(
     agentFrame(hello.connectionId, 0, "hello_ack", {
-      selectedVersion: "0.1",
+      selectedVersion: "0.2",
       agentId: "50000000-0000-4000-8000-000000000001",
     }),
   );
@@ -611,8 +768,6 @@ async function driveToDetached(
   await socket.receive(
     agentFrame(connectionId, 4, "session_detached", {
       sessionId,
-      resumeGrant: "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
-      expiresAt: "2026-08-26T12:02:00.000Z",
     }),
   );
   await waitFor(() => expect(adapter.getState()).toBe("detached"));
@@ -624,13 +779,13 @@ function agentFrame(
   type: ProtocolFrame["type"],
   payload: Record<string, unknown>,
 ): ProtocolFrame {
-  return { version: "0.1", type, connectionId, sequence, payload };
+  return { version: "0.2", type, connectionId, sequence, payload };
 }
 
 class MockWebSocket implements WebSocketPort {
   binaryType: BinaryType = "blob";
   bufferedAmount = 0;
-  protocol = "terminus.v0_1";
+  protocol = "terminus.v0_2";
   readyState = 0;
   onclose: ((event: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -645,10 +800,14 @@ class MockWebSocket implements WebSocketPort {
     readonly requestedSubprotocol: string,
   ) {}
 
-  open(protocol = "terminus.v0_1") {
+  open(protocol = "terminus.v0_2") {
     this.protocol = protocol;
     this.readyState = 1;
     this.onopen?.();
+  }
+
+  error() {
+    this.onerror?.();
   }
 
   send(data: string): void {

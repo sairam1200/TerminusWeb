@@ -23,7 +23,8 @@ export type ProtocolSessionState =
   | "OPEN"
   | "DETACHING"
   | "DETACHED"
-  | "RESUMING"
+  | "REOPENING"
+  | "REPLAYING"
   | "CLOSING"
   | "CLOSED";
 
@@ -44,6 +45,13 @@ export interface ProtocolMachineInitialState {
   connectionState: ProtocolConnectionState;
   sessionState: ProtocolSessionState;
   nextSequence: Record<ProtocolDirection, number>;
+  nextOutputOffset?: number;
+  history?: {
+    begun: boolean;
+    cursor: number;
+    endOffset: number;
+  };
+  sessionId?: string;
 }
 
 export interface ProtocolValidationContext {
@@ -51,7 +59,14 @@ export interface ProtocolValidationContext {
   challengeExpiresAt?: string;
   credentialSecret?: string;
   challenge?: string;
-  consumedResumeGrants?: string[];
+  reopenDecision?:
+    | "allow"
+    | "unknown_session"
+    | "already_attached"
+    | "wrong_credential"
+    | "wrong_source_device"
+    | "missing_source_device"
+    | "closed_by_new_session";
 }
 
 export interface ProtocolMachineSnapshot {
@@ -59,6 +74,13 @@ export interface ProtocolMachineSnapshot {
   sessionState: ProtocolSessionState;
   nextSequence: Record<ProtocolDirection, number>;
   connectionId?: string;
+  nextOutputOffset: number;
+  history?: {
+    begun: boolean;
+    cursor: number;
+    endOffset: number;
+  };
+  sessionId?: string;
 }
 
 export class ProtocolViolation extends Error {

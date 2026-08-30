@@ -22,6 +22,10 @@ import {
   ProtocolTerminalAdapter,
   type ProtocolTerminalAdapterConfig,
 } from "../terminal/protocolTerminalAdapter";
+import {
+  parseSessionFragment,
+  sessionFragment,
+} from "../protocol/sessionFragment";
 
 type Language = "en" | "sv";
 type AccentKey = "violet" | "cyan" | "rose" | "emerald";
@@ -71,7 +75,7 @@ const TRANSLATIONS = {
     brand: "Terminus",
     brandSub: "PRIVATE TERMINAL",
     workspace: "Terminal workspace",
-    protocol: "PRIVATE WSS · PROTOCOL 0.1",
+    protocol: "PRIVATE WSS · PROTOCOL 0.2",
     secure: "mTLS · PRIVATE",
     personalPrototype: "Personal prototype",
     status: {
@@ -80,6 +84,7 @@ const TRANSLATIONS = {
       pairing: "Pairing",
       authenticating: "Authenticating…",
       opening: "Opening session…",
+      replaying: "Restoring history…",
       connected: "Connected",
       detaching: "Detaching…",
       detached: "Detached",
@@ -130,6 +135,12 @@ const TRANSLATIONS = {
     sendKey: (key: string) => `Send ${key}`,
     sessionOpenFailure:
       "PowerShell could not open. Check the Windows agent and available system resources, then retry.",
+    sessionId: "Session",
+    newSession: "New Session",
+    historyTruncated: "Earlier output is not available.",
+    invalidSession: "This session link is invalid or unavailable.",
+    newSessionFailure:
+      "A new session could not open. The session link was not changed. Retry from this page.",
     terminalOutput: "Private terminal output",
     simulatedOutput: "Simulated terminal output",
     privateTraffic:
@@ -155,7 +166,7 @@ const TRANSLATIONS = {
     brand: "Terminus",
     brandSub: "PRIVAT TERMINAL",
     workspace: "Terminalarbetsyta",
-    protocol: "PRIVAT WSS · PROTOKOLL 0.1",
+    protocol: "PRIVAT WSS · PROTOKOLL 0.2",
     secure: "mTLS · PRIVAT",
     personalPrototype: "Personlig prototyp",
     status: {
@@ -164,6 +175,7 @@ const TRANSLATIONS = {
       pairing: "Parkopplar",
       authenticating: "Autentiserar…",
       opening: "Öppnar session…",
+      replaying: "Återställer historik…",
       connected: "Ansluten",
       detaching: "Kopplar från…",
       detached: "Frånkopplad",
@@ -215,6 +227,12 @@ const TRANSLATIONS = {
     sendKey: (key: string) => `Skicka ${key}`,
     sessionOpenFailure:
       "PowerShell kunde inte öppnas. Kontrollera Windows-agenten och tillgängliga systemresurser och försök sedan igen.",
+    sessionId: "Session",
+    newSession: "Ny session",
+    historyTruncated: "Tidigare utdata är inte tillgängliga.",
+    invalidSession: "Sessionslänken är ogiltig eller otillgänglig.",
+    newSessionFailure:
+      "En ny session kunde inte öppnas. Sessionslänken ändrades inte. Försök igen från den här sidan.",
     terminalOutput: "Privat terminalutdata",
     simulatedOutput: "Simulerad terminalutdata",
     privateTraffic:
@@ -353,6 +371,10 @@ export function TerminalShell({
   );
   const protocolClient = adapter.kind === "protocol-client";
   const [connectionState, setConnectionState] = useState(adapter.getState());
+  const [currentSessionId, setCurrentSessionId] = useState<string>();
+  const [fragmentInvalid, setFragmentInvalid] = useState(false);
+  const [historyTruncated, setHistoryTruncated] = useState(false);
+  const [newSessionFailed, setNewSessionFailed] = useState(false);
   const [markers, setMarkers] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [pairingCode, setPairingCode] = useState("");
@@ -380,6 +402,7 @@ export function TerminalShell({
     "connecting",
     "authenticating",
     "opening",
+    "replaying",
     "reconnecting",
     "detaching",
     "closing",
@@ -394,6 +417,19 @@ export function TerminalShell({
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    if (!protocolClient) return;
+    const syncFragment = () => {
+      const fragment = parseSessionFragment(window.location.hash);
+      setFragmentInvalid(fragment.kind === "invalid");
+      setCurrentSessionId(
+        fragment.kind === "session" ? fragment.sessionId : undefined,
+      );
+    };
+    const timer = window.setTimeout(syncFragment, 0);
+    return () => window.clearTimeout(timer);
+  }, [protocolClient]);
 
   useEffect(() => {
     if (!protocolClient || terminalRef.current === null) return;
@@ -414,6 +450,9 @@ export function TerminalShell({
       },
     });
     terminal.open(terminalRef.current);
+    const sideEffectGuards = [8, 9, 52, 777].map((identifier) =>
+      terminal.parser.registerOscHandler(identifier, () => true),
+    );
     const inputSubscription = terminal.onData((data) => {
       if (connectedRef.current) adapter.sendInput(data);
     });
@@ -424,6 +463,7 @@ export function TerminalShell({
       xtermRef.current = null;
       pendingOutputRef.current = [];
       inputSubscription.dispose();
+      sideEffectGuards.forEach((guard) => guard.dispose());
       terminal.dispose();
     };
   }, [adapter, protocolClient]);
@@ -452,10 +492,31 @@ export function TerminalShell({
       }
       setMarkers((current) => [...current.slice(-4), output]);
     });
+    const unsubscribeSession =
+      adapter.subscribeSession?.((event) => {
+        if (event.type === "history-begin") {
+          pendingOutputRef.current = [];
+          xtermRef.current?.reset();
+          setHistoryTruncated(event.truncated);
+          return;
+        }
+        setCurrentSessionId(event.sessionId);
+        setFragmentInvalid(false);
+        setHistoryTruncated(false);
+        if (event.type === "session-opened") {
+          window.history.replaceState(
+            null,
+            "",
+            sessionFragment(event.sessionId),
+          );
+          setNewSessionFailed(false);
+        }
+      }) ?? (() => undefined);
     return () => {
       unsubscribeState();
       unsubscribeOutput();
-      void adapter.disconnect();
+      unsubscribeSession();
+      if (!protocolClient) void adapter.disconnect();
     };
   }, [adapter, protocolClient]);
 
@@ -508,8 +569,8 @@ export function TerminalShell({
       cancelPendingReconnect();
       // Safari may freeze a background page before even a short timer runs.
       // A persisted pagehide keeps this document alive, so detach now and
-      // retain the memory-only resume grant for pageshow. A real reload/close
-      // remains undetached so transport teardown releases server resources.
+      // retain the remembered session ID for pageshow. A real reload/close
+      // lets transport teardown detach the server session for fragment reopen.
       if (event.persisted && adapter.getState() === "connected") void detach();
     };
     const pageShowing = (event: PageTransitionEvent) => {
@@ -610,9 +671,33 @@ export function TerminalShell({
   );
 
   const connect = async () => {
+    setNewSessionFailed(false);
+    const fragment = protocolClient
+      ? parseSessionFragment(window.location.hash)
+      : { kind: "root" as const };
+    if (fragment.kind === "invalid") {
+      setFragmentInvalid(true);
+      setConnectionState("error");
+      return;
+    }
     try {
-      await adapter.connect();
+      await adapter.connect({
+        ...(fragment.kind === "session"
+          ? { sessionId: fragment.sessionId }
+          : {}),
+      });
     } catch {
+      setConnectionState("error");
+    }
+  };
+
+  const newSession = async () => {
+    if (adapter.newSession === undefined) return;
+    setNewSessionFailed(false);
+    try {
+      await adapter.newSession();
+    } catch {
+      setNewSessionFailed(true);
       setConnectionState("error");
     }
   };
@@ -808,9 +893,44 @@ export function TerminalShell({
           {connected && protocolClient && (
             <span className="secureLabel">{t.secure}</span>
           )}
+          {protocolClient && currentSessionId !== undefined && (
+            <span className="sessionIdentity">
+              {t.sessionId} <code>{currentSessionId}</code>
+            </span>
+          )}
+          {connected &&
+            protocolClient &&
+            currentSessionId !== undefined &&
+            adapter.newSession !== undefined && (
+              <button
+                className="secondaryButton compactButton"
+                type="button"
+                onClick={() => void newSession()}
+              >
+                {t.newSession}
+              </button>
+            )}
           <span>{t.personalPrototype}</span>
         </div>
       </section>
+
+      {fragmentInvalid && (
+        <p className="sessionOpenGuidance" role="alert">
+          {t.invalidSession}
+        </p>
+      )}
+
+      {newSessionFailed && (
+        <p className="sessionOpenGuidance" role="alert">
+          {t.newSessionFailure}
+        </p>
+      )}
+
+      {historyTruncated && (
+        <p className="historyNotice" role="status">
+          {t.historyTruncated}
+        </p>
+      )}
 
       {connectionState === "error" && errorCode === "SESSION_OPEN_FAILED" && (
         <p className="sessionOpenGuidance" role="alert">

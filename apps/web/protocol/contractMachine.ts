@@ -1,5 +1,9 @@
 import { computeAuthenticationProof, importCredentialKey } from "./auth";
-import { parseProtocolFrame, validateProtocolFrame } from "./codec";
+import {
+  decodeBase64Url,
+  parseProtocolFrame,
+  validateProtocolFrame,
+} from "./codec";
 import { MAX_SAFE_SEQUENCE, PROTOCOL_VERSION } from "./constants";
 import type {
   ProtocolDirection,
@@ -36,13 +40,19 @@ const connectionTransitions = new Map<string, Transition>([
 const sessionTransitions = new Map<string, Transition>([
   ["READY|NONE|client_to_agent|open_session", { session: "OPENING" }],
   ["READY|OPENING|agent_to_client|session_opened", { session: "OPEN" }],
+  ["READY|NONE|client_to_agent|reopen_session", { session: "REOPENING" }],
+  [
+    "READY|REOPENING|agent_to_client|session_reopened",
+    { session: "REPLAYING" },
+  ],
+  ["READY|REPLAYING|agent_to_client|history_begin", { session: "REPLAYING" }],
+  ["READY|REPLAYING|agent_to_client|history_chunk", { session: "REPLAYING" }],
+  ["READY|REPLAYING|agent_to_client|history_end", { session: "OPEN" }],
   ["READY|OPEN|client_to_agent|terminal_input", { session: "OPEN" }],
   ["READY|OPEN|agent_to_client|terminal_output", { session: "OPEN" }],
   ["READY|OPEN|client_to_agent|resize", { session: "OPEN" }],
   ["READY|OPEN|client_to_agent|detach", { session: "DETACHING" }],
   ["READY|DETACHING|agent_to_client|session_detached", { session: "DETACHED" }],
-  ["READY|DETACHED|client_to_agent|resume_session", { session: "RESUMING" }],
-  ["READY|RESUMING|agent_to_client|session_resumed", { session: "OPEN" }],
   ["READY|OPEN|client_to_agent|close_session", { session: "CLOSING" }],
   ["READY|CLOSING|agent_to_client|session_closed", { session: "CLOSED" }],
   ["READY|OPEN|agent_to_client|session_closed", { session: "CLOSED" }],
@@ -50,6 +60,7 @@ const sessionTransitions = new Map<string, Transition>([
 
 export class ProtocolContractMachine {
   private snapshot: ProtocolMachineSnapshot;
+  private nextOutputOffsetKnown: boolean;
 
   constructor(
     initial: ProtocolMachineInitialState = {
@@ -58,7 +69,11 @@ export class ProtocolContractMachine {
       nextSequence: { client_to_agent: 0, agent_to_client: 0 },
     },
   ) {
-    this.snapshot = structuredClone(initial);
+    this.nextOutputOffsetKnown = initial.nextOutputOffset !== undefined;
+    this.snapshot = {
+      ...structuredClone(initial),
+      nextOutputOffset: initial.nextOutputOffset ?? 0,
+    };
   }
 
   getSnapshot(): ProtocolMachineSnapshot {
@@ -98,6 +113,7 @@ export class ProtocolContractMachine {
 
     await this.validateContext(frame, context);
     const transition = this.findTransition(direction, frame.type);
+    this.validateSessionData(frame);
     this.snapshot.nextSequence[direction] = nextSequence(expectedSequence);
     if (transition.connection !== undefined) {
       this.snapshot.connectionState = transition.connection;
@@ -170,10 +186,100 @@ export class ProtocolContractMachine {
     }
 
     if (
-      frame.type === "resume_session" &&
-      context.consumedResumeGrants?.includes(String(frame.payload.resumeGrant))
+      frame.type === "reopen_session" &&
+      context.reopenDecision !== undefined &&
+      context.reopenDecision !== "allow"
     ) {
-      throw new ProtocolViolation("RESUME_REJECTED", 1008);
+      throw new ProtocolViolation("SESSION_REOPEN_REJECTED", 1008);
+    }
+  }
+
+  private validateSessionData(frame: ProtocolFrame): void {
+    const payloadSessionId =
+      typeof frame.payload.sessionId === "string"
+        ? frame.payload.sessionId
+        : undefined;
+    if (
+      this.snapshot.sessionId !== undefined &&
+      payloadSessionId !== undefined &&
+      frame.type !== "reopen_session" &&
+      payloadSessionId !== this.snapshot.sessionId
+    ) {
+      throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+    }
+
+    switch (frame.type) {
+      case "session_opened":
+      case "session_reopened":
+        this.snapshot.sessionId = payloadSessionId;
+        if (frame.type === "session_opened") {
+          this.snapshot.nextOutputOffset = 0;
+          this.nextOutputOffsetKnown = true;
+        }
+        break;
+      case "history_begin": {
+        const start = Number(frame.payload.startOffset);
+        const end = Number(frame.payload.endOffset);
+        if (
+          end < start ||
+          end - start > 262_144 ||
+          (frame.payload.truncated === false && start !== 0) ||
+          (this.nextOutputOffsetKnown && end !== this.snapshot.nextOutputOffset)
+        ) {
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+        }
+        this.snapshot.history = {
+          begun: true,
+          cursor: start,
+          endOffset: end,
+        };
+        this.snapshot.nextOutputOffset = end;
+        this.nextOutputOffsetKnown = true;
+        break;
+      }
+      case "history_chunk": {
+        const history = this.snapshot.history;
+        const offset = Number(frame.payload.offset);
+        const length = decodeBase64Url(frame.payload.data).byteLength;
+        if (
+          history === undefined ||
+          !history.begun ||
+          offset !== history.cursor ||
+          offset + length > history.endOffset ||
+          offset + length > MAX_SAFE_SEQUENCE
+        ) {
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+        }
+        history.cursor += length;
+        break;
+      }
+      case "history_end": {
+        const history = this.snapshot.history;
+        const end = Number(frame.payload.endOffset);
+        if (
+          history === undefined ||
+          !history.begun ||
+          history.cursor !== history.endOffset ||
+          end !== history.endOffset
+        ) {
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+        }
+        this.snapshot.nextOutputOffset = end;
+        this.snapshot.history = undefined;
+        break;
+      }
+      case "terminal_output": {
+        const offset = Number(frame.payload.offset);
+        const length = decodeBase64Url(frame.payload.data).byteLength;
+        if (
+          offset !== this.snapshot.nextOutputOffset ||
+          offset + length > MAX_SAFE_SEQUENCE
+        ) {
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+        }
+        this.snapshot.nextOutputOffset += length;
+        break;
+      }
     }
   }
 }
@@ -192,7 +298,7 @@ export function evaluateHandshake(
   code: "ACCEPT" | "ORIGIN_REJECTED" | "UNSUPPORTED_VERSION";
   httpStatus: number;
 } {
-  if (request.subprotocol !== "terminus.v0_1") {
+  if (request.subprotocol !== "terminus.v0_2") {
     return { code: "UNSUPPORTED_VERSION", httpStatus: 426 };
   }
   if (

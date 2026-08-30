@@ -2,6 +2,7 @@ import { computeAuthenticationProof } from "../protocol/auth";
 import {
   decodeBase64Url,
   encodeBase64Url,
+  isSessionId,
   protocolErrorCode,
 } from "../protocol/codec";
 import {
@@ -30,6 +31,7 @@ import type {
   TerminalAdapter,
   TerminalConnectOptions,
   TerminalConnectionState,
+  TerminalSessionEvent,
   TerminalViewport,
 } from "./adapter";
 
@@ -63,17 +65,16 @@ export interface ProtocolTerminalAdapterConfig extends PrivateWssPolicy {
   webSocketFactory?: (url: string, subprotocol: string) => WebSocketPort;
 }
 
-interface ResumeGrant {
-  sessionId: string;
-  value: string;
-  monotonicDeadline: number;
-}
-
 const SOCKET_OPEN = 1;
 const APPLICATION_CLOSE_CODE_OFFSET = 3000;
 const AUTHORIZATION_LIFETIME_MS = 12 * 60 * 60 * 1000;
-const RESUME_GRANT_LIFETIME_MS = 120_000;
 const textDecoder = new TextDecoder();
+
+interface NewSessionOperation {
+  phase: "closing" | "opening";
+  resolve: () => void;
+  reject: (error: ProtocolViolation) => void;
+}
 
 function browserCloseCode(protocolCloseCode: number): number {
   if (protocolCloseCode === 1000) return protocolCloseCode;
@@ -104,6 +105,9 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     (state: TerminalConnectionState) => void
   >();
   private readonly outputListeners = new Set<(output: string) => void>();
+  private readonly sessionListeners = new Set<
+    (event: TerminalSessionEvent) => void
+  >();
   private state: TerminalConnectionState = "disconnected";
   private errorCode?: ProtocolErrorCode;
   private viewport: TerminalViewport = { columns: 80, rows: 24 };
@@ -112,7 +116,8 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   private credential?: StoredCredential;
   private connectionId?: string;
   private sessionId?: string;
-  private resumeGrant?: ResumeGrant;
+  private requestedSessionId?: string;
+  private newSessionOperation?: NewSessionOperation;
   private lastInboundAt = 0;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private authorizationTimer?: ReturnType<typeof setTimeout>;
@@ -135,7 +140,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       config.webSocketFactory ??
       ((url, subprotocol) =>
         new WebSocket(url, subprotocol) as unknown as WebSocketPort);
-    this.label = `PRIVATE WSS · PROTOCOL 0.1 · ${new URL(this.policy.endpoint).host}`;
+    this.label = `PRIVATE WSS · PROTOCOL 0.2 · ${new URL(this.policy.endpoint).host}`;
   }
 
   async connect(options: TerminalConnectOptions = {}): Promise<void> {
@@ -153,12 +158,19 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     if (!["disconnected", "detached", "error"].includes(this.state)) return;
 
     this.errorCode = undefined;
-    const resuming =
-      this.resumeGrant !== undefined &&
-      this.resumeGrant.monotonicDeadline > this.monotonicNow();
-    if (this.resumeGrant !== undefined && !resuming)
-      this.resumeGrant = undefined;
-    this.setState(resuming ? "reconnecting" : "connecting");
+    const requestedSessionId =
+      options.sessionId ??
+      (this.state === "detached" ? this.sessionId : undefined);
+    if (requestedSessionId !== undefined && !isSessionId(requestedSessionId)) {
+      const violation = new ProtocolViolation("SESSION_REOPEN_REJECTED", 1008);
+      this.errorCode = violation.code;
+      this.setState("error");
+      throw violation;
+    }
+    this.requestedSessionId = requestedSessionId;
+    this.setState(
+      requestedSessionId === undefined ? "connecting" : "reconnecting",
+    );
 
     let clientInstanceId: string;
     try {
@@ -174,7 +186,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     this.connectionId = this.cryptoProvider.randomUUID().toLowerCase();
     this.machine = new ProtocolContractMachine({
       connectionState: "NEW",
-      sessionState: resuming ? "DETACHED" : "NONE",
+      sessionState: "NONE",
       nextSequence: { client_to_agent: 0, agent_to_client: 0 },
     });
 
@@ -216,7 +228,9 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           .then(() => this.receive(event.data))
           .catch((error: unknown) => this.fail(asProtocolViolation(error)));
       };
-      socket.onclose = () => this.handleTransportClose();
+      socket.onclose = () => {
+        if (this.socket === socket) this.handleTransportClose();
+      };
     });
   }
 
@@ -253,14 +267,45 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       });
       return;
     }
-    this.resumeGrant = undefined;
     this.sessionId = undefined;
+    this.requestedSessionId = undefined;
     this.socket?.close(1000, "user_request");
     this.setState("disconnected");
   }
 
+  async newSession(): Promise<void> {
+    if (
+      this.state !== "connected" ||
+      this.sessionId === undefined ||
+      this.newSessionOperation !== undefined
+    ) {
+      throw new ProtocolViolation("INVALID_STATE", 1008);
+    }
+    const completion = new Promise<void>((resolve, reject) => {
+      this.newSessionOperation = {
+        phase: "closing",
+        resolve,
+        reject: (error) => reject(error),
+      };
+    });
+    this.setState("closing");
+    try {
+      await this.sendFrame("close_session", {
+        sessionId: this.sessionId,
+        reason: "new_session",
+      });
+    } catch (error) {
+      this.rejectNewSession(asProtocolViolation(error));
+    }
+    return completion;
+  }
+
   getErrorCode(): string | undefined {
     return this.errorCode;
+  }
+
+  getSessionId(): string | undefined {
+    return this.sessionId;
   }
 
   getState(): TerminalConnectionState {
@@ -314,6 +359,13 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     return () => this.outputListeners.delete(listener);
   }
 
+  subscribeSession(
+    listener: (event: TerminalSessionEvent) => void,
+  ): () => void {
+    this.sessionListeners.add(listener);
+    return () => this.sessionListeners.delete(listener);
+  }
+
   private async receive(data: string | ArrayBuffer | Blob): Promise<void> {
     if (typeof data !== "string") {
       throw new ProtocolViolation("SCHEMA_INVALID", 1002);
@@ -355,26 +407,55 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         ) {
           throw new ProtocolViolation("AUTHORIZATION_EXPIRED", 1008);
         }
-        await this.openOrResume();
+        await this.openOrReopen();
         break;
       case "session_opened":
-      case "session_resumed":
-        if (
-          frame.type === "session_resumed" &&
-          (this.resumeGrant === undefined ||
-            this.resumeGrant.monotonicDeadline <= this.monotonicNow() ||
-            frame.payload.sessionId !== this.resumeGrant.sessionId)
-        ) {
-          throw new ProtocolViolation("RESUME_REJECTED", 1008);
+        this.sessionId = String(frame.payload.sessionId);
+        this.requestedSessionId = undefined;
+        this.setState("connected");
+        this.startHeartbeat();
+        this.emitSession({ type: "session-opened", sessionId: this.sessionId });
+        this.resolveNewSession();
+        break;
+      case "session_reopened":
+        if (frame.payload.sessionId !== this.requestedSessionId) {
+          throw new ProtocolViolation("SESSION_REOPEN_REJECTED", 1008);
         }
         this.sessionId = String(frame.payload.sessionId);
-        if (frame.type === "session_resumed") this.resumeGrant = undefined;
+        this.setState("replaying");
+        this.emitSession({
+          type: "session-reopened",
+          sessionId: this.sessionId,
+        });
+        break;
+      case "history_begin":
+        if (frame.payload.sessionId !== this.sessionId) {
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+        }
+        this.emitSession({
+          type: "history-begin",
+          sessionId: String(frame.payload.sessionId),
+          truncated: frame.payload.truncated === true,
+        });
+        break;
+      case "history_chunk":
+        if (frame.payload.sessionId !== this.sessionId) {
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+        }
+        this.emitOutput(
+          textDecoder.decode(decodeBase64Url(frame.payload.data)),
+        );
+        break;
+      case "history_end":
+        if (frame.payload.sessionId !== this.sessionId) {
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
+        }
         this.setState("connected");
         this.startHeartbeat();
         break;
       case "terminal_output":
         if (frame.payload.sessionId !== this.sessionId) {
-          throw new ProtocolViolation("INVALID_STATE", 1008);
+          throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
         }
         this.emitOutput(
           textDecoder.decode(decodeBase64Url(frame.payload.data)),
@@ -392,18 +473,6 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         if (frame.payload.sessionId !== this.sessionId) {
           throw new ProtocolViolation("INVALID_STATE", 1008);
         }
-        this.resumeGrant = {
-          sessionId: String(frame.payload.sessionId),
-          value: String(frame.payload.resumeGrant),
-          // The wire timestamp is schema-validated metadata. The grant was
-          // freshly issued for this response, so capture its bounded lifetime
-          // on the browser's monotonic clock instead of comparing two devices'
-          // wall clocks.
-          monotonicDeadline: this.monotonicNow() + RESUME_GRANT_LIFETIME_MS,
-        };
-        if (this.resumeGrant.monotonicDeadline <= this.monotonicNow()) {
-          throw new ProtocolViolation("RESUME_REJECTED", 1008);
-        }
         this.stopHeartbeat();
         this.clearAuthorizationTimer();
         this.setState("detached");
@@ -412,8 +481,30 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       case "session_closed":
         this.stopHeartbeat();
         this.clearAuthorizationTimer();
+        if (this.newSessionOperation?.phase === "closing") {
+          if (frame.payload.reason !== "new_session") {
+            const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
+            this.errorCode = failure.code;
+            this.rejectNewSession(failure);
+            this.setState("error");
+            this.socket?.close(browserCloseCode(1008), failure.code);
+            break;
+          }
+          const oldSocket = this.socket;
+          this.sessionId = undefined;
+          this.requestedSessionId = undefined;
+          this.newSessionOperation.phase = "opening";
+          this.setState("disconnected");
+          oldSocket?.close(1000, "new_session");
+          queueMicrotask(() => {
+            void this.connect().catch((error: unknown) =>
+              this.rejectNewSession(asProtocolViolation(error)),
+            );
+          });
+          break;
+        }
         this.sessionId = undefined;
-        this.resumeGrant = undefined;
+        this.requestedSessionId = undefined;
         this.socket?.close(1000, "session_closed");
         this.setState("disconnected");
         break;
@@ -421,6 +512,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         const code = protocolErrorCode(frame.payload.code) ?? "SCHEMA_INVALID";
         this.errorCode = code;
         this.stopHeartbeat();
+        this.rejectNewSession(new ProtocolViolation(code, 1008));
         this.setState("error");
         this.socket?.close(browserCloseCode(1008), code);
         break;
@@ -454,20 +546,15 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     this.setState("authenticating");
   }
 
-  private async openOrResume(): Promise<void> {
+  private async openOrReopen(): Promise<void> {
     this.setState("opening");
-    if (
-      this.resumeGrant !== undefined &&
-      this.resumeGrant.monotonicDeadline > this.monotonicNow()
-    ) {
-      await this.sendFrame("resume_session", {
-        sessionId: this.resumeGrant.sessionId,
-        resumeGrant: this.resumeGrant.value,
+    if (this.requestedSessionId !== undefined) {
+      await this.sendFrame("reopen_session", {
+        sessionId: this.requestedSessionId,
         dimensions: this.viewport,
       });
       return;
     }
-    this.resumeGrant = undefined;
     await this.sendFrame("open_session", {
       shell: "powershell",
       dimensions: this.viewport,
@@ -529,6 +616,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   private fail(violation: ProtocolViolation): void {
     if (this.state === "error") return;
     this.errorCode = violation.code;
+    this.rejectNewSession(violation);
     this.stopHeartbeat();
     this.clearAuthorizationTimer();
     const socket = this.socket;
@@ -551,10 +639,14 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     this.stopHeartbeat();
     this.clearAuthorizationTimer();
     if (["disconnected", "detached", "error"].includes(this.state)) return;
-    if (
-      this.resumeGrant !== undefined &&
-      this.resumeGrant.monotonicDeadline > this.monotonicNow()
-    ) {
+    if (this.newSessionOperation !== undefined) {
+      const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
+      this.errorCode = failure.code;
+      this.rejectNewSession(failure);
+      this.setState("error");
+      return;
+    }
+    if (this.sessionId !== undefined) {
       this.setState("detached");
       return;
     }
@@ -569,6 +661,24 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
 
   private emitOutput(output: string): void {
     this.outputListeners.forEach((listener) => listener(output));
+  }
+
+  private emitSession(event: TerminalSessionEvent): void {
+    this.sessionListeners.forEach((listener) => listener(event));
+  }
+
+  private resolveNewSession(): void {
+    if (this.newSessionOperation?.phase !== "opening") return;
+    const operation = this.newSessionOperation;
+    this.newSessionOperation = undefined;
+    operation.resolve();
+  }
+
+  private rejectNewSession(violation: ProtocolViolation): void {
+    const operation = this.newSessionOperation;
+    if (operation === undefined) return;
+    this.newSessionOperation = undefined;
+    operation.reject(violation);
   }
 
   private getCredentialStore(): CredentialStore {
