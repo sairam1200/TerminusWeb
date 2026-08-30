@@ -1,7 +1,12 @@
 import { webcrypto } from "node:crypto";
 import { waitFor } from "@testing-library/react";
+import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it, vi } from "vitest";
-import { MemoryCredentialStore } from "../protocol/credentialStore";
+import {
+  IndexedDbCredentialStore,
+  MemoryCredentialStore,
+  type CredentialStore,
+} from "../protocol/credentialStore";
 import type { ProtocolFrame } from "../protocol/types";
 import { ProtocolViolation } from "../protocol/types";
 import {
@@ -277,6 +282,93 @@ describe("ProtocolTerminalAdapter", () => {
     );
   });
 
+  it("pairs once and silently reuses the persisted credential after a page reload", async () => {
+    const indexedDb = new IDBFactory();
+    const initialStore = new IndexedDbCredentialStore(
+      indexedDb,
+      cryptoProvider,
+      () => now,
+    );
+    const initialSockets: MockWebSocket[] = [];
+    const initialAdapter = createAdapter(initialStore, initialSockets);
+    const pairingStates: string[] = [];
+    initialAdapter.subscribe((state) => pairingStates.push(state));
+
+    const initialConnection = initialAdapter.connect();
+    await waitFor(() => expect(initialSockets).toHaveLength(1));
+    const initialSocket = initialSockets[0] as MockWebSocket;
+    initialSocket.open();
+    await initialConnection;
+    const initialHello = initialSocket.sentFrame(0);
+    expect(initialHello.payload).not.toHaveProperty("credentialId");
+    await initialSocket.receive(
+      agentFrame(initialHello.connectionId, 0, "hello_ack", {
+        selectedVersion: "0.1",
+        agentId: "50000000-0000-4000-8000-000000000001",
+      }),
+    );
+    await waitFor(() => expect(initialAdapter.getState()).toBe("pairing"));
+    await initialAdapter.pair("AAECAwQFBgcICQoLDA0ODw");
+    await initialSocket.receive(
+      agentFrame(initialHello.connectionId, 1, "pairing_result", {
+        credentialId,
+        credentialSecret,
+        credentialExpiresAt: "2026-09-25T12:00:00.000Z",
+      }),
+    );
+    await waitFor(async () =>
+      expect((await initialStore.loadCredential())?.credentialId).toBe(
+        credentialId,
+      ),
+    );
+    expect(pairingStates).toContain("pairing");
+
+    // A new store and adapter model a later page load in the same browser
+    // profile. IndexedDB retains the non-extractable signing key, while the
+    // one-time pairing code and raw credential secret are not reused.
+    const reloadedStore = new IndexedDbCredentialStore(
+      indexedDb,
+      cryptoProvider,
+      () => now,
+    );
+    const reloadedSockets: MockWebSocket[] = [];
+    const reloadedAdapter = createAdapter(reloadedStore, reloadedSockets);
+    const reloadedStates: string[] = [];
+    reloadedAdapter.subscribe((state) => reloadedStates.push(state));
+
+    const reloadedConnection = reloadedAdapter.connect();
+    await waitFor(() => expect(reloadedSockets).toHaveLength(1));
+    const reloadedSocket = reloadedSockets[0] as MockWebSocket;
+    reloadedSocket.open();
+    await reloadedConnection;
+    const reloadedHello = reloadedSocket.sentFrame(0);
+    expect(reloadedHello.payload).toMatchObject({ credentialId });
+    await reloadedSocket.receive(
+      agentFrame(reloadedHello.connectionId, 0, "hello_ack", {
+        selectedVersion: "0.1",
+        agentId: "50000000-0000-4000-8000-000000000001",
+      }),
+    );
+    await reloadedSocket.receive(
+      agentFrame(reloadedHello.connectionId, 1, "auth_challenge", {
+        challengeId,
+        challenge,
+        expiresAt: "2026-08-26T12:00:10.000Z",
+      }),
+    );
+    await waitFor(() =>
+      expect(reloadedSocket.sentFrame(1).type).toBe("auth_response"),
+    );
+    expect(reloadedStates).not.toContain("pairing");
+    expect(
+      reloadedSocket.sent.map((frame) => JSON.parse(frame) as ProtocolFrame),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "pairing_request" }),
+      ]),
+    );
+  });
+
   it("rejects an unconfigured destination before opening a socket", async () => {
     const sockets: MockWebSocket[] = [];
     const adapter = createAdapter(
@@ -449,7 +541,7 @@ describe("ProtocolTerminalAdapter", () => {
 });
 
 function createAdapter(
-  store: MemoryCredentialStore,
+  store: CredentialStore,
   sockets: MockWebSocket[],
   monotonicNow?: () => number,
   wallNow: () => number = () => now,
