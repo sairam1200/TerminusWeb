@@ -140,7 +140,7 @@ const TRANSLATIONS = {
     historyTruncated: "Earlier output is not available.",
     invalidSession: "This session link is invalid or unavailable.",
     newSessionFailure:
-      "A new session could not open. The session link was not changed. Retry from this page.",
+      "New Session could not complete. The session link was not changed. Retry from this page.",
     terminalOutput: "Private terminal output",
     simulatedOutput: "Simulated terminal output",
     privateTraffic:
@@ -232,7 +232,7 @@ const TRANSLATIONS = {
     historyTruncated: "Tidigare utdata är inte tillgängliga.",
     invalidSession: "Sessionslänken är ogiltig eller otillgänglig.",
     newSessionFailure:
-      "En ny session kunde inte öppnas. Sessionslänken ändrades inte. Försök igen från den här sidan.",
+      "Ny session kunde inte slutföras. Sessionslänken ändrades inte. Försök igen från den här sidan.",
     terminalOutput: "Privat terminalutdata",
     simulatedOutput: "Simulerad terminalutdata",
     privateTraffic:
@@ -375,6 +375,8 @@ export function TerminalShell({
   const [fragmentInvalid, setFragmentInvalid] = useState(false);
   const [historyTruncated, setHistoryTruncated] = useState(false);
   const [newSessionFailed, setNewSessionFailed] = useState(false);
+  const [newSessionNeedsFreshRetry, setNewSessionNeedsFreshRetry] =
+    useState(false);
   const [markers, setMarkers] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [pairingCode, setPairingCode] = useState("");
@@ -509,8 +511,9 @@ export function TerminalShell({
             "",
             sessionFragment(event.sessionId),
           );
-          setNewSessionFailed(false);
         }
+        setNewSessionFailed(false);
+        setNewSessionNeedsFreshRetry(false);
       }) ?? (() => undefined);
     return () => {
       unsubscribeState();
@@ -672,9 +675,10 @@ export function TerminalShell({
 
   const connect = async () => {
     setNewSessionFailed(false);
-    const fragment = protocolClient
-      ? parseSessionFragment(window.location.hash)
-      : { kind: "root" as const };
+    const fragment =
+      protocolClient && !newSessionNeedsFreshRetry
+        ? parseSessionFragment(window.location.hash)
+        : { kind: "root" as const };
     if (fragment.kind === "invalid") {
       setFragmentInvalid(true);
       setConnectionState("error");
@@ -694,11 +698,13 @@ export function TerminalShell({
   const newSession = async () => {
     if (adapter.newSession === undefined) return;
     setNewSessionFailed(false);
+    setNewSessionNeedsFreshRetry(false);
     try {
       await adapter.newSession();
     } catch {
       setNewSessionFailed(true);
-      setConnectionState("error");
+      setNewSessionNeedsFreshRetry(adapter.getSessionId?.() === undefined);
+      setConnectionState(adapter.getState());
     }
   };
 

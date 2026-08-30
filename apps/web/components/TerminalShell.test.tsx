@@ -353,6 +353,10 @@ describe("TerminalShell", () => {
     const adapter = new ProtocolUiAdapter("connected");
     adapter.newSessionShouldFail = true;
     render(<TerminalShell adapterFactory={() => adapter} />);
+    adapter.emitSession({
+      type: "session-reopened",
+      sessionId: "k7m4-p2q9-wxyz",
+    });
 
     await user.click(
       await screen.findByRole("button", { name: "New Session" }),
@@ -361,9 +365,47 @@ describe("TerminalShell", () => {
     expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
     expect(
       screen.getByText(
-        "A new session could not open. The session link was not changed. Retry from this page.",
+        "New Session could not complete. The session link was not changed. Retry from this page.",
       ),
     ).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: "New Session" })).toBeEnabled();
+
+    adapter.newSessionShouldFail = false;
+    await user.click(screen.getByRole("button", { name: "New Session" }));
+    expect(adapter.newSessionCalls).toBe(2);
+    expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
+  });
+
+  it("retries a fresh root after New Session closed the old session", async () => {
+    window.history.replaceState(null, "", "/#/s/k7m4-p2q9-wxyz");
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter("connected");
+    adapter.newSessionShouldFail = true;
+    adapter.newSessionFailureDropsSession = true;
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    adapter.emitSession({
+      type: "session-reopened",
+      sessionId: "k7m4-p2q9-wxyz",
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "New Session" }),
+    );
+    expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
+
+    await user.click(
+      screen.getByRole("button", { name: "Retry private connection" }),
+    );
+    expect(adapter.connectOptions.at(-1)).toEqual({});
+    expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
+
+    adapter.emitSession({
+      type: "session-opened",
+      sessionId: "rstv-wxyz-2345",
+    });
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/s/rstv-wxyz-2345"),
+    );
   });
 
   it("fails closed for an invalid remembered-session fragment", async () => {
@@ -477,6 +519,7 @@ class ProtocolUiAdapter implements TerminalAdapter {
   detachCalls = 0;
   newSessionCalls = 0;
   newSessionShouldFail = false;
+  newSessionFailureDropsSession = false;
 
   constructor(
     initialState: TerminalConnectionState = "disconnected",
@@ -521,8 +564,13 @@ class ProtocolUiAdapter implements TerminalAdapter {
 
   async newSession(): Promise<void> {
     this.newSessionCalls += 1;
-    if (this.newSessionShouldFail)
+    if (this.newSessionShouldFail) {
+      if (this.newSessionFailureDropsSession) {
+        this.sessionId = undefined;
+        this.setState("error");
+      }
       throw new Error("Synthetic new-session failure");
+    }
   }
 
   async pair(pairingCode: string): Promise<void> {

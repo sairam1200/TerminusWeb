@@ -50,9 +50,9 @@ worker caches, fragments, and rendered error text.
 - `node packages/protocol/scripts/verify-contract-0.2.mjs` in the exact-content
   Session 01 worktree: PASS — 23 transcripts, 32 fixtures, one positive auth
   vector, and four negative auth mutations.
-- Focused Vitest after the final lifecycle assertions: PASS — 30/30 across the
+- Focused Vitest after the final lifecycle assertions: PASS — 32/32 across the
   terminal component and direct WebSocket adapter suites.
-- Full `npm test`: PASS — 58/58 across 9 files.
+- Full `npm test`: PASS — 60/60 across 9 files.
 - `npm run typecheck`: PASS.
 - `npm run lint`: PASS.
 - Targeted `npx prettier --check ...`: PASS for every changed TypeScript, TSX,
@@ -67,6 +67,15 @@ generic `SESSION_REOPEN_REJECTED` result. The adapter test separately proves a
 fresh store/adapter sharing the same IndexedDB profile reuses the credential,
 does not enter pairing or send `pairing_request`, and sends the remembered ID
 in `reopen_session`.
+
+The first independent review of product `cdde0dfbed9cf423c471d4bd0e25a3b9dd672bbe`
+found one Medium recovery issue: a rejected close send could leave internal and
+UI state out of sync, while a retry after acknowledged closure could target the
+destroyed old ID. The cumulative follow-up restores the attached state and
+contract-machine snapshot when close was not queued, and records the
+acknowledged-close case in the UI so Retry requests a fresh root session. New
+adapter and component regressions prove both retry paths while retaining the
+old fragment until a new `session_opened` arrives.
 
 ## Scope and limitations
 

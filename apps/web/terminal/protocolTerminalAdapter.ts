@@ -296,6 +296,9 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       });
     } catch (error) {
       this.rejectNewSession(asProtocolViolation(error));
+      // The close frame was not queued, so the existing session is still the
+      // attached retry target and its fragment remains valid.
+      this.setState("connected");
     }
     return completion;
   }
@@ -485,6 +488,8 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           if (frame.payload.reason !== "new_session") {
             const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
             this.errorCode = failure.code;
+            this.sessionId = undefined;
+            this.requestedSessionId = undefined;
             this.rejectNewSession(failure);
             this.setState("error");
             this.socket?.close(browserCloseCode(1008), failure.code);
@@ -587,8 +592,16 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     if (this.socket.bufferedAmount + frameBytes > MAX_OUTBOUND_BUFFERED_BYTES) {
       throw new ProtocolViolation("BACKPRESSURE_LIMIT", 1008);
     }
+    const previousMachine = this.machine.getSnapshot();
     await this.machine.apply("client_to_agent", frame);
-    this.socket.send(serialized);
+    try {
+      this.socket.send(serialized);
+    } catch (error) {
+      // A throwing WebSocket.send did not queue this frame. Restore sequence
+      // and lifecycle state so the same operation can be retried safely.
+      this.machine = new ProtocolContractMachine(previousMachine);
+      throw error;
+    }
   }
 
   private startHeartbeat(): void {
