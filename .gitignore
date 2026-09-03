@@ -34,3 +34,8 @@ temp/
 Thumbs.db
 .idea/
 .vscode/
+
+# local-only dirs
+rag/
+scripts/
+
