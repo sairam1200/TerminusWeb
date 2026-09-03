@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://terminus.invalid/contracts/control-plane/lease-claims-0.1.json",
+  "title": "Terminus metadata-only session authorization lease",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "issuer",
+    "audience",
+    "subject",
+    "tenant_id",
+    "lease_id",
+    "pairing_id",
+    "entitlement",
+    "quota_units",
+    "nonce",
+    "not_before",
+    "expires_at"
+  ],
+  "properties": {
+    "version": { "const": "0.1" },
+    "issuer": { "const": "terminus-control-plane" },
+    "audience": { "$ref": "#/$defs/uuid" },
+    "subject": { "$ref": "#/$defs/uuid" },
+    "tenant_id": { "$ref": "#/$defs/uuid" },
+    "lease_id": { "$ref": "#/$defs/uuid" },
+    "pairing_id": { "$ref": "#/$defs/uuid" },
+    "entitlement": { "const": "terminal_access" },
+    "quota_units": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+    "nonce": { "type": "string", "minLength": 22, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$" },
+    "not_before": { "type": "integer", "minimum": 0 },
+    "expires_at": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    }
+  },
+  "x-terminus-invariants": {
+    "maximumLifetimeSeconds": 300,
+    "maximumClockSkewSeconds": 30,
+    "audienceMeaning": "private host id",
+    "subjectMeaning": "active membership id",
+    "terminalPayloadAllowed": false
+  }
+}

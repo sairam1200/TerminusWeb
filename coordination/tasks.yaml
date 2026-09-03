@@ -1,0 +1,105 @@
+version: 1
+states: [blocked, ready, in_progress, review, verified, done]
+state_semantics:
+  done: Owner Definition of Done plus named independent reviewer evidence; satisfies ordinary implementation dependencies.
+  verified: Session 06 independently reproduced applicable checks against exact commits; required by the integration chain.
+
+tasks:
+  - id: S01-001
+    owner: session_01
+    state: ready
+    title: Freeze protocol and security contract version 0.1
+    depends_on: []
+    evidence: Versioned schemas, state machine, fixtures, and rejection cases.
+
+  - id: S02-001
+    owner: session_02
+    state: ready
+    title: Scaffold responsive Next.js PWA and terminal adapter boundary
+    depends_on: []
+    evidence: Build, typecheck, component tests, and mock adapter clearly labelled.
+
+  - id: S02-002
+    owner: session_02
+    state: blocked
+    title: Integrate browser terminal with protocol 0.1
+    depends_on: [S01-001, S02-001]
+    evidence: Shared fixtures pass and malformed frames fail closed.
+
+  - id: S03-001
+    owner: session_03
+    state: ready
+    title: Prove non-elevated local ConPTY lifecycle behind an internal adapter
+    depends_on: []
+    evidence: Windows test output for open, input/output, resize, close, timeout, and cleanup.
+
+  - id: S03-002
+    owner: session_03
+    state: blocked
+    title: Implement private WSS protocol 0.1 endpoint
+    depends_on: [S01-001, S03-001]
+    evidence: Contract fixtures, origin checks, auth rejection, and listener-scope proof.
+
+  - id: S04-001
+    owner: session_04
+    state: ready
+    title: Define control-plane domain model and API contract without terminal relay
+    depends_on: []
+    evidence: Schema, tenant isolation invariants, lease boundaries, and API tests.
+
+  - id: S05-001
+    owner: session_05
+    state: ready
+    title: Produce threat model and proposed deny-by-default Tailscale policy
+    depends_on: []
+    evidence: Threat cases, allowed/denied matrix, rollback plan, and no live mutation.
+
+  - id: S05-002
+    owner: session_05
+    state: blocked
+    title: Review protocol 0.1 and both consumer implementations
+    depends_on: [S01-001, S02-002, S03-002, S05-001]
+    evidence: Independent first-slice findings with reproducible cases and severity.
+
+  - id: S05-003
+    owner: session_05
+    state: blocked
+    title: Review control-plane tenancy and authorization contract
+    depends_on: [S04-001]
+    evidence: Cross-tenant and privilege-escalation contract findings with reproducible cases.
+
+  - id: S06-001
+    owner: session_06
+    state: ready
+    title: Create independent contract and browser verification harness
+    depends_on: []
+    evidence: Tests initially run against labelled test doubles and define real-integration switch.
+
+  - id: S06-002
+    owner: session_06
+    state: blocked
+    title: Verify first end-to-end private terminal vertical slice
+    depends_on: [S01-001, S02-002, S03-002, S05-002, S06-001]
+    evidence: Exact task commit SHAs, allowed and denied paths, browser matrix, logs, and pre-integration pass/fail report.
+
+  - id: S01-002
+    owner: session_01
+    state: blocked
+    title: Prepare first-slice integration manifest
+    depends_on: [S06-002]
+    evidence: Exact verified SHAs, merge order, compatibility statement, and unresolved conflict report; no merge.
+
+  - id: S01-003
+    owner: session_01
+    state: blocked
+    title: Assemble user-authorized integration candidate
+    depends_on: [S01-002]
+    requires_user_authorization: true
+    evidence: Integration branch SHA assembled from approved task SHAs without unilateral implementation edits.
+
+  - id: S06-003
+    owner: session_06
+    state: blocked
+    title: Verify integrated first-slice candidate
+    depends_on: [S01-003]
+    evidence: Exact integration SHA, full deterministic gate results, negative paths, and final pass/fail report.

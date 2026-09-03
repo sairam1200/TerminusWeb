@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terminus Control Plane"
+  short_description: "Build tenancy, leases, billing metadata"
+  default_prompt: "Use $terminus-control-plane to complete the next unblocked Session 04 contract or backend task without relaying terminal data."

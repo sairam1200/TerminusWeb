@@ -1,0 +1,58 @@
+{
+  "contractVersion": "0.1",
+  "connectionInitialState": "NEW",
+  "sessionInitialState": "NONE",
+  "connectionStates": [
+    "NEW",
+    "NEGOTIATING",
+    "UNAUTHENTICATED",
+    "PAIRING",
+    "CHALLENGED",
+    "PROVING",
+    "READY",
+    "CLOSING",
+    "CLOSED"
+  ],
+  "sessionStates": [
+    "NONE",
+    "OPENING",
+    "OPEN",
+    "DETACHING",
+    "DETACHED",
+    "RESUMING",
+    "CLOSING",
+    "CLOSED"
+  ],
+  "connectionTransitions": [
+    { "id": "c01", "from": "NEW", "direction": "client_to_agent", "message": "hello", "to": "NEGOTIATING" },
+    { "id": "c02", "from": "NEGOTIATING", "direction": "agent_to_client", "message": "hello_ack", "to": "UNAUTHENTICATED" },
+    { "id": "c03", "from": "UNAUTHENTICATED", "direction": "client_to_agent", "message": "pairing_request", "to": "PAIRING" },
+    { "id": "c04", "from": "PAIRING", "direction": "agent_to_client", "message": "pairing_result", "to": "UNAUTHENTICATED" },
+    { "id": "c05", "from": "UNAUTHENTICATED", "direction": "agent_to_client", "message": "auth_challenge", "to": "CHALLENGED" },
+    { "id": "c06", "from": "CHALLENGED", "direction": "client_to_agent", "message": "auth_response", "to": "PROVING" },
+    { "id": "c07", "from": "PROVING", "direction": "agent_to_client", "message": "auth_result", "to": "READY" },
+    { "id": "c08", "from": "READY", "direction": "client_to_agent", "message": "heartbeat", "to": "READY" },
+    { "id": "c09", "from": "READY", "direction": "agent_to_client", "message": "heartbeat", "to": "READY" }
+  ],
+  "sessionTransitions": [
+    { "id": "s01", "connection": "READY", "from": "NONE", "direction": "client_to_agent", "message": "open_session", "to": "OPENING" },
+    { "id": "s02", "connection": "READY", "from": "OPENING", "direction": "agent_to_client", "message": "session_opened", "to": "OPEN" },
+    { "id": "s03", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "terminal_input", "to": "OPEN" },
+    { "id": "s04", "connection": "READY", "from": "OPEN", "direction": "agent_to_client", "message": "terminal_output", "to": "OPEN" },
+    { "id": "s05", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "resize", "to": "OPEN" },
+    { "id": "s06", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "detach", "to": "DETACHING" },
+    { "id": "s07", "connection": "READY", "from": "DETACHING", "direction": "agent_to_client", "message": "session_detached", "to": "DETACHED" },
+    { "id": "s08", "connection": "READY", "from": "DETACHED", "direction": "client_to_agent", "message": "resume_session", "to": "RESUMING" },
+    { "id": "s09", "connection": "READY", "from": "RESUMING", "direction": "agent_to_client", "message": "session_resumed", "to": "OPEN" },
+    { "id": "s10", "connection": "READY", "from": "OPEN", "direction": "client_to_agent", "message": "close_session", "to": "CLOSING" },
+    { "id": "s11", "connection": "READY", "from": "CLOSING", "direction": "agent_to_client", "message": "session_closed", "to": "CLOSED" },
+    { "id": "s12", "connection": "READY", "from": "OPEN", "direction": "agent_to_client", "message": "session_closed", "to": "CLOSED" }
+  ],
+  "metaRules": [
+    "A fatal error may be sent from any non-CLOSED connection state when the sender can safely construct it; the sender then enters CLOSING and the transport close enters CLOSED.",
+    "WebSocket transport loss moves the connection to CLOSED. An OPEN session becomes DETACHED only when a valid unexpired resume grant was issued; otherwise the agent closes and cleans it up.",
+    "Heartbeat frames do not change session state and are legal only after authentication.",
+    "A new authenticated connection may begin with a previously detached session selected by its one-time resume grant; this is the only legal cross-connection session transition.",
+    "Any message without a matching transition is INVALID_STATE and fatal. Direction is part of the transition key."
+  ]
+}

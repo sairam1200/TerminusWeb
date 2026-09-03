@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "profiles": {
+    "double": {
+      "allowedEvidenceClasses": ["labelled-test-double", "simulated"],
+      "required": ["TERMINUS_EVIDENCE_CLASS"]
+    },
+    "real": {
+      "allowedEvidenceClasses": ["staging", "real-device"],
+      "required": [
+        "TERMINUS_EVIDENCE_CLASS",
+        "TERMINUS_PROTOCOL_SHA",
+        "TERMINUS_WEB_SHA",
+        "TERMINUS_WINDOWS_AGENT_SHA",
+        "TERMINUS_SECURITY_SHA",
+        "TERMINUS_CONTRACT_ADAPTER",
+        "TERMINUS_BROWSER_BASE_URL",
+        "TERMINUS_BROWSER_PROFILE_MODULE",
+        "TERMINUS_AGENT_WSS_URL",
+        "TERMINUS_EXPECTED_BROWSER_ORIGIN",
+        "TERMINUS_AGENT_VISIBILITY",
+        "TERMINUS_WINDOWS_VERSION",
+        "TERMINUS_ALLOWED_SOURCE_LABEL",
+        "TERMINUS_DENIED_SOURCE_LABEL",
+        "TERMINUS_LOG_CAPTURE_PATH",
+        "TERMINUS_PAIRING_SECRET"
+      ]
+    }
+  },
+  "shaVariables": [
+    "TERMINUS_PROTOCOL_SHA",
+    "TERMINUS_WEB_SHA",
+    "TERMINUS_WINDOWS_AGENT_SHA",
+    "TERMINUS_SECURITY_SHA"
+  ],
+  "secretVariables": ["TERMINUS_PAIRING_SECRET"],
+  "urlVariables": {
+    "TERMINUS_BROWSER_BASE_URL": ["https:"],
+    "TERMINUS_AGENT_WSS_URL": ["wss:"],
+    "TERMINUS_EXPECTED_BROWSER_ORIGIN": ["https:"]
+  },
+  "fixedValues": {
+    "TERMINUS_AGENT_VISIBILITY": ["tailscale-private"]
+  }
+}

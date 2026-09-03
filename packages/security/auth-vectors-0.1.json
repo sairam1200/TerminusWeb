@@ -1,0 +1,23 @@
+{
+  "contractVersion": "0.1",
+  "algorithm": "HMAC-SHA-256",
+  "encoding": "unpadded-base64url",
+  "domain": "Terminus/0.1/auth",
+  "vectors": [
+    {
+      "id": "auth-proof-sequential-octets",
+      "credentialSecret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "challengeId": "20000000-0000-4000-8000-000000000001",
+      "challenge": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+      "messageHex": "5465726d696e75732f302e312f617574680031303030303030302d303030302d343030302d383030302d3030303030303030303030310032303030303030302d303030302d343030302d383030302d30303030303030303030303100202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "proof": "Lc7B_pWvNKrS7lyj12dhdOZOh4NHEmLDgR1Rgc4TVYE"
+    }
+  ],
+  "negativeMutations": [
+    { "id": "wrong-connection", "field": "connectionId", "value": "10000000-0000-4000-8000-000000000002", "expected": "AUTHENTICATION_FAILED" },
+    { "id": "wrong-challenge-id", "field": "challengeId", "value": "20000000-0000-4000-8000-000000000002", "expected": "AUTHENTICATION_FAILED" },
+    { "id": "wrong-challenge", "field": "challenge", "value": "ICMiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8", "expected": "AUTHENTICATION_FAILED" },
+    { "id": "wrong-proof", "field": "proof", "value": "Mc7B_pWvNKrS7lyj12dhdOZOh4NHEmLDgR1Rgc4TVYE", "expected": "AUTHENTICATION_FAILED" }
+  ]
+}

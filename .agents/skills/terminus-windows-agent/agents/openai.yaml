@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terminus Windows Agent"
+  short_description: "Build the private ConPTY Windows agent"
+  default_prompt: "Use $terminus-windows-agent to complete the next unblocked Session 03 task with real Windows evidence."

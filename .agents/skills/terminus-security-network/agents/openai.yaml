@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terminus Security Network"
+  short_description: "Threat-model and test private networking"
+  default_prompt: "Use $terminus-security-network to complete the next Session 05 review or proposed-policy task without live mutation."

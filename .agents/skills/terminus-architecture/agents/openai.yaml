@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terminus Architecture"
+  short_description: "Govern contracts and verified integration"
+  default_prompt: "Use $terminus-architecture to complete the next unblocked Session 01 contract task with deterministic evidence."

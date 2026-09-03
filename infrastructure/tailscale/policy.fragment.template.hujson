@@ -1,0 +1,71 @@
+{
+  "groups": {
+    "group:terminus-terminal-operators": [
+      "__TERMINUS_OPERATOR_IDENTITY__"
+    ],
+    "group:terminus-agent-tag-admins": [
+      "__TERMINUS_TAG_ADMIN_IDENTITY__"
+    ]
+  },
+  "tagOwners": {
+    "tag:terminus-windows-agent": [
+      "group:terminus-agent-tag-admins"
+    ]
+  },
+  "grants": [
+    {
+      "src": [
+        "group:terminus-terminal-operators"
+      ],
+      "dst": [
+        "tag:terminus-windows-agent"
+      ],
+      "ip": [
+        "tcp:__TERMINUS_SERVE_HTTPS_PORT__"
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "src": "group:terminus-terminal-operators",
+      "proto": "tcp",
+      "accept": [
+        "tag:terminus-windows-agent:__TERMINUS_SERVE_HTTPS_PORT__"
+      ],
+      "deny": [
+        "tag:terminus-windows-agent:22",
+        "tag:terminus-windows-agent:3389"
+      ]
+    },
+    {
+      "src": "__TERMINUS_DENIED_IDENTITY__",
+      "proto": "tcp",
+      "deny": [
+        "tag:terminus-windows-agent:__TERMINUS_SERVE_HTTPS_PORT__",
+        "tag:terminus-windows-agent:22",
+        "tag:terminus-windows-agent:3389"
+      ]
+    },
+    {
+      "src": "group:terminus-terminal-operators",
+      "proto": "udp",
+      "deny": [
+        "tag:terminus-windows-agent:__TERMINUS_SERVE_HTTPS_PORT__"
+      ]
+    },
+    {
+      "src": "group:terminus-terminal-operators",
+      "proto": "icmp",
+      "deny": [
+        "tag:terminus-windows-agent:0"
+      ]
+    },
+    {
+      "src": "tag:terminus-windows-agent",
+      "proto": "tcp",
+      "deny": [
+        "group:terminus-terminal-operators:__TERMINUS_SERVE_HTTPS_PORT__"
+      ]
+    }
+  ]
+}
