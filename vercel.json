@@ -1,6 +1,6 @@
 {
-  "buildCommand": "cd apps/web && npm run build",
-  "installCommand": "cd apps/web && npm ci",
-  "devCommand": "cd apps/web && npm run dev",
+  "buildCommand": "if [ -d apps/web ]; then cd apps/web; fi; npm run build",
+  "installCommand": "if [ -d apps/web ]; then cd apps/web; fi; npm ci",
+  "devCommand": "if [ -d apps/web ]; then cd apps/web; fi; npm run dev",
   "framework": "nextjs"
 }
