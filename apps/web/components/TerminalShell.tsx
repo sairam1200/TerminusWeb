@@ -6,15 +6,30 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import type { TerminalAdapter, TerminalViewport } from "../terminal/adapter";
+import type {
+  TerminalAdapter,
+  TerminalConnectionState,
+  TerminalViewport,
+} from "../terminal/adapter";
 import { MockTerminalAdapter } from "../terminal/mockTerminalAdapter";
 import {
   ProtocolTerminalAdapter,
   type ProtocolTerminalAdapterConfig,
 } from "../terminal/protocolTerminalAdapter";
+import {
+  type ConnectionMode,
+  type ConnectProfile,
+  persistConnectState,
+  profileLabel,
+  readPersistedConnectState,
+  resolveProfiles,
+  selectInitialProfile,
+} from "../protocol/connectConfig";
 
 const MOBILE_KEYS = [
   { label: "Escape", value: "\u001b" },
@@ -37,26 +52,68 @@ function measureViewport(element: HTMLElement): TerminalViewport {
   };
 }
 
+function sameProfile(a?: ConnectProfile, b?: ConnectProfile): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    a.mode === b.mode &&
+    a.endpoint === b.endpoint &&
+    a.expectedWebOrigin === b.expectedWebOrigin
+  );
+}
+
+function toPersistedState(
+  profiles: ConnectProfile[],
+  selectedMode: ConnectionMode,
+) {
+  return { selectedMode, profiles };
+}
+
+function normalizeProtocolConfig(
+  protocolConfig: Pick<
+    ProtocolTerminalAdapterConfig,
+    "endpoint" | "expectedWebOrigin" | "mode"
+  >,
+  fallbackMode: ConnectionMode | undefined,
+): ConnectProfile {
+  return {
+    endpoint: protocolConfig.endpoint,
+    expectedWebOrigin: protocolConfig.expectedWebOrigin,
+    mode: protocolConfig.mode ?? fallbackMode ?? "private",
+  };
+}
+
 export interface TerminalShellProps {
-  adapterFactory?: () => TerminalAdapter;
+  adapterFactory?: (profile?: ConnectProfile) => TerminalAdapter;
+  protocolProfiles?: ConnectProfile[];
   protocolConfig?: Pick<
     ProtocolTerminalAdapterConfig,
-    "endpoint" | "expectedWebOrigin"
+    "endpoint" | "expectedWebOrigin" | "mode"
   >;
+  defaultMode?: ConnectionMode;
+}
+
+function initialProfileFromConfig(
+  protocolConfig: TerminalShellProps["protocolConfig"],
+  resolvedProfiles: ConnectProfile[],
+  defaultMode: ConnectionMode | undefined,
+) {
+  if (protocolConfig !== undefined) {
+    return normalizeProtocolConfig(
+      protocolConfig,
+      resolvedProfiles[0]?.mode ?? defaultMode,
+    );
+  }
+  const saved = readPersistedConnectState();
+  return selectInitialProfile(resolvedProfiles, saved?.selectedMode, defaultMode);
 }
 
 export function TerminalShell({
   adapterFactory,
+  protocolProfiles = [],
   protocolConfig,
+  defaultMode,
 }: TerminalShellProps) {
-  const [adapter] = useState<TerminalAdapter>(() =>
-    adapterFactory !== undefined
-      ? adapterFactory()
-      : protocolConfig !== undefined
-        ? new ProtocolTerminalAdapter(protocolConfig)
-        : new MockTerminalAdapter(),
-  );
-  const [connectionState, setConnectionState] = useState(adapter.getState());
+  const selectId = useId();
   const [markers, setMarkers] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [pairingCode, setPairingCode] = useState("");
@@ -67,8 +124,83 @@ export function TerminalShell({
   const [orientation, setOrientation] = useState<"portrait" | "landscape">(
     "landscape",
   );
+
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const activeProfileRef = useRef<ConnectProfile | undefined>(undefined);
+
+  const resolvedProfiles = useMemo(() => {
+    const saved = readPersistedConnectState();
+    return resolveProfiles(protocolProfiles, saved);
+  }, [protocolProfiles]);
+
+  const controlledProfile = useMemo(() => {
+    if (protocolConfig === undefined) return undefined;
+    return normalizeProtocolConfig(protocolConfig, defaultMode);
+  }, [protocolConfig, defaultMode]);
+
+  const initialProfile = useMemo(
+    () => initialProfileFromConfig(protocolConfig, resolvedProfiles, defaultMode),
+    [protocolConfig, resolvedProfiles, defaultMode],
+  );
+
+  const [selectedProfile, setSelectedProfile] =
+    useState<ConnectProfile | undefined>(initialProfile);
+
+  const profileForClient = controlledProfile ?? selectedProfile;
+
+  const createAdapter = useCallback(
+    (profile?: ConnectProfile): TerminalAdapter => {
+      if (adapterFactory !== undefined) {
+        return adapterFactory(profile);
+      }
+      if (profile === undefined) {
+        return new MockTerminalAdapter();
+      }
+      return new ProtocolTerminalAdapter({
+        endpoint: profile.endpoint,
+        expectedWebOrigin: profile.expectedWebOrigin,
+        mode: profile.mode,
+      });
+    },
+    [adapterFactory],
+  );
+
+  const [adapter, setAdapter] = useState<TerminalAdapter>(() =>
+    createAdapter(profileForClient),
+  );
+  const [connectionState, setConnectionState] =
+    useState<TerminalConnectionState>(adapter.getState());
+
+  useEffect(() => {
+    activeProfileRef.current = profileForClient;
+  }, [profileForClient]);
+
+  useEffect(() => {
+    if (sameProfile(activeProfileRef.current, profileForClient)) return;
+
+    const previous = adapter;
+    const next = createAdapter(profileForClient);
+    activeProfileRef.current = profileForClient;
+    if (controlledProfile === undefined && profileForClient !== undefined) {
+      persistConnectState(
+        toPersistedState(resolvedProfiles, profileForClient.mode),
+      );
+    }
+
+    setMarkers([]);
+    setPairingCode("");
+    setInput("");
+    setConnectionState(next.getState());
+    setAdapter(next);
+    void previous.disconnect();
+  }, [
+    adapter,
+    controlledProfile,
+    createAdapter,
+    profileForClient,
+    resolvedProfiles,
+  ]);
 
   useEffect(() => {
     const unsubscribeState = adapter.subscribe(setConnectionState);
@@ -84,8 +216,10 @@ export function TerminalShell({
   }, [adapter]);
 
   useEffect(() => {
-    if (adapter.kind !== "protocol-client" || adapter.detach === undefined)
+    if (adapter.kind !== "protocol-client" || adapter.detach === undefined) {
       return;
+    }
+
     const detach = adapter.detach.bind(adapter);
     const visibilityChanged = () => {
       if (
@@ -100,9 +234,11 @@ export function TerminalShell({
         void adapter.connect();
       }
     };
+
     document.addEventListener("visibilitychange", visibilityChanged);
-    return () =>
+    return () => {
       document.removeEventListener("visibilitychange", visibilityChanged);
+    };
   }, [adapter]);
 
   useEffect(() => {
@@ -144,7 +280,9 @@ export function TerminalShell({
 
   const send = useCallback(
     (value: string) => {
-      if (connectionState !== "connected" || value.length === 0) return;
+      if (connectionState !== "connected" || value.length === 0) {
+        return;
+      }
       adapter.sendInput(value);
     },
     [adapter, connectionState],
@@ -187,6 +325,14 @@ export function TerminalShell({
     }
   };
 
+  const setMode = (mode: ConnectionMode) => {
+    if (controlledProfile !== undefined) return;
+    const next = resolvedProfiles.find((profile) => profile.mode === mode);
+    if (next === undefined || sameProfile(next, selectedProfile)) return;
+    setSelectedProfile(next);
+  };
+
+  const selectedMode = profileForClient?.mode;
   const connected = connectionState === "connected";
   const protocolClient = adapter.kind === "protocol-client";
   const busy = [
@@ -198,11 +344,27 @@ export function TerminalShell({
     "closing",
   ].includes(connectionState);
 
+  const connectButtonLabel = protocolClient
+    ? selectedMode === "local"
+      ? "Connect locally"
+      : "Connect privately"
+    : "Start simulation";
+  const retryButtonLabel = protocolClient
+    ? selectedMode === "local"
+      ? "Retry local connection"
+      : "Retry private connection"
+    : "Retry simulation";
+  const headerModeLabel = protocolClient
+    ? selectedMode === "local"
+      ? "Local terminal"
+      : "Private path terminal"
+    : "Terminal simulation";
+
   return (
     <main className="workspace">
       <header className="appHeader">
         <div>
-          <p className="eyebrow">Private path terminal</p>
+          <p className="eyebrow">{headerModeLabel}</p>
           <h1>Terminus</h1>
         </div>
         <span className="prototypeBadge">Personal prototype</span>
@@ -213,6 +375,25 @@ export function TerminalShell({
           <div>
             <h2 id="terminal-heading">Terminal workspace</h2>
             <p className="adapterLabel">{adapter.label}</p>
+            {resolvedProfiles.length > 1 && selectedMode !== undefined && (
+              <label>
+                Connection mode
+                <select
+                  id={selectId}
+                  value={selectedMode}
+                  onChange={(event) =>
+                    setMode(event.currentTarget.value as ConnectionMode)
+                  }
+                  disabled={protocolConfig !== undefined}
+                >
+                  {resolvedProfiles.map((profile) => (
+                    <option key={profile.mode} value={profile.mode}>
+                      {profileLabel(profile)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <div className="connectionActions">
             <p
@@ -257,18 +438,20 @@ export function TerminalShell({
               <button
                 className="primaryButton"
                 type="button"
-                disabled={busy}
+                disabled={
+                  busy ||
+                  (protocolClient &&
+                    adapterFactory === undefined &&
+                    profileForClient === undefined) ||
+                  (protocolClient &&
+                    adapterFactory === undefined &&
+                    resolvedProfiles.length === 0)
+                }
                 onClick={() => void connect()}
               >
-                {connectionState === "detached"
-                  ? "Reconnect"
-                  : connectionState === "error"
-                    ? protocolClient
-                      ? "Retry private connection"
-                      : "Retry simulation"
-                    : protocolClient
-                      ? "Connect privately"
-                      : "Start simulation"}
+                {connectionState === "error"
+                  ? retryButtonLabel
+                  : connectButtonLabel}
               </button>
             )}
           </div>
@@ -280,7 +463,7 @@ export function TerminalShell({
           role="log"
           aria-label={
             protocolClient
-              ? "Private terminal output"
+              ? "Protocol terminal output"
               : "Simulated terminal output"
           }
           aria-live="polite"
@@ -302,6 +485,11 @@ export function TerminalShell({
           {!connected && !protocolClient && (
             <p className="terminalHint">
               Start the local simulation to exercise the interface.
+            </p>
+          )}
+          {protocolClient && connectionState === "disconnected" && (
+            <p className="terminalHint">
+              Select a mode and open the connection to continue.
             </p>
           )}
         </div>
@@ -379,10 +567,12 @@ export function TerminalShell({
               placeholder={
                 connected
                   ? protocolClient
-                    ? "Send input directly to the private agent"
+                    ? selectedMode === "local"
+                      ? "Send input to the local terminal"
+                      : "Send input directly to the private agent"
                     : "Input is acknowledged, never executed"
                   : protocolClient
-                    ? "Private terminal is disconnected"
+                    ? "Terminal is disconnected"
                     : "Simulation is disconnected"
               }
               onChange={(event) => setInput(event.target.value)}
@@ -403,7 +593,9 @@ export function TerminalShell({
       <footer>
         <p>
           {protocolClient
-            ? "Terminal traffic connects directly to the configured private agent."
+            ? selectedMode === "local"
+              ? "Terminal traffic connects directly to the configured local endpoint on this machine."
+              : "Terminal traffic connects directly to the configured private endpoint."
             : "Terminal traffic is not routed through this web scaffold."}
         </p>
       </footer>

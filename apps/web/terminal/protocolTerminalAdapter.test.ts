@@ -20,6 +20,53 @@ const challenge = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8";
 const sessionId = "60000000-0000-4000-8000-000000000001";
 
 describe("ProtocolTerminalAdapter", () => {
+  it("labels and validates local and private modes distinctly", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const privateSockets: MockWebSocket[] = [];
+    const localSockets: MockWebSocket[] = [];
+    const privateAdapter = createAdapter(store, privateSockets);
+    const localAdapter = createAdapter(
+      store,
+      localSockets,
+      undefined,
+      undefined,
+      "local",
+      "wss://127.0.0.1:4176/terminal",
+      "http://127.0.0.1:4176",
+      "http://127.0.0.1:4176",
+    );
+
+    expect(privateAdapter.label).toContain("PRIVATE WSS | PROTOCOL 0.1");
+    expect(localAdapter.label).toContain("LOCAL WSS | PROTOCOL 0.1");
+  });
+
+  it("rejects malformed local destination before opening the transport", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    expect(() =>
+      createAdapter(
+        store,
+        sockets,
+        undefined,
+        undefined,
+        "local",
+        "wss://agent.public.invalid/terminal",
+        "https://127.0.0.1:4176",
+        "https://127.0.0.1:4176",
+      ),
+    ).toThrow();
+  });
+
   it("authenticates, opens, exchanges IO/resize/heartbeat, detaches, resumes, and closes", async () => {
     const store = new MemoryCredentialStore(cryptoProvider, () => now);
     await store.saveCredential(
@@ -417,13 +464,18 @@ function createAdapter(
   sockets: MockWebSocket[],
   monotonicNow?: () => number,
   wallNow: () => number = () => now,
+  mode: "private" | "local" = "private",
+  destination = endpoint,
+  origin = webOrigin,
+  expectedOrigin = webOrigin,
 ) {
   return new ProtocolTerminalAdapter({
-    endpoint,
-    expectedWebOrigin: webOrigin,
+    endpoint: destination,
+    expectedWebOrigin: expectedOrigin,
+    mode,
     credentialStore: store,
     cryptoProvider,
-    getCurrentOrigin: () => webOrigin,
+    getCurrentOrigin: () => origin,
     monotonicNow,
     now: wallNow,
     webSocketFactory: (url, subprotocol) => {

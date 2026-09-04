@@ -1,11 +1,18 @@
 import { TerminalShell } from "../components/TerminalShell";
+import {
+  buildConnectProfilesFromEnv,
+  parseDefaultMode,
+} from "../protocol/connectConfig";
 
 export default function Home() {
-  const endpoint = process.env.NEXT_PUBLIC_TERMINUS_WSS_ENDPOINT;
-  const expectedWebOrigin = process.env.NEXT_PUBLIC_TERMINUS_WEB_ORIGIN;
-  const protocolConfig =
-    endpoint !== undefined && expectedWebOrigin !== undefined
-      ? { endpoint, expectedWebOrigin }
-      : undefined;
-  return <TerminalShell protocolConfig={protocolConfig} />;
+  const connectProfiles = buildConnectProfilesFromEnv();
+  const defaultMode = parseDefaultMode(
+    process.env.NEXT_PUBLIC_TERMINUS_CONNECT_MODE,
+  );
+  return (
+    <TerminalShell
+      protocolProfiles={connectProfiles}
+      defaultMode={defaultMode}
+    />
+  );
 }

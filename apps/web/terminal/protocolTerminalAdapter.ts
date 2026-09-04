@@ -21,7 +21,7 @@ import {
   type StoredCredential,
 } from "../protocol/credentialStore";
 import {
-  validatePrivateWssPolicy,
+  validateWssPolicy,
   type PrivateWssPolicy,
 } from "../protocol/endpointPolicy";
 import type { ProtocolErrorCode, ProtocolFrame } from "../protocol/types";
@@ -55,6 +55,7 @@ export interface WebSocketPort {
 }
 
 export interface ProtocolTerminalAdapterConfig extends PrivateWssPolicy {
+  mode?: PrivateWssPolicy["mode"];
   credentialStore?: CredentialStore;
   cryptoProvider?: Crypto;
   getCurrentOrigin?: () => string;
@@ -127,13 +128,24 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     this.now = config.now ?? Date.now;
     this.monotonicNow =
       config.monotonicNow ?? (() => globalThis.performance.now());
-    this.policy = validatePrivateWssPolicy(config, this.getCurrentOrigin());
+    this.policy = validateWssPolicy(
+      {
+        endpoint: config.endpoint,
+        expectedWebOrigin: config.expectedWebOrigin,
+        mode: config.mode,
+      },
+      this.getCurrentOrigin(),
+    );
     this.credentialStore = config.credentialStore;
     this.webSocketFactory =
       config.webSocketFactory ??
       ((url, subprotocol) =>
         new WebSocket(url, subprotocol) as unknown as WebSocketPort);
-    this.label = `PRIVATE WSS · PROTOCOL 0.1 · ${new URL(this.policy.endpoint).host}`;
+    const modeLabel =
+      this.policy.mode === "local" ? "LOCAL WSS" : "PRIVATE WSS";
+    this.label = `${modeLabel} | PROTOCOL 0.1 | ${new URL(
+      this.policy.endpoint,
+    ).host}`;
   }
 
   async connect(options: TerminalConnectOptions = {}): Promise<void> {
