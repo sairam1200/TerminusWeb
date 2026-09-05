@@ -16,7 +16,7 @@ describe("private WSS endpoint policy", () => {
       endpoint: "wss://agent.private.invalid/terminal",
       expectedWebOrigin: "https://preview.example.invalid",
       cspSource: "wss://agent.private.invalid",
-      subprotocol: "terminus.v0_1",
+      subprotocol: "terminus.v0_2",
     });
   });
 

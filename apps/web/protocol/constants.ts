@@ -1,7 +1,7 @@
 export const PROTOCOL_SOURCE_COMMIT =
-  "910b69e24f464bb3e89152f3e5881beb9b706b76";
-export const PROTOCOL_VERSION = "0.1" as const;
-export const PROTOCOL_SUBPROTOCOL = "terminus.v0_1" as const;
+  "f9a70299974734c3eeb920697d2dfa4717148a9a";
+export const PROTOCOL_VERSION = "0.2" as const;
+export const PROTOCOL_SUBPROTOCOL = "terminus.v0_2" as const;
 export const MAX_FRAME_BYTES = 65_536;
 export const MAX_OUTBOUND_BUFFERED_BYTES = MAX_FRAME_BYTES;
 export const MAX_TERMINAL_INPUT_BYTES = 16_384;
@@ -21,13 +21,14 @@ export const PROTOCOL_ERROR_CODES = [
   "PAYLOAD_TOO_LARGE",
   "SEQUENCE_REPLAY",
   "SEQUENCE_GAP",
+  "OUTPUT_OFFSET_INVALID",
   "INVALID_STATE",
   "DIRECTION_VIOLATION",
   "ORIGIN_REJECTED",
   "PAIRING_FAILED",
   "AUTHENTICATION_FAILED",
   "AUTHORIZATION_EXPIRED",
-  "RESUME_REJECTED",
+  "SESSION_REOPEN_REJECTED",
   "HELLO_TIMEOUT",
   "HEARTBEAT_TIMEOUT",
   "SESSION_OPEN_FAILED",
@@ -44,14 +45,17 @@ export const PROTOCOL_MESSAGE_TYPES = [
   "auth_result",
   "open_session",
   "session_opened",
+  "reopen_session",
+  "session_reopened",
+  "history_begin",
+  "history_chunk",
+  "history_end",
   "terminal_input",
   "terminal_output",
   "resize",
   "heartbeat",
   "detach",
   "session_detached",
-  "resume_session",
-  "session_resumed",
   "close_session",
   "session_closed",
   "error",
