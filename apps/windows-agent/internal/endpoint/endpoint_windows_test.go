@@ -127,9 +127,9 @@ func waitNoActiveSession(t *testing.T, endpoint *Endpoint) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		endpoint.sessions.mu.Lock()
-		active := endpoint.sessions.active
+		active := len(endpoint.sessions.active)
 		endpoint.sessions.mu.Unlock()
-		if active == nil {
+		if active == 0 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

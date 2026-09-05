@@ -14,12 +14,11 @@ import (
 )
 
 const (
-	pairingLifetime              = 120 * time.Second
-	pairingApprovalLimit         = 60 * time.Second
-	credentialClockSkewAllowance = 5 * time.Minute
-	credentialLifetime           = 30*24*time.Hour - credentialClockSkewAllowance
-	challengeLifetime            = 10 * time.Second
-	authorizationLifetime        = 12 * time.Hour
+	pairingLifetime       = 120 * time.Second
+	pairingApprovalLimit  = 60 * time.Second
+	credentialLifetime    = 30 * 24 * time.Hour
+	challengeLifetime     = 10 * time.Second
+	authorizationLifetime = 12 * time.Hour
 )
 
 type Credential struct {

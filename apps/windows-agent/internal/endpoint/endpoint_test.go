@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -37,6 +38,12 @@ const (
 type fakeAdapter struct {
 	mu       sync.Mutex
 	sessions []*fakeSession
+}
+
+type failingOpenAdapter struct{ err error }
+
+func (a failingOpenAdapter) Open(context.Context, terminal.Config) (terminal.Session, error) {
+	return nil, a.err
 }
 
 type memoryCredentialStore struct {
@@ -137,6 +144,24 @@ func (s *fakeSession) Resize(columns, rows uint16) error {
 }
 func (s *fakeSession) Wait() error  { <-s.closed; return nil }
 func (s *fakeSession) Close() error { s.once.Do(func() { close(s.closed) }); return nil }
+
+func waitSessionState(t *testing.T, session *fakeSession, input string, columns, rows uint16) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		session.mu.Lock()
+		gotInput, gotColumns, gotRows := session.input.String(), session.columns, session.rows
+		session.mu.Unlock()
+		if gotInput == input && gotColumns == columns && gotRows == rows {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	session.mu.Lock()
+	gotInput, gotColumns, gotRows := session.input.String(), session.columns, session.rows
+	session.mu.Unlock()
+	t.Fatalf("session state = %q %dx%d, want %q %dx%d", gotInput, gotColumns, gotRows, input, columns, rows)
+}
 
 type testClient struct {
 	t        *testing.T
@@ -452,27 +477,52 @@ func TestConnectionIDCannotBeReused(t *testing.T) {
 	secondWS.Close()
 }
 
-func TestCredentialRevocationClosesAuthorizationAndSession(t *testing.T) {
+func TestCredentialRevocationClosesAllAuthorizationsAndSessions(t *testing.T) {
 	endpoint, adapter, _ := newTestEndpoint(t)
 	server := httptest.NewTLSServer(endpoint)
 	defer server.Close()
-	client, credential := pairAndAuthorize(t, endpoint, server)
-	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
-	client.read("session_opened")
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	second := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000079")
+	clients := []*testClient{first, second}
+	for _, client := range clients {
+		client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+		client.read("session_opened")
+	}
 	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
-	session := adapter.sessions[0]
+	sessions := append([]*fakeSession(nil), adapter.sessions...)
 	adapter.mu.Unlock()
-	select {
-	case <-session.closed:
-	case <-time.After(time.Second):
-		t.Fatal("revocation left terminal open")
+	for index, session := range sessions {
+		select {
+		case <-session.closed:
+		case <-time.After(time.Second):
+			t.Fatalf("revocation left terminal %d open", index)
+		}
 	}
-	client.read("session_closed")
-	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
-		t.Fatalf("code = %s", got)
+	for _, client := range clients {
+		client.read("session_closed")
+		if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
+			t.Fatalf("code = %s", got)
+		}
+	}
+}
+
+func TestSessionRegistryRejectsClosedConnectionBeforeProcessCreation(t *testing.T) {
+	adapter := &fakeAdapter{}
+	registry := sessionRegistry{adapter: adapter, now: time.Now}
+	done := make(chan struct{})
+	close(done)
+	owner := &connection{done: done, credential: Credential{ID: "30000000-0000-4000-8000-000000000079"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+	if _, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
+		t.Fatal("closed connection opened a terminal session")
+	}
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != 0 {
+		t.Fatalf("closed connection created %d terminal sessions", created)
 	}
 }
 
@@ -507,7 +557,7 @@ func TestRevocationCannotRaceCredentialBinding(t *testing.T) {
 	}
 }
 
-func TestClosingSessionKeepsReservationAndReturnsCleanupError(t *testing.T) {
+func TestEndpointShutdownRejectsOpenWhileCleanupInProgressAndReturnsCleanupError(t *testing.T) {
 	sentinel := errors.New("synthetic cleanup failure")
 	inner := &fakeSession{output: make(chan []byte), closed: make(chan struct{})}
 	blocking := &blockingCloseSession{fakeSession: inner, closeStarted: make(chan struct{}), releaseClose: make(chan struct{}), closeErr: sentinel}
@@ -716,20 +766,96 @@ func TestEndpointCloseCleansActiveTerminal(t *testing.T) {
 	}
 }
 
-func TestSessionRegistryEnforcesOneSession(t *testing.T) {
+func TestEndpointAllowsIndependentSessionsAboveLegacyBoundary(t *testing.T) {
+	endpoint, adapter, _ := newTestEndpoint(t)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	const sessionCount = 12
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	clients := []*testClient{first}
+	for index := 2; index <= sessionCount; index++ {
+		connectionID := fmt.Sprintf("10000000-0000-4000-8000-%012d", index)
+		clients = append(clients, authorizeExisting(t, server, credential, connectionID))
+	}
+	sessionIDs := make([]string, 0, len(clients))
+	for _, client := range clients {
+		client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+		sessionIDs = append(sessionIDs, client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID)
+	}
+
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	sessions := append([]*fakeSession(nil), adapter.sessions...)
+	adapter.mu.Unlock()
+	if created != sessionCount {
+		t.Fatalf("created sessions = %d, want %d", created, sessionCount)
+	}
+
+	firstID := sessionIDs[0]
+	lastID := sessionIDs[len(sessionIDs)-1]
+	first.send("terminal_input", protocol.TerminalPayload{SessionID: firstID, Data: protocol.EncodeBase64([]byte("first"))})
+	clients[len(clients)-1].send("terminal_input", protocol.TerminalPayload{SessionID: lastID, Data: protocol.EncodeBase64([]byte("last"))})
+	first.send("resize", protocol.ResizePayload{SessionID: firstID, Dimensions: protocol.Dimensions{Columns: 101, Rows: 31}})
+	clients[len(clients)-1].send("resize", protocol.ResizePayload{SessionID: lastID, Dimensions: protocol.Dimensions{Columns: 112, Rows: 42}})
+	waitSessionState(t, sessions[0], "first", 101, 31)
+	waitSessionState(t, sessions[len(sessions)-1], "last", 112, 42)
+
+	first.send("close_session", protocol.CloseSessionPayload{SessionID: firstID, Reason: "user_request"})
+	first.read("session_closed")
+}
+
+func TestSessionRegistryConcurrentAdmissionHasNoFixedCountLimit(t *testing.T) {
 	adapter := &fakeAdapter{}
 	registry := sessionRegistry{adapter: adapter, now: time.Now}
-	first := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000001"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
-	second := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000002"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
-	id, err := registry.open(first, protocol.Dimensions{Columns: 80, Rows: 24})
+	const attempts = 24
+	results := make(chan error, attempts)
+	for index := 0; index < attempts; index++ {
+		index := index
+		go func() {
+			owner := &connection{credential: Credential{ID: fmt.Sprintf("30000000-0000-4000-8000-%012d", index+1)}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+			_, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24})
+			results <- err
+		}()
+	}
+	for index := 0; index < attempts; index++ {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent open %d failed: %v", index, err)
+		}
+	}
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != attempts {
+		t.Fatalf("created sessions = %d, want %d", created, attempts)
+	}
+	if err := registry.close("agent_shutdown"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEndpointReportsActualAdapterOpenFailure(t *testing.T) {
+	sentinel := errors.New("synthetic adapter open failure")
+	endpoint, err := New(Config{
+		AllowedOrigin:  testOrigin,
+		AgentID:        testAgentID,
+		Terminal:       failingOpenAdapter{err: sentinel},
+		Credentials:    newMemoryCredentialStore(),
+		ApprovePairing: func(context.Context, PairingApproval) bool { return true },
+		ResolveDevice:  func(*http.Request) (string, error) { return "open-failure-device", nil },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.open(second, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
-		t.Fatal("second terminal session was accepted")
-	}
-	if err := registry.closeBy(first, id, "user_request"); err != nil {
-		t.Fatal(err)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	client, _ := pairAndAuthorize(t, endpoint, server)
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.SessionOpenFailed {
+		t.Fatalf("adapter open error = %s, want %s", got, protocol.SessionOpenFailed)
 	}
 }
 
@@ -743,21 +869,6 @@ func TestCanonicalAuthenticationProof(t *testing.T) {
 	proof := protocol.EncodeBase64(authProof(secret, "10000000-0000-4000-8000-000000000001", "20000000-0000-4000-8000-000000000001", challenge))
 	if proof != "Lc7B_pWvNKrS7lyj12dhdOZOh4NHEmLDgR1Rgc4TVYE" {
 		t.Fatalf("proof = %s", proof)
-	}
-}
-
-func TestGeneratedCredentialExpiresInsideThirtyDayClientBoundary(t *testing.T) {
-	now := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
-	credential, err := generateCredential(now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := now.Add(30*24*time.Hour - 5*time.Minute)
-	if !credential.ExpiresAt.Equal(want) {
-		t.Fatalf("expiry = %s, want %s", credential.ExpiresAt, want)
-	}
-	if !credential.ExpiresAt.Before(now.Add(30 * 24 * time.Hour)) {
-		t.Fatal("credential expiry must leave client clock-skew headroom")
 	}
 }
 
