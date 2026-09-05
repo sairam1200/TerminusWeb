@@ -17,3 +17,49 @@ Session 01 owns this file. Other sessions submit proposed corrections through `c
 - Browser private-network compatibility matrix for the chosen Tailscale Serve endpoint.
 - Windows packaging, code-signing, and update mechanism.
 - Commercial Tailscale integration/licensing model.
+
+## Authorized private integration bootstrap (2026-08-26)
+
+- The user authorized a Preview-only deployment of the exact Session 02 branch
+  tip `d479f5b3f058d01dccc3258e6c50bb7d1865e52e` to GitHub/Vercel, with
+  `apps/web` as the Vercel Root Directory. Production promotion, `main`
+  integration, public exposure, DNS changes, and final release remain
+  unauthorized.
+- The user authorized one personal-test private raw-TCP Serve mapping for
+  `sai.tailf8dcea.ts.net:443` to a Session 03 loopback port, with Funnel,
+  HTTPS/TLS-terminating Serve, LAN/public binds, SSH/RDP, grant broadening,
+  and terminal proxying through Vercel explicitly disallowed.
+- This authorization freezes `sai.tailf8dcea.ts.net` as the target hostname for
+  this run. Session 06 reported a conflicting `sai.tail98bed6.ts.net`
+  observation; that conflict must be rechecked in the live environment and
+  must not be silently substituted.
+- Private certificate/key files and PFX passwords remain out-of-band. The
+  browser leaf must have explicit Client Authentication EKU
+  `1.3.6.1.5.5.7.3.2` before live verification. Session 03 owns host startup,
+  Session 05 owns Serve/private-path controls, and Session 06 owns independent
+  verification.
+- Session 02 confirmed the exact branch tip on GitHub, but Vercel's first
+  deployment of the newly created empty project was automatically classified
+  as Production and was deleted. The current authorization does not permit a
+  temporary Production-classified bootstrap; an already-initialized Preview
+  project or a separately authorized platform decision is required before an
+  exact HTTPS Origin can be frozen.
+
+## No fixed browser-tab session cap decision (2026-08-29; supersedes 2026-08-27)
+
+- The user requires each authenticated Chrome tab to own an independent
+  non-elevated PowerShell/ConPTY session.
+- Protocol 0.1 and the Windows agent application policy impose no fixed numeric
+  maximum on concurrent terminal sessions across connections. A valid
+  authenticated request is not rejected solely because other sessions exist;
+  the agent attempts terminal creation unless shutdown has begun.
+- Each WebSocket still carries at most one session. Protocol 0.1 does not add
+  multiplexing, new frames, fields, or error codes; the existing
+  `SESSION_OPEN_FAILED` result is preserved for genuine adapter `Open`, ConPTY,
+  system resource, or shutdown failures.
+- Open, detached, and resuming sessions remain independently accounted for
+  until deterministic cleanup completes, but accounting does not reserve a
+  fixed-capacity slot. Per-session backpressure bounds, pairing, mTLS,
+  authentication, authorization, exact Origin validation, expiry, credential
+  revocation, private listener scope, and Funnel-disabled requirements remain
+  unchanged.

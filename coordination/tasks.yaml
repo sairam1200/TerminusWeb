@@ -7,14 +7,14 @@ state_semantics:
 tasks:
   - id: S01-001
     owner: session_01
-    state: ready
+    state: done
     title: Freeze protocol and security contract version 0.1
     depends_on: []
     evidence: Versioned schemas, state machine, fixtures, and rejection cases.
 
   - id: S02-001
     owner: session_02
-    state: ready
+    state: done
     title: Scaffold responsive Next.js PWA and terminal adapter boundary
     depends_on: []
     evidence: Build, typecheck, component tests, and mock adapter clearly labelled.
@@ -23,33 +23,33 @@ tasks:
     owner: session_02
     state: blocked
     title: Integrate browser terminal with protocol 0.1
-    depends_on: [S01-001, S02-001]
+    depends_on: [S01-001, S02-001, S03-004, S05-005, S05-006, S06-004]
     evidence: Shared fixtures pass and malformed frames fail closed.
 
   - id: S03-001
     owner: session_03
-    state: ready
+    state: done
     title: Prove non-elevated local ConPTY lifecycle behind an internal adapter
     depends_on: []
     evidence: Windows test output for open, input/output, resize, close, timeout, and cleanup.
 
   - id: S03-002
     owner: session_03
-    state: blocked
+    state: done
     title: Implement private WSS protocol 0.1 endpoint
     depends_on: [S01-001, S03-001]
     evidence: Contract fixtures, origin checks, auth rejection, and listener-scope proof.
 
   - id: S04-001
     owner: session_04
-    state: ready
+    state: done
     title: Define control-plane domain model and API contract without terminal relay
     depends_on: []
     evidence: Schema, tenant isolation invariants, lease boundaries, and API tests.
 
   - id: S05-001
     owner: session_05
-    state: ready
+    state: done
     title: Produce threat model and proposed deny-by-default Tailscale policy
     depends_on: []
     evidence: Threat cases, allowed/denied matrix, rollback plan, and no live mutation.
@@ -63,14 +63,14 @@ tasks:
 
   - id: S05-003
     owner: session_05
-    state: blocked
+    state: done
     title: Review control-plane tenancy and authorization contract
     depends_on: [S04-001]
     evidence: Cross-tenant and privilege-escalation contract findings with reproducible cases.
 
   - id: S06-001
     owner: session_06
-    state: ready
+    state: done
     title: Create independent contract and browser verification harness
     depends_on: []
     evidence: Tests initially run against labelled test doubles and define real-integration switch.
@@ -81,6 +81,102 @@ tasks:
     title: Verify first end-to-end private terminal vertical slice
     depends_on: [S01-001, S02-002, S03-002, S05-002, S06-001]
     evidence: Exact task commit SHAs, allowed and denied paths, browser matrix, logs, and pre-integration pass/fail report.
+
+  - id: S04-002
+    owner: session_04
+    state: done
+    title: Remediate control-plane identity binding and final-owner invariants
+    depends_on: [S04-001, S05-003]
+    evidence: All seven S05-003 findings fixed with fail-closed authorization inputs, tenant-scoped pairing binding, transactional/database final-owner protection, and regression/concurrency tests.
+
+  - id: S05-004
+    owner: session_05
+    state: done
+    title: Re-review control-plane remediation and final-owner invariants
+    depends_on: [S04-002]
+    evidence: Independent exact-commit re-review reproduces no S05-003 fail-open findings and passes stale/concurrent owner-revocation checks.
+
+  - id: S03-003
+    owner: session_03
+    state: done
+    title: Build runnable non-elevated integration host around private WSS library
+    depends_on: [S03-002]
+    evidence: Windows-protected credential storage, private-device resolution, mandatory local approval, loopback-only TLS listener, bounded lifecycle/reset/health commands, positive and denied endpoint paths, cleanup and secret-safe logs, exact product and reviewer commits.
+
+  - id: S05-005
+    owner: session_05
+    state: blocked
+    title: Review TLS/private publication design and prove private-only access
+    depends_on: [S03-004, S05-001]
+    evidence: Read-only exact-design review explicitly deciding Tailscale Serve TLS termination versus raw-TCP/passthrough for end-to-end browser mTLS, then proving intended private access, denied LAN/public access, existing browser/OS certificate trust, Funnel disabled, and separation of Tailscale policy from application pairing/authentication; no live mutation.
+
+  - id: S03-004
+    owner: session_03
+    state: blocked
+    title: Run the authorized private integration host with supplied trusted inputs
+    depends_on: [S03-003, S06-004]
+    requires_user_authorization: true
+    evidence: Non-elevated Windows host wiring using externally supplied trusted server certificate/key, client-CA bundle, exact Vercel HTTPS Origin, protected credential storage, private-device resolution, mandatory local approval, loopback-only TLS listener, bounded health/reset/revoke lifecycle, secret-safe logs, and an immutable endpoint-ready response; no certificate generation/installation, Tailscale mutation, Funnel, LAN/public exposure, or deployment.
+
+  - id: S02-003
+    owner: session_02
+    state: review
+    title: Publish the authorized Session 02 source branch for Preview bootstrap
+    depends_on: [S02-001]
+    requires_user_authorization: true
+    evidence: Exact branch tip d479f5b3f058d01dccc3258e6c50bb7d1865e52e is confirmed or pushed to the matching GitHub branch without history rewrite or product changes; remote SHA and command evidence are recorded without credentials.
+
+  - id: S06-004
+    owner: session_06
+    state: blocked
+    title: Bootstrap Preview-only Vercel deployment and freeze HTTPS Origin
+    depends_on: [S02-003, S06-001]
+    requires_user_authorization: true
+    evidence: Preview-only deployment of the exact Session 02 source with Root Directory apps/web; initial WSS endpoint unset; exact final serialized HTTPS Origin recorded, NEXT_PUBLIC_TERMINUS_WEB_ORIGIN set to that origin, and redeployment metadata captured; no production promotion, DNS change, or terminal proxy.
+    blocker: The first deployment of the empty Vercel project was automatically classified Production and deleted; current authorization does not permit retrying or temporarily accepting that classification.
+
+  - id: S05-006
+    owner: session_05
+    state: blocked
+    title: Configure authorized raw-TCP private Serve and prove allowed/denied paths
+    depends_on: [S03-004, S05-001]
+    requires_user_authorization: true
+    evidence: One private raw-TCP Serve mapping from sai.tailf8dcea.ts.net:443 to the exact S03 loopback port, Funnel disabled, no HTTPS/TLS termination or path rewriting, complete pre/post snapshots, one approved private path, denied LAN/public/wrong-device/wrong-Origin/wrong-subprotocol/invalid-client-certificate/Funnel paths, and rollback evidence; no grant broadening or unrelated live mutation.
+
+  - id: S01-004
+    owner: session_01
+    state: done
+    title: Clarify independent browser-tab sessions without a fixed agent cap
+    depends_on: [S01-001]
+    evidence: Contract states one session per authenticated connection, no protocol/application numeric cap, admission until genuine terminal creation failure or shutdown, detached-session accounting, preserved cleanup/backpressure/security boundaries, and no wire-version or schema change.
+
+  - id: S03-005
+    owner: session_03
+    state: done
+    title: Implement independent ConPTY sessions without a fixed agent cap
+    depends_on: [S01-004, S03-003]
+    evidence: Concurrent positive sessions above eight with no count-based rejection, genuine adapter/Open and shutdown failure paths, independent input/resize/close, detach accounting, credential revocation, bounded per-session backpressure, and real Windows process-tree cleanup.
+
+  - id: S02-004
+    owner: session_02
+    state: done
+    title: Explain genuine terminal-creation failure in the terminal UI
+    depends_on: [S01-004, S02-002]
+    evidence: SESSION_OPEN_FAILED presents accessible retry guidance for genuine terminal creation/system failure or shutdown without count-based close-an-earlier-session guidance and without changing authentication or protocol framing.
+
+  - id: S05-007
+    owner: session_05
+    state: ready
+    title: Review uncapped-by-policy multi-session abuse and isolation controls
+    depends_on: [S03-005, S02-004]
+    evidence: Independent review of no fixed admission cap, above-eight isolation, detached accounting, actual resource-exhaustion behavior, per-session backpressure, authentication rate limits, revocation, cleanup, and unchanged private-access boundaries.
+
+  - id: S06-005
+    owner: session_06
+    state: blocked
+    title: Verify above-eight independent terminal behavior
+    depends_on: [S03-005, S02-004, S05-007]
+    evidence: Exact-commit automated and real Chrome proof for more than eight independent sessions with no count-based rejection, genuine open-failure guidance, resize/reconnect, non-elevation, revocation, bounded backpressure, and leak-free cleanup.
 
   - id: S01-002
     owner: session_01

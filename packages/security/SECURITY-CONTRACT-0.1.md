@@ -69,6 +69,19 @@ Canonical proof inputs and outputs are in `auth-vectors-0.1.json`. Implementatio
 
 ## Failure and logging rules
 
+- Terminal process admission has no fixed protocol or application-policy
+  numeric cap across the agent. A valid authenticated and authorized
+  `open_session` is not rejected solely because other sessions exist; the agent
+  attempts contained terminal creation unless shutdown has begun. A genuine
+  adapter `Open`, ConPTY, or system resource failure uses the existing generic
+  `SESSION_OPEN_FAILED` result and does not disclose session identifiers or
+  terminal metadata.
+- Open, detached, and resuming sessions remain independently accounted for
+  until their contained process and ConPTY cleanup completes, but that
+  accounting is not a capacity reservation. Closing, expiry, revocation,
+  connection loss without a valid resume grant, and agent shutdown still
+  deterministically terminate and clean up the affected resources. Per-session
+  bounded outbound queues and `BACKPRESSURE_LIMIT` behavior remain mandatory.
 - Parsing, schema, direction, state, version, size, timing, origin, pairing, authentication, authorization, and replay checks fail closed according to the wire contract.
 - Rate limits are required in addition to high-entropy pairing codes: at most five failed pairing/authentication attempts per source device identity in five minutes, followed by a five-minute monotonic cooldown. Rate-limit metadata contains counts and device/credential identifiers only.
 - Logs and structured errors never contain terminal bytes, commands, clipboard data, pairing codes, credential secrets, proofs, challenges, resume grants, tokens, private keys, WebSocket payloads, or reusable hashes of those values.
