@@ -1,256 +1,108 @@
 # Session 02 Status
 
-- Current task: `S02-005` - Implement remembered session pages and explicit
-  New Session behavior
-- State: owner/reviewer `done`; Session 06 integrated verification remains
-  pending
-- Branch: `session/02-web-renderer`
-- Files changed: Session 02-owned `apps/web/**` protocol consumer, direct
-  adapter, terminal UI/styles, deterministic tests, and evidence report.
-- Commands/evidence: exact protocol 0.2 verifier passed 23 transcripts, 32
-  fixtures, 1 positive auth vector, and 4 negative mutations; focused tests
-  passed 32/32; full web tests passed 60/60 across 9 files; typecheck, lint,
-  targeted Prettier, dependency tree, configured Next.js production build,
-  `git diff --check`, and cumulative `git show --check` passed.
-- Independent reviewer/evidence: `/root/s06_006_origin` reviewed and
-  reproduced exact cumulative product
-  `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9`; PASS with no remaining
-  severity findings. The first review found one Medium New Session retry issue
-  on immutable product `cdde0df`; the cumulative follow-up fixed it without
-  rewriting history and the fresh review closed it.
-- Assumptions: the legacy IndexedDB database name is retained only to reuse the
-  existing non-extractable credential across the wire upgrade; all wire frames,
-  HMAC domain separation, and subprotocol selection are strictly 0.2.
-- Blockers/requests: no owner blocker. Deterministic evidence uses JSDOM, fake
-  IndexedDB, and mock WebSockets; physical mobile browsers and live integrated
-  browser/agent behavior remain Session 06 release gates.
-- Product/task commit:
-  `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9`
-- Handoff commit: resolve from branch HEAD after the status-only handoff commit
+- Current task: `S02-002` — Implement browser protocol client and private WSS behavior
+- State: blocked after the third real-path attempt; trusted certificate/private publication authorization remains absent and is escalated to Session 01. Deterministic Session 02 owner gate remains passed.
+- Branch: `session/02-web`
+- Authoritative queue: latest Session 01 commit `ed4cc9bd6aad6bd36373eeaa36775b1d8df2c397`.
+- Protocol consumed: exact Session 01 product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`, wire version `0.1`, subprotocol `terminus.v0_1`.
 
-## S02-005 remembered-session pages (2026-08-30)
+## Dependency verification
 
-- Authoritative input: queue/request commit
-  `789397bac3c11fed56a1a9a5784fe5ee551138c2`, cumulative protocol/security
-  contract `f9a70299974734c3eeb920697d2dfa4717148a9a`, and Session 01 handoff
-  `14a613b`.
-- Product: immutable implementation commit
-  `cdde0dfbed9cf423c471d4bd0e25a3b9dd672bbe` plus focused review-fix commit
-  `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9`. Integration must consume the
-  cumulative latter SHA.
-- Behavior: exact `terminus.v0_2` transport and 0.2 HMAC domain; canonical
-  `#/s/{id}` fragments; stored-credential same-ID reopen without pairing;
-  clear-before-replay, bounded contiguous history offsets, content-free
-  truncation notice, and fail-closed invalid replay; no terminal persistence;
-  OSC browser-side-effect guards; and accessible responsive New Session UI.
-- New Session: waits for acknowledged old-session closure before a fresh
-  authenticated connection and replaces the fragment only on the new
-  `session_opened`. A close-send rejection restores the still-attached session
-  and contract snapshot for retry. A failed fresh open after acknowledged close
-  retains the old fragment visually but Retry opens a fresh root rather than
-  targeting the destroyed ID.
-- Owner validation: focused Vitest 32/32; full Vitest 60/60 in 9 files;
-  protocol 0.2 verifier 23 transcripts/32 fixtures/auth vectors; typecheck,
-  lint, targeted Prettier, dependency tree, configured Next 16.3.3 build,
-  diff/show checks all PASS. Repository-wide `format:check` retains a baseline
-  failure on 19 untouched files; no cumulative S02-005 file is listed.
-- Independent review: `/root/s06_006_origin` personally reproduced the focused
-  and full tests, typecheck, lint, targeted formatting, configured build,
-  protocol verifier, CSP, scope, and clean-tree checks on exact cumulative
-  `d8a9b52`; final verdict PASS, no remaining findings. The throwing-WebSocket
-  rollback was statically reviewed; the deterministic retry regression drives
-  the explicit backpressure rejection boundary.
-- Scope/limitations: no contract, backend, Windows-agent, certificate,
-  Tailscale, browser, deployment, push, or live endpoint state was mutated.
-  Automated results do not claim physical browser or live integration proof.
+- `S01-001`: owner `session-01`; authoritative state `done`; exact product commit `910b69e24f464bb3e89152f3e5881beb9b706b76`. Its status records an independent PASS and the frozen schema, state machine, accepted/rejected fixtures, security contract, and HMAC vectors consumed here.
+- `S02-001`: owner `session-02`; authoritative state `done`; exact product commit `055692f46ac61228f0592af96f06a99e55e431ce`; status handoff commit `0ded9446187327ade915401bfc053cf51dff829c`. Its status records independent reviewer PASS.
+- `S02-002`: authoritative state `ready` at queue commit `7422df6d827e20bf8c770d1ea0d0762229121f12`; both dependencies were therefore satisfied before implementation began.
+- Queue, shared contracts, governance, or other sessions' paths were not modified.
 
-## S02-002 one-time identity and credential reuse follow-up (2026-08-30)
+## Product implementation
 
-- Queue input: exact Session 01 queue
-  `3428aaa35ceca06fc21c41a001a370a463235aa5`; S02-002 was `ready`.
-  Exact web baseline was
-  `bf7ca71b437907e7d25251e54d59355440797ad4`.
-- Integration inputs: exact Windows-agent product
-  `0446e685489d2e9d09715d6cc5ba011a5471a540`, endpoint-ready response at
-  `c092189`, and private-path review products `e4a362922` and
-  `e823add5f`. At final owner capture, coordinator evidence reported the
-  non-elevated fixed host at PID 6932 on only `127.0.0.1:8443`, valid
-  installed-certificate health HTTP 200/TLS 1.3, and no-certificate denial.
-- Product: exact commit
-  `16e850a34b56a315fb78c137ddae6d38220180ea` adds a deterministic browser
-  credential-reuse regression and its evidence report. One synthetic pairing
-  persists a non-extractable key in IndexedDB; a fresh store and adapter then
-  authenticate without a second pairing state or `pairing_request`. Existing
-  tests separately cover detach/resume with the stored credential.
-- Real-browser boundary: Chrome loaded
-  `https://terminus-web.vercel.app/` in the disconnected protocol-client
-  state, displayed the fixed private endpoint, and produced no console
-  errors/warnings. At 390 by 844 CSS pixels it had no horizontal overflow.
-  An existing client-certificate-protected `/healthz` tab was present.
-  No new authentication proof or terminal frame was sent by this owner run.
-- Build evidence: the configured build embedded only
-  `wss://sai.tailf8dcea.ts.net` in `connect-src`. The recorded generated
-  `index.html` checksum is evidence for that single run only. The independent
-  reviewer reproduced the exact build but obtained a different HTML checksum
-  because Next.js build identity is nondeterministic; the checksum is not a
-  reproducible source hash and must not be used as an integration invariant.
-- Independent review: `/root/s06_006_origin` reproduced focused 11/11 and
-  full 42/42 tests, typecheck, lint, targeted Prettier, configured build,
-  lockfile dependencies, exact CSP, scope, clean worktree, and secret/plaintext
-  scans. Verdict: PASS with no severity findings.
-- Limitations: current live authenticated Chrome connect/reconnect, silent
-  browser certificate reuse across those connections, physical mobile browser
-  behavior, and deployment of the exact cumulative web candidate are not
-  claimed. Session 06 must reproduce those release gates.
+- `apps/web/protocol/**`: strict protocol 0.1 types, duplicate-key-aware JSON codec, exact schema/payload validation, canonical fixture runner, transition machine, HMAC proof, credential storage, and endpoint/origin policy.
+- `apps/web/terminal/protocolTerminalAdapter.ts`: exact `wss:` endpoint and HTTPS Origin enforcement, `terminus.v0_1` negotiation, independent sequence handling, pairing/authentication, open/input/output/resize, heartbeat/liveness, detach/resume, authorization expiry, clean close, and fail-closed error handling.
+- Resume acceptance requires the exact unexpired in-memory detached grant and matching session ID. Outbound frames enforce `bufferedAmount + UTF-8 frame bytes <= 65,536`, otherwise `BACKPRESSURE_LIMIT`/1008. Paired credentials accept expiry only in `(now, now + 30 days]`.
+- `apps/web/protocol/credentialStore.ts`: imports raw pairing material directly into a non-extractable HMAC `CryptoKey`; IndexedDB persists only that protected key plus non-secret identifiers/expiry. Resume grants remain memory-only. No local/session storage, cookie, service-worker cache, console logging, terminal plaintext logging, or secret logging was added.
+- `apps/web/components/TerminalShell.tsx` and `app/page.tsx`: select the real protocol adapter only when both exact public endpoint/origin settings are supplied; otherwise preserve the visibly labelled socket-free simulation. Pairing input is transient and cleared before the await boundary. Background visibility detaches and foreground visibility resumes only from detached state.
+- `apps/web/next.config.ts`: `connect-src` defaults to `'self'` and adds only the exact configured `wss://host[:port]` source after policy validation.
+- Added failure coverage for malformed/binary/oversized/duplicate/unknown frames, replay/gap/direction/state errors, wrong subprotocol, insecure or credential-bearing destinations, query-bearing destinations, wrong/non-HTTPS origins, HMAC mutations, expired credentials, over-30-day credentials, resume mismatch/expiry, and outbound backpressure.
+- Locked test-only dependency added: `fake-indexeddb@6.2.5`; final `npm ls --depth=0` passed with the existing locked application/test graph.
 
-## Previous current-task summary
+## Exact commands and deterministic evidence
 
-- Current task: `S02-004` — Explain genuine terminal-creation failure without fixed-cap guidance
-- State: done at the owner level; Session 06 verification remains pending
-- Branch: `session/02-web-renderer`
-- Files changed: `apps/web/components/TerminalShell.tsx`, `apps/web/components/TerminalShell.test.tsx`
-- Commands/evidence: focused component tests passed 12/12; full web tests passed 41/41 across 7 files; typecheck, lint, Next.js production build, targeted Prettier, `git diff --check`, product `git show --check`, and the stale fixed-cap text scan passed.
-- Independent reviewer/evidence: `/root/s02_open_failure_review` reviewed exact product `bf7ca71b437907e7d25251e54d59355440797ad4` and returned PASS with no findings.
-- Assumptions: Session 01 product `e795c391cbdb7a77c136ce5e15e0577331d436b7` is the exact governing contract input; `SESSION_OPEN_FAILED` remains a generic protocol result and the web client does not infer a specific failure cause.
-- Blockers/requests: Session 06 has not independently verified this product against a real browser and Windows agent; owner `done` is not `verified`.
-- Product/task commit: `bf7ca71b437907e7d25251e54d59355440797ad4`
-- Handoff commit: resolve from branch HEAD after the status-only handoff commit
+- Required-source reads used `Get-Content` for `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/SHARED_CONTRACTS.md`, `docs/DEFINITION_OF_DONE.md`, `agents/session-02-web.md`, `coordination/ownership.yaml`, and this status file.
+- Exact authoritative reads used `git show 7422df6d827e20bf8c770d1ea0d0762229121f12:coordination/tasks.yaml`, the dependency status files at that commit, and `git show`/`git ls-tree -r` against `910b69e24f464bb3e89152f3e5881beb9b706b76` for every protocol/schema/state/fixture/security/auth-vector artifact.
+- `npm run format` => pass; all files formatted or unchanged.
+- `npm run format:check` => pass; all matched files use Prettier style.
+- `npm run lint` => pass; exit 0 with no reported warnings/errors.
+- `npm run typecheck` => pass; `tsc --noEmit` exit 0.
+- `npx vitest run --reporter=verbose` => pass after final repairs: 7 files, 32 tests. The canonical test reads fixtures directly from exact Git commit `910b69e...`; all 27 canonical handshake/transcript fixtures passed, as did the positive HMAC vector and all four negative mutations.
+- `npm test` => sandboxed attempt failed only because Vite could not spawn its config child process (`spawn EPERM`); approved outside-sandbox rerun passed before repairs with 7 files/28 tests, and the final verbose run after repairs passed 7 files/32 tests.
+- `npm run build` => pass after final repairs; Next.js 16.3.3 compiled, typechecked, and statically prerendered `/`, `/_not-found`, and `/manifest.webmanifest`.
+- `$env:NEXT_PUBLIC_TERMINUS_WSS_ENDPOINT='wss://agent.private.invalid/terminal'; $env:NEXT_PUBLIC_TERMINUS_WEB_ORIGIN='https://preview.example.invalid'; npm run build` => pass after final repairs with the protocol-client configuration and exact CSP source.
+- `npm ls --depth=0` => pass; all direct dependencies resolved, including `fake-indexeddb@6.2.5`.
+- `rg -n "console\\.|localStorage|sessionStorage|document\\.cookie|ws://|https?://|Authorization|Cookie|Sec-WebSocket-Protocol" app components protocol terminal next.config.ts securityHeaders.test.ts` => only expected tests/constants and authorization method names; no browser secret/plaintext logging or prohibited persistence path.
+- `git diff --cached --check` before each product commit => pass with no output. Product and repair scopes contained only `apps/web/**`.
 
-## S02-004 no-fixed-cap UI follow-up (2026-08-29)
+## Browser evidence
 
-- Contract input: exact Session 01 product `e795c391cbdb7a77c136ce5e15e0577331d436b7`; no schema, framing, authentication, or error-code change.
-- Product: exact commit `bf7ca71b437907e7d25251e54d59355440797ad4` keeps the accessible `SESSION_OPEN_FAILED` alert, removes the eight-session/close-tab claim in English and Swedish, and advises checking the Windows agent and available system resources before retrying. This supersedes the fixed-cap UI handoff recorded below.
-- Validation: `npx vitest run components/TerminalShell.test.tsx --reporter=verbose` passed 12/12; `npm test` passed 41/41 in 7 files after the initial Windows sandbox `spawn EPERM` occurred before discovery and the authorized rerun passed; `npm run typecheck`, `npm run lint`, `npm run build`, targeted Prettier, `git diff --check`, `git show --check`, and the focused stale-cap scan all passed.
-- Independent review: `/root/s02_open_failure_review` returned PASS with no findings on the exact product commit.
-- Limitation: the failure-state component evidence uses a labelled adapter test double in JSDOM. No real Chrome/Windows-agent failure path was exercised for this follow-up; Session 06 verification remains required.
+- `npx next start -H 127.0.0.1 -p 3212` => local production server ready at `http://127.0.0.1:3212`; no deployment.
+- `npx --yes --package @playwright/cli playwright-cli -s=s02-002-browser open http://127.0.0.1:3212` => Chromium opened the built unconfigured application; title `Terminus`.
+- `... resize 1440 900` then `... snapshot` => accessible desktop shell, visibly labelled `SIMULATED UI — NO TERMINAL CONNECTION`, disconnected state, disabled input, and computed viewport `134 × 23`.
+- `... resize 390 844` then `... snapshot` => accessible portrait shell, `43 × 17` viewport, and seven disabled accessible mobile terminal-key controls while disconnected.
+- `... console` => 0 errors and 0 warnings.
+- This browser run intentionally verifies the unconfigured safe fallback and responsive regression only. It does not prove the configured WSS handshake.
+- Attempting a configured local HTTPS browser run with Next's `--experimental-https` first failed in the sandbox on certificate-process permissions, then the approved retry reached a self-signed certificate trust prompt. It was terminated rather than mutating the host trust store; the empty generated `apps/web/certificates` directory was removed. This attempt is not counted as successful evidence.
 
-## S02-004 handoff (2026-08-27)
+## Independent review
 
-- Current task: `S02-004` — Explain the eight-session limit after a rejected new tab.
-- State: implementation and owner validation complete; independent review and Session 01 queue transition remain pending.
-- Architecture input: Session 01 product `2e309afc90a9c657aa71864252882ae9eb9047c0`; the existing protocol 0.1 `SESSION_OPEN_FAILED` error remains unchanged.
-- Product files: `apps/web/components/TerminalShell.tsx`, `TerminalShell.test.tsx`, and `apps/web/app/globals.css`.
-- Implementation: when a private connection reaches error state with `SESSION_OPEN_FAILED`, the UI now presents an accessible alert explaining that a new PowerShell session could not open and asks the user to close an earlier Terminus tab or disconnect a session if eight are active, then retry. Other connection failures retain their existing behavior.
-- Commands/evidence:
-  - Focused `vitest run components/TerminalShell.test.tsx`: PASS (8/8).
-  - Full `vitest run`: PASS (7 files, 36/36 tests).
-  - `tsc --noEmit`: PASS.
-  - `eslint .`: PASS.
-  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
-  - `git diff --check` and product `git show --check`: PASS.
-- Security/operations: no endpoint, authentication, certificate, Origin, credential, Tailscale, or deployment behavior changed. No production deployment was performed.
-- Live-browser limitation: this product commit has not been integrated or deployed, so the new ninth-tab alert has not yet been exercised in production Chrome. The prior S02-002 production terminal flow remains unchanged until authorized integration/deployment.
-- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
-- Product/task commit: `edd2823bfae4280eb2a4b038c8f5c35d75b28d8d`.
-- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+- Reviewer: read-only agent `/root/s02_002_independent_review`.
+- Initial verdict: FAIL for exact commit `690274fe63ac596e5b36e34a4dd49b553c3abd88`. Findings were missing resume-session identity/expiry enforcement, missing outbound buffer bound, and missing 30-day credential-expiry cap. The reviewer made no edits.
+- Repairs were committed separately at `aec63af0ce7512341555910e59f3617543869c4a`, preserving the failed-review SHA for audit history. The exact cumulative product tip for integration/review is `aec63af0ce7512341555910e59f3617543869c4a`.
+- Final verdict: PASS for exact cumulative product tip `aec63af0ce7512341555910e59f3617543869c4a` at the Session 02 code/deterministic owner gate.
+- Reviewer independently reproduced `npm run format:check`, `npm run lint`, `npm run typecheck`, `npx vitest run --reporter=verbose` (7 files/32 tests), default `npm run build`, configured WSS/origin `npm run build`, cumulative and repair-only `git diff --check`, and clean exact-SHA worktree/scope checks.
+- Reviewer confirmed the three repairs, exact `910b69e...` fixture/HMAC coverage, and Session 02-only cumulative scope.
+- Reviewer limitation: no approved real private WSS integration environment exists. The PASS does not establish a real terminal path, browser Origin-header acceptance by an agent, end-to-end behavior, Session 06 `verified`, integration, deployment, or release.
 
-## S02-002 iPhone clock-skew follow-up (2026-08-27)
+## Evidence classification and limitations
 
-- State: owner implementation, deployment, and initial real-iPhone validation complete; manual interaction checks and independent review remain pending.
-- Product files: `apps/web/terminal/protocolTerminalAdapter.ts` and `protocolTerminalAdapter.test.ts`.
-- Real-device evidence: iPhone Safari reached the client-certificate-protected `/healthz` endpoint over the tailnet, then reached protocol `pairing` after first loading `/healthz` in the same Safari process. A fresh one-time code was consumed and local pairing approval succeeded. The browser then reported `AUTHORIZATION_EXPIRED` before opening a terminal; the agent created no PowerShell child.
-- Root cause: the browser calculated the freshly issued 12-hour authorization and 120-second resume-grant deadlines by subtracting the phone wall clock from Windows timestamps. Even small device-clock differences could reject a fresh authorization or resume grant despite the agent's authoritative monotonic deadlines.
-- Implementation: capture authorization and resume lifetimes with the browser monotonic clock. Wire timestamps remain schema-validated metadata, and the Windows agent remains authoritative for credential validity and server-side expiry. Authentication, mTLS, exact Origin, pairing, and credential storage are unchanged.
-- Commands/evidence:
-  - Focused `vitest run terminal/protocolTerminalAdapter.test.ts`: PASS (10/10).
-  - `npm test`: PASS (7 files, 38/38 tests).
-  - `npm run typecheck`: PASS.
-  - `npm run lint`: PASS.
-  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
-  - `git diff --check`: PASS before commit.
-  - Vercel production deployment `dpl_Dx53BFNMxUFeRxC38gszgCK7izsT` reached `READY`, was aliased to `https://terminus-web.vercel.app`, and returned HTTP 200 with the expected private WebSocket CSP.
-  - After loading `/healthz` and Terminus in the same iPhone Safari process, a final fresh pairing request was consumed and locally approved. The corrected production client completed authorization and the loopback agent opened exactly one direct ConPTY `powershell.exe` child (agent PID 22648, child PID 29604).
-  - The iPhone tailnet peer was online and active; the agent remained bound only to `127.0.0.1:8443`. Manual command-output, rotation-resize, and background/reconnect confirmation remain pending from the user.
-- Privacy evidence: the one-time code was shown only in a local operator window and PC clipboard; it was not printed to task output, chat, logs, source, fixtures, or artifacts. Terminal plaintext was not inspected or recorded.
-- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
-- Product/task commit: `f22db4df3fa514a1ec68773c2c8e4466a6b3b6aa`.
+- Deterministic real code: strict codec/state/crypto/endpoint/storage behavior, exact commit-backed fixtures, production builds, CSP generation, and failure paths.
+- Test-double backed: WebSocket lifecycle, Origin/subprotocol expectations, pairing/auth/open/IO/resize/heartbeat/detach/resume/close, backpressure, and IndexedDB behavior use explicit mock WebSocket/fake IndexedDB boundaries.
+- Real browser: only the unconfigured local responsive/safety fallback was exercised. No approved private agent, exact real WSS destination, or agent Origin allowlist was available, so no live connection or end-to-end claim is made.
+- No physical iPhone Safari run, Session 06 independent verification, merge, push, deployment, DNS/Tailscale mutation, public exposure, or release occurred.
+
+## Commits
+
+- Initial product commit (failed first review, retained for audit): `690274fe63ac596e5b36e34a4dd49b553c3abd88`.
+- Exact cumulative product/task tip after reviewed repairs: `aec63af0ce7512341555910e59f3617543869c4a`.
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit.
 
-## S02-002 Safari suspension follow-up (2026-08-27)
+## Real-WSS resume audit (latest attempt)
 
-- State: owner implementation and automated validation complete; real iPhone Safari retest and independent review remain pending.
-- User-observed evidence: returning to the terminal page in Safari after roughly ten seconds showed the session closed, and manual Retry opened a replacement session instead of resuming the prior ConPTY session.
-- Root cause: the background detach was deferred for 100 ms so reload/page teardown could cancel it. Safari can freeze that timer or emit a persisted `pagehide` first. Without a completed detach, no memory-only resume grant exists; protocol 0.1 therefore requires the agent to close the shell on transport loss, and Retry can only open a new session.
-- Implementation: queue background detach on the next task with no artificial delay, keep non-persisted reload/close teardown cancellation, and detach immediately for persisted Safari/BFCache `pagehide`. A persisted `pageshow` records one bounded foreground recovery intent and reuses the existing 500 ms reconnect gate. Resume grants remain memory-only and every authentication, mTLS, Origin, expiry, and manual-retry check remains unchanged.
-- Product files: `apps/web/components/TerminalShell.tsx` and `apps/web/components/TerminalShell.test.tsx`.
-- Commands/evidence:
-  - Focused `npx vitest run components/TerminalShell.test.tsx --reporter=verbose`: PASS (12/12), including persisted Safari page suspension, reload teardown, deferred detach, and bounded foreground reconnect coverage.
-  - `npm test`: PASS (7 files, 41/41 tests). The first sandboxed attempt failed before test discovery with Windows `spawn EPERM`; the same command passed outside that sandbox restriction.
-  - `npm run typecheck`: PASS.
-  - `npm run lint`: PASS.
-  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
-  - Targeted Prettier check and `git diff --check`: PASS.
-- Security/operations: no resume grant, credential, pairing material, or terminal content is persisted or logged. No protocol, agent, endpoint, certificate, Tailscale, Funnel, deployment, or public-exposure behavior changed.
-- Limitations: automated evidence uses JSDOM lifecycle events; it does not prove physical iPhone Safari behavior. No deployment or live mutation was performed.
-- Publication authorization: the user explicitly authorized a normal push of `session/02-web-renderer` on 2026-08-27. This authorization does not include `main`, force-push, deployment, or live infrastructure mutation.
-- Independent reviewer: pending; do not mark this follow-up `done` or `verified` until maker-independent review is recorded.
-- Product/task commit: `7c7ce0263560bb06c102019e7452279681577203`.
-- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+- Latest Session 01 queue commit inspected: `a9ffbab08f843c46b2321a34b4fdd4d6cc872f31`. It records S02-002 `review` and S03-002 `ready`; Session 01 has not yet consumed the newer Session 03 handoff.
+- Exact completed Session 03 product inspected: `6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc`.
+- Exact Session 03 status-only handoff inspected: `715aac71205f3c97b23d825b75c8d2fddf806b8a`. It records S03-002 owner/reviewer `done` while awaiting the Session 01 queue transition.
+- `git show 6e5ff870ea9b8f4da9d7de7d0636724a67eb48cc:apps/windows-agent/README.md` confirms the product is an internal library, not an installed or running integration service. It requires caller-provided protected credential storage, private-device identity resolution, local pairing approval, TLS certificate, loopback listener, and separately approved private publication.
+- No exact private WSS URL, allowed browser Origin, already-trusted TLS chain, process startup command, pairing/approval procedure, or safe negative-path control was present in the product or handoff. Session 02 did not guess these values, weaken certificate validation, install a trust certificate, deploy, expose an endpoint, or edit Session 03-owned files.
+- Startup request scan covered every local branch ref. No committed request/response addressed to Session 02 was present.
+- Immutable source-owned request created and committed: `43a1b4d414818a18bf1515a9635cd08b1d74d56b`, path `coordination/requests/from-02-to-03-s02-002-real-wss-endpoint.request.md`.
+- Requested response path: `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`. Session 02 will consume it only by exact response commit SHA with `git show`.
+- Blocking evidence: the requested real browser WSS checks cannot start until Session 03 supplies an approved runnable endpoint/configuration or identifies the exact missing task and authorization. No new `apps/web/**` product change was made, so no new product tip or independent product review exists for this blocked attempt.
 
-## S02-002 iPhone foreground reconnect follow-up (2026-08-27)
+## Session 03 response consumed
 
-- State: owner implementation and automated validation complete; production iPhone retest pending deployment; independent review remains pending.
-- Product files: `apps/web/components/TerminalShell.tsx` and `TerminalShell.test.tsx`.
-- Real-device evidence: after a successful iPhone terminal session, returning to Safari after five seconds in the background showed `SESSION_OPEN_FAILED`; manually pressing retry immediately reconnected. The ConPTY session and credential remained valid.
-- Root cause: foreground visibility could race an in-flight detach or attempt WSS reconnect in the same event before iOS networking was ready.
-- Implementation: record one foreground recovery intent, wait until the adapter reaches `detached` or `error`, then make one bounded reconnect attempt after 500 ms. No retry loop is introduced; manual retry and every authentication/security check remain intact.
-- Commands/evidence:
-  - Focused `vitest run components/TerminalShell.test.tsx`: PASS (10/10), including deferred-detach foreground coverage.
-  - `npm test`: PASS (7 files, 39/39 tests).
-  - `npm run typecheck`: PASS.
-  - `npm run lint`: PASS.
-  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
-  - `git diff --check`: PASS before commit.
-- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
-- Product/task commit: `e358d31b57d1d9080c77f1924fa8ba40194f925a`.
-- Handoff commit: resolve from branch HEAD after the status-only handoff commit.
+- Startup scan found the target-owned response on `session/03-windows-agent`. Exact response commit: `de185692732b93afdc730b228be4475b43a3b0e1`; path: `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`.
+- The response was read only with `git show de185692732b93afdc730b228be4475b43a3b0e1:coordination/requests/from-03-to-02-s02-002-real-wss-endpoint.response.md`; Session 02 did not edit or copy the target-owned response.
+- Latest Session 01 queue `f004d2cc807ff3cf419e934c0dc3fc1101c4c4ce` now records S03-002 `done` and S02-002 `review`.
+- Session 03 explicitly confirms no approved runnable private WSS endpoint exists: no URL, listener/process, certificate or trusted chain, private-publication mapping, protected credential store, device resolver, or local approval UI is configured or live. Its `httptest.NewTLSServer` paths and synthetic `https://preview.example.invalid` Origin are test-only and are not approved browser integration evidence.
+- Session 03 identifies the prerequisite as a new Session 01-assigned, explicitly user-authorized follow-up task for consumer/host wiring plus independently approved certificate-backed Tailscale-private publication. No such task or authorization is currently recorded.
+- Therefore exact destination, real browser Origin header, negotiated subprotocol, pairing/authentication, open/input/output/resize, heartbeat, detach/resume, expiry, malformed/replayed/oversized rejection, close, and configured CSP could not be exercised against a real endpoint. Desktop/iPhone real-path browser checks and a new final-tip independent review were not run.
+- Existing cumulative web product tip remains `aec63af0ce7512341555910e59f3617543869c4a`, with its prior deterministic reviewer PASS unchanged. No `apps/web/**` files changed in this attempt, so there is no repair/product commit to review.
+- Session 02 did not weaken certificate validation, install a certificate, create or expose a listener, alter Tailscale, deploy, modify Session 03 files, merge, or push.
 
-## S02-004 live refresh follow-up (2026-08-27)
+## Third real-path attempt and safe stop
 
-- State: owner implementation and live production validation complete; independent review remains pending.
-- Product files: `apps/web/components/TerminalShell.tsx` and `apps/web/components/TerminalShell.test.tsx`.
-- Root cause: a reload first emitted `visibilitychange(hidden)`, which immediately detached the session. Page teardown then discarded the memory-only resume grant, leaving that detached session to occupy capacity until expiry. At the eight-session limit, an immediate reload/reconnect was therefore rejected.
-- Implementation: delay background detach by 100 ms and cancel it on `pagehide`. Real background tabs still detach, while reload/close lets WebSocket teardown release the server session immediately. The resume grant remains memory-only; no authentication, credential-storage, endpoint, or protocol behavior was weakened.
-- Commands/evidence:
-  - `npm test`: PASS (7 files, 37/37 tests), including page-teardown coverage.
-  - `npm run typecheck`: PASS.
-  - `npm run lint`: PASS.
-  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
-  - `git diff --check`: PASS before commit.
-  - Vercel production deployment `dpl_GZXfaPdbHgoiVH3MgtRRnCSZDhnE` reached `READY` and was aliased to `https://terminus-web.vercel.app`; the production response returned HTTP 200 with the expected private WebSocket CSP.
-  - Live Chrome opened eight independent PowerShell sessions, rejected a ninth with `SESSION_OPEN_FAILED`, recovered a released slot, and resized the recovered terminal from 134 columns to 83 and back.
-  - At the eight-session limit, reloading the recovered tab immediately reduced direct PowerShell children from eight to seven; reconnect succeeded and restored exactly eight unique children. The reconnected terminal resized successfully.
-  - Disconnecting all controlled tabs reduced direct PowerShell children to zero. One intentional verified session was then reopened and marked deliverable in Chrome.
-  - Agent PID 16788 remained bound only to `127.0.0.1:8443`; Tailscale reported the 443 forward as `tailnet only`, including from `tailscale funnel status`.
-- Privacy evidence: no terminal plaintext, command text, clipboard data, secrets, reusable pairing material, or private keys were recorded.
-- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
-- Product/task commit: `cae2ded7adeeefa9e5cd97e3561cf5bfd9d0570f`.
-- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
-
-## S02-005 Figma-derived bilingual interface (2026-08-27)
-
-- State: owner implementation, production deployment, and live UI validation complete; independent review remains pending.
-- Source: Figma Make file `hmK588nDMBB1tmM2bAsPzD`, root node `0:1`, read through the official Figma design-context workflow. The source supplied the dark violet/cyan/rose/emerald visual system, responsive terminal/control layout, exact inline SVG geometry, and English/Swedish interaction model.
-- Product files: `apps/web/app/globals.css`, `apps/web/components/TerminalShell.tsx`, and `apps/web/components/TerminalShell.test.tsx`.
-- Implementation: replaced the existing green card layout with the Figma-derived full-screen dark grid/glow shell; retained the real adapter, xterm renderer, pairing, resize, reconnect, detach, session-limit, and cleanup behavior; added four accent themes, three font sizes, three glow levels, responsive side/bottom terminal controls, and a flag-plus-switch-icon English/Swedish control. The browser cannot edit the configured endpoint. The mTLS badge renders only for the real protocol client, never for the labelled simulation.
-- Browser evidence:
-  - Production build served on loopback and inspected at 1280x720 and 390x844 with Playwright CLI.
-  - English and Swedish mobile states rendered without horizontal overflow after the 390px header was changed to a two-row grid.
-  - Swedish control changed the document language, visible status, connection actions, terminal labels, mobile-key accessibility names, viewport metadata, and input text.
-  - Production-preview browser console: zero errors and zero warnings.
-  - The remote Google Fonts import from the Figma prototype was intentionally omitted because Terminus CSP blocks it; the existing local monospace stack is used without weakening CSP.
-  - Vercel production deployment `dpl_9h1hGq6DPsQykoBkVogqcbUxxv2u` reached `READY` and was aliased to `https://terminus-web.vercel.app`.
-  - The canonical production UI rendered in English and Swedish at desktop and 390x844 with zero browser-console errors or warnings.
-- Commands/evidence:
-  - `npx vitest run components/TerminalShell.test.tsx`: PASS (11/11).
-  - `npm test`: PASS (7 files, 40/40 tests).
-  - `npm run typecheck`: PASS.
-  - `npm run lint`: PASS.
-  - `npm run build`: PASS; Next.js 16.3.3 production static build completed.
-  - Targeted `npx prettier --check components/TerminalShell.tsx components/TerminalShell.test.tsx app/globals.css`: PASS.
-  - Repository-wide `npm run format:check`: pre-existing baseline failure on 29 untouched files; none of the three S02-005 files were listed.
-  - `git diff --check`: PASS before product commit.
-- Security/operations: no endpoint, authentication, certificate, Origin, credential, protocol, Windows-agent, Tailscale, Funnel, or public-exposure behavior changed. The existing Vercel project was deployed only after explicit user authorization.
-- Independent reviewer: pending; do not mark this task `done` or `verified` until maker-independent review is recorded.
-- Product/task commit: `601f76e73b27058ead9fd4b226c9183a1bd0c04d`.
-- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+- All branch refs and committed request/response paths were scanned. The required `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint-ready.response.md` does not exist on any ref, so the prompt placeholder could not be resolved to an exact SHA.
+- Latest queue `ed4cc9bd6aad6bd36373eeaa36775b1d8df2c397` records S03-003 `done`, S05-005 `ready`, and S02-002 `blocked` on S05-005.
+- Exact reviewed S03-003 host product `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c` and handoff `662e376094c631890dd22d23391ff6a7e62d8a30` were read. They provide the non-elevated loopback integration host but explicitly report no trusted server certificate/hostname, client-CA bundle, browser Origin, or approved private Serve mapping; no endpoint was started.
+- Exact S05-005 static review product `d95841ea4829a1a5a3a51b0b3f6f3babf3ef26d8` and handoff `de4fb65f923bb29f4ab7e6ed756ed3309ac2d61c` were read. Static/read-only review passed, but live hostname, trusted certificate, Serve mapping, Funnel state, listener, expiry, and network paths remain untested and authorization-blocked.
+- The immutable Session 05 authorization request was read at `de4fb65f923bb29f4ab7e6ed756ed3309ac2d61c:coordination/requests/from-05-to-01-s05-005-private-publication-authorization.request.md`.
+- This is the third S02-002 attempt stopped by the same missing live-publication prerequisite. Per the safe-stopping rule, Session 02 created immutable request `828d7485217464e073bb409bc4ea5decec340408` at `coordination/requests/from-02-to-01-s02-002-live-publication-blocker.request.md` and stopped.
+- No real WSS URL or approved Origin existed, so the requested real lifecycle/negative-path checks, desktop/iPhone real-path browser checks, configured CSP proof, deterministic reruns, repairs, or new independent review were run. Existing product tip remains `aec63af0ce7512341555910e59f3617543869c4a` with its prior deterministic reviewer PASS.
+- No `apps/web/**` product file, Session 03/05 file, shared contract, certificate, listener, Tailscale setting, deployment, merge, push, or public exposure was changed.

@@ -17,8 +17,6 @@ import { ProtocolViolation } from "./types";
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const SESSION_ID =
-  /^[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]{4}-[0-9a-hjkmnp-tv-z]{4}$/;
 const TIMESTAMP =
   /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$/;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
@@ -35,17 +33,14 @@ const requiredPayloadKeys: Record<ProtocolMessageType, readonly string[]> = {
   auth_result: ["authenticated", "authorizationExpiresAt"],
   open_session: ["shell", "dimensions"],
   session_opened: ["sessionId"],
-  reopen_session: ["sessionId", "dimensions"],
-  session_reopened: ["sessionId"],
-  history_begin: ["sessionId", "startOffset", "endOffset", "truncated"],
-  history_chunk: ["sessionId", "offset", "data"],
-  history_end: ["sessionId", "endOffset"],
   terminal_input: ["sessionId", "data"],
-  terminal_output: ["sessionId", "offset", "data"],
+  terminal_output: ["sessionId", "data"],
   resize: ["sessionId", "dimensions"],
   heartbeat: ["kind", "nonce"],
   detach: ["sessionId"],
-  session_detached: ["sessionId"],
+  session_detached: ["sessionId", "resumeGrant", "expiresAt"],
+  resume_session: ["sessionId", "resumeGrant", "dimensions"],
+  session_resumed: ["sessionId"],
   close_session: ["sessionId", "reason"],
   session_closed: ["sessionId", "reason"],
   error: ["code", "fatal"],
@@ -199,30 +194,13 @@ function validatePayload(
       assertDimensions(payload.dimensions);
       break;
     case "session_opened":
-    case "session_reopened":
+    case "session_resumed":
     case "detach":
-    case "session_detached":
-      assertSessionId(payload.sessionId);
-      break;
-    case "reopen_session":
-      assertSessionId(payload.sessionId);
-      assertDimensions(payload.dimensions);
-      break;
-    case "history_begin":
-      assertSessionId(payload.sessionId);
-      assertOffset(payload.startOffset);
-      assertOffset(payload.endOffset);
-      if (typeof payload.truncated !== "boolean") schemaInvalid();
-      break;
-    case "history_end":
-      assertSessionId(payload.sessionId);
-      assertOffset(payload.endOffset);
+      assertUuid(payload.sessionId);
       break;
     case "terminal_input":
-    case "terminal_output":
-    case "history_chunk": {
-      assertSessionId(payload.sessionId);
-      if (type !== "terminal_input") assertOffset(payload.offset);
+    case "terminal_output": {
+      assertUuid(payload.sessionId);
       const decoded = decodeBase64Url(payload.data);
       const maximum =
         type === "terminal_input"
@@ -234,26 +212,33 @@ function validatePayload(
       break;
     }
     case "resize":
-      assertSessionId(payload.sessionId);
+      assertUuid(payload.sessionId);
       assertDimensions(payload.dimensions);
       break;
     case "heartbeat":
       if (payload.kind !== "ping" && payload.kind !== "pong") schemaInvalid();
       decodeBase64Url(payload.nonce, 16);
       break;
+    case "session_detached":
+      assertUuid(payload.sessionId);
+      decodeBase64Url(payload.resumeGrant, 32);
+      assertTimestamp(payload.expiresAt);
+      break;
+    case "resume_session":
+      assertUuid(payload.sessionId);
+      decodeBase64Url(payload.resumeGrant, 32);
+      assertDimensions(payload.dimensions);
+      break;
     case "close_session":
-      assertSessionId(payload.sessionId);
-      if (payload.reason !== "user_request" && payload.reason !== "new_session")
-        schemaInvalid();
+      assertUuid(payload.sessionId);
+      if (payload.reason !== "user_request") schemaInvalid();
       break;
     case "session_closed":
-      assertSessionId(payload.sessionId);
+      assertUuid(payload.sessionId);
       if (
         ![
           "user_request",
-          "new_session",
-          "credential_expired",
-          "credential_revoked",
+          "idle_timeout",
           "agent_shutdown",
           "process_exit",
           "protocol_error",
@@ -301,25 +286,8 @@ export function isUuidV4(value: unknown): value is string {
   return typeof value === "string" && UUID_V4.test(value);
 }
 
-export function isSessionId(value: unknown): value is string {
-  return typeof value === "string" && SESSION_ID.test(value);
-}
-
 function assertUuid(value: unknown): asserts value is string {
   if (!isUuidV4(value)) schemaInvalid();
-}
-
-function assertSessionId(value: unknown): asserts value is string {
-  if (!isSessionId(value)) schemaInvalid();
-}
-
-function assertOffset(value: unknown): asserts value is number {
-  if (
-    !Number.isInteger(value) ||
-    (value as number) < 0 ||
-    (value as number) > MAX_SAFE_SEQUENCE
-  )
-    schemaInvalid();
 }
 
 function assertExactKeys(

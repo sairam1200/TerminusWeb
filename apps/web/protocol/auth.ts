@@ -1,6 +1,6 @@
 import { decodeBase64Url, encodeBase64Url } from "./codec";
 
-const AUTH_DOMAIN = new TextEncoder().encode("Terminus/0.2/auth\0");
+const AUTH_DOMAIN = new TextEncoder().encode("Terminus/0.1/auth\0");
 const NULL_BYTE = new Uint8Array([0]);
 
 export async function importCredentialKey(

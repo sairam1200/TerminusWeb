@@ -1,25 +1,12 @@
 import type { NextConfig } from "next";
 import { privateWssCspSource } from "./protocol/endpointPolicy";
 
-export function buildContentSecurityPolicy(
-  privateEndpoints?: string | string[],
-): string {
-  const endpoints = privateEndpoints === undefined
-    ? []
-    : Array.isArray(privateEndpoints)
-      ? privateEndpoints
-      : [privateEndpoints];
-  const wssSources = Array.from(
-    new Set(
-      endpoints
-        .filter((endpoint) => endpoint !== "")
-        .map((endpoint) => privateWssCspSource(endpoint)),
-    ).values(),
-  );
+export function buildContentSecurityPolicy(privateEndpoint?: string): string {
+  const wssSource = privateWssCspSource(privateEndpoint);
   return [
     "default-src 'self'",
     "base-uri 'self'",
-    `connect-src 'self'${wssSources.length === 0 ? "" : ` ${wssSources.join(" ")}`}`,
+    `connect-src 'self'${wssSource === undefined ? "" : ` ${wssSource}`}`,
     "font-src 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
@@ -32,10 +19,7 @@ export function buildContentSecurityPolicy(
 }
 
 export const contentSecurityPolicy = buildContentSecurityPolicy(
-  [
-    process.env.NEXT_PUBLIC_TERMINUS_WSS_ENDPOINT,
-    process.env.NEXT_PUBLIC_TERMINUS_LOCAL_WSS_ENDPOINT,
-  ].filter((endpoint) => endpoint !== undefined),
+  process.env.NEXT_PUBLIC_TERMINUS_WSS_ENDPOINT,
 );
 
 const securityHeaders = [

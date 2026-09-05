@@ -27,15 +27,4 @@ describe("web security headers", () => {
       buildContentSecurityPolicy("wss://token@agent.private.invalid/terminal"),
     ).toThrow(/credential-free wss/i);
   });
-
-  it("supports local and private WSS origins together", () => {
-    expect(
-      buildContentSecurityPolicy([
-        "wss://agent.private.invalid/terminal",
-        "wss://127.0.0.1:4176/terminal",
-      ]),
-    ).toContain(
-      "connect-src 'self' wss://agent.private.invalid wss://127.0.0.1:4176",
-    );
-  });
 });
