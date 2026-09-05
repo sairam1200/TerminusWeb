@@ -1,6 +1,8 @@
 import { PROTOCOL_SUBPROTOCOL } from "./constants";
 import { ProtocolViolation } from "./types";
 
+export type ConnectionMode = "local" | "private";
+
 export interface PrivateWssPolicy {
   endpoint: string;
   expectedWebOrigin: string;
@@ -50,6 +52,13 @@ export function validatePrivateWssPolicy(
     cspSource: endpoint.origin,
     subprotocol: PROTOCOL_SUBPROTOCOL,
   };
+}
+
+export function validateWssPolicy(
+  policy: PrivateWssPolicy & { mode?: ConnectionMode },
+  currentWebOrigin: string,
+): ValidatedPrivateWssPolicy {
+  return validatePrivateWssPolicy(policy, currentWebOrigin);
 }
 
 export function privateWssCspSource(

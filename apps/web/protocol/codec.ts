@@ -286,6 +286,10 @@ export function isUuidV4(value: unknown): value is string {
   return typeof value === "string" && UUID_V4.test(value);
 }
 
+export function isSessionId(value: unknown): value is string {
+  return isUuidV4(value);
+}
+
 function assertUuid(value: unknown): asserts value is string {
   if (!isUuidV4(value)) schemaInvalid();
 }
