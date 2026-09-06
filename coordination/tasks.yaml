@@ -260,14 +260,14 @@ tasks:
 
   - id: S02-006
     owner: session_02
-    state: in_progress
+    state: done
     title: Combine protocol 0.2 renderer with local and private connection profiles
     depends_on: [S02-005]
     evidence: Preserve xterm, remembered sessions, settings, language and mobile controls; retain strict destination and Origin checks, clock-skew and browser-close fixes; test both connection modes and build the combined UI.
 
   - id: S03-008
     owner: session_03
-    state: in_progress
+    state: done
     title: Preserve credential clock-skew headroom during repository recovery
     depends_on: [S03-007]
     evidence: Retain reviewed protocol 0.2 lifecycle and remembered sessions, restore bounded credential expiry headroom and its regression test, run Go tests and vet.
