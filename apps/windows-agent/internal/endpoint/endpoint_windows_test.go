@@ -41,7 +41,7 @@ func TestRealConPTYThroughWSSCleanupPaths(t *testing.T) {
 	found := false
 	for !found {
 		frame := client.read("terminal_output")
-		data, _ := protocol.DecodeBase64(frame.Value.(*protocol.TerminalPayload).Data, -1)
+		data, _ := protocol.DecodeBase64(frame.Value.(*protocol.TerminalOutputPayload).Data, -1)
 		found = bytes.Contains(data, marker)
 	}
 	client.send("resize", protocol.ResizePayload{SessionID: sessionID, Dimensions: protocol.Dimensions{Columns: 100, Rows: 35}})
@@ -53,6 +53,29 @@ func TestRealConPTYThroughWSSCleanupPaths(t *testing.T) {
 	lostID := lost.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
 	lostShell, lostChild := captureProcessTree(t, lost, lostID)
 	_ = lost.ws.Close()
+	waitDetachedSession(t, endpoint, lostID)
+	for _, pid := range []uint32{lostShell, lostChild} {
+		alive, err := processAlive(pid)
+		if err != nil || !alive {
+			t.Fatalf("retained process %d alive=%v err=%v", pid, alive, err)
+		}
+	}
+	reopened := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000073")
+	reopened.send("reopen_session", protocol.ReopenSessionPayload{SessionID: lostID, Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	reopened.read("session_reopened")
+	begin := reopened.read("history_begin").Value.(*protocol.HistoryBeginPayload)
+	var replayed []byte
+	for begin.StartOffset+uint64(len(replayed)) < begin.EndOffset {
+		chunk := reopened.read("history_chunk").Value.(*protocol.HistoryChunkPayload)
+		data, _ := protocol.DecodeBase64(chunk.Data, -1)
+		replayed = append(replayed, data...)
+	}
+	reopened.read("history_end")
+	if !bytes.Contains(replayed, []byte("S03PIDS-")) {
+		t.Fatal("real ConPTY replay did not contain the synthetic process marker")
+	}
+	reopened.send("close_session", protocol.CloseSessionPayload{SessionID: lostID, Reason: "user_request"})
+	reopened.read("session_closed")
 	waitNoActiveSession(t, endpoint)
 	waitProcessesGone(t, lostShell, lostChild)
 
@@ -75,7 +98,7 @@ func captureProcessTree(t *testing.T, client *testClient, sessionID string) (uin
 	var output []byte
 	for {
 		frame := client.read("terminal_output")
-		data, _ := protocol.DecodeBase64(frame.Value.(*protocol.TerminalPayload).Data, -1)
+		data, _ := protocol.DecodeBase64(frame.Value.(*protocol.TerminalOutputPayload).Data, -1)
 		output = append(output, data...)
 		match := pattern.FindSubmatch(output)
 		if match != nil {
@@ -84,6 +107,22 @@ func captureProcessTree(t *testing.T, client *testClient, sessionID string) (uin
 			return uint32(shell), uint32(child)
 		}
 	}
+}
+
+func waitDetachedSession(t *testing.T, endpoint *Endpoint, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		endpoint.sessions.mu.Lock()
+		managed := endpoint.sessions.active[sessionID]
+		detached := managed != nil && managed.detached && managed.owner == nil
+		endpoint.sessions.mu.Unlock()
+		if detached {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("real ConPTY session did not detach")
 }
 
 func waitProcessesGone(t *testing.T, pids ...uint32) {
@@ -127,9 +166,9 @@ func waitNoActiveSession(t *testing.T, endpoint *Endpoint) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		endpoint.sessions.mu.Lock()
-		active := endpoint.sessions.active
+		active := len(endpoint.sessions.active)
 		endpoint.sessions.mu.Unlock()
-		if active == nil {
+		if active == 0 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

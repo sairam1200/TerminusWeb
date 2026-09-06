@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -37,6 +38,96 @@ const (
 type fakeAdapter struct {
 	mu       sync.Mutex
 	sessions []*fakeSession
+}
+
+// ignoringContextOpenAdapter deliberately models a terminal implementation
+// that does not return when its context is cancelled. Tests release the
+// adapter explicitly so they can prove registry operations remain independent
+// and that any terminal created after admission is invalidated is closed.
+type ignoringContextOpenAdapter struct {
+	mu        sync.Mutex
+	calls     int
+	stallFrom int
+	started   chan int
+	release   chan struct{}
+	releaseMu sync.Once
+	sessions  []*fakeSession
+}
+
+// lateTerminalAfterCancellationAdapter models a broken terminal adapter that
+// observes cancellation but still creates and returns a terminal. The endpoint
+// must close that late terminal instead of registering it.
+type lateTerminalAfterCancellationAdapter struct {
+	started   chan struct{}
+	cancelled chan struct{}
+	created   chan *fakeSession
+}
+
+func newLateTerminalAfterCancellationAdapter() *lateTerminalAfterCancellationAdapter {
+	return &lateTerminalAfterCancellationAdapter{
+		started:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+		created:   make(chan *fakeSession, 1),
+	}
+}
+
+func (a *lateTerminalAfterCancellationAdapter) Open(ctx context.Context, config terminal.Config) (terminal.Session, error) {
+	close(a.started)
+	<-ctx.Done()
+	close(a.cancelled)
+	session := &fakeSession{
+		output:  make(chan []byte, 4),
+		closed:  make(chan struct{}),
+		columns: config.Columns,
+		rows:    config.Rows,
+	}
+	a.created <- session
+	return session, nil
+}
+
+func newIgnoringContextOpenAdapter(stallFrom, capacity int) *ignoringContextOpenAdapter {
+	return &ignoringContextOpenAdapter{
+		stallFrom: stallFrom,
+		started:   make(chan int, capacity),
+		release:   make(chan struct{}),
+	}
+}
+
+func (a *ignoringContextOpenAdapter) Open(_ context.Context, config terminal.Config) (terminal.Session, error) {
+	a.mu.Lock()
+	a.calls++
+	call := a.calls
+	a.mu.Unlock()
+	if call >= a.stallFrom {
+		a.started <- call
+		<-a.release
+	}
+	session := &fakeSession{
+		output:  make(chan []byte, 4),
+		closed:  make(chan struct{}),
+		columns: config.Columns,
+		rows:    config.Rows,
+	}
+	a.mu.Lock()
+	a.sessions = append(a.sessions, session)
+	a.mu.Unlock()
+	return session, nil
+}
+
+func (a *ignoringContextOpenAdapter) unblock() {
+	a.releaseMu.Do(func() { close(a.release) })
+}
+
+func (a *ignoringContextOpenAdapter) snapshot() []*fakeSession {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]*fakeSession(nil), a.sessions...)
+}
+
+type failingOpenAdapter struct{ err error }
+
+func (a failingOpenAdapter) Open(context.Context, terminal.Config) (terminal.Session, error) {
+	return nil, a.err
 }
 
 type memoryCredentialStore struct {
@@ -109,6 +200,27 @@ type fakeSession struct {
 	columns, rows uint16
 }
 
+type resizeOutputAdapter struct{ session *resizeOutputSession }
+type resizeOutputSession struct {
+	*fakeSession
+	outputOnResize []byte
+}
+
+func (a *resizeOutputAdapter) Open(context.Context, terminal.Config) (terminal.Session, error) {
+	return a.session, nil
+}
+
+func (s *resizeOutputSession) Resize(columns, rows uint16) error {
+	if err := s.fakeSession.Resize(columns, rows); err != nil {
+		return err
+	}
+	if len(s.outputOnResize) > 0 {
+		s.output <- append([]byte(nil), s.outputOnResize...)
+		s.outputOnResize = nil
+	}
+	return nil
+}
+
 func (a *fakeAdapter) Open(_ context.Context, config terminal.Config) (terminal.Session, error) {
 	s := &fakeSession{output: make(chan []byte, 4), closed: make(chan struct{}), columns: config.Columns, rows: config.Rows}
 	a.mu.Lock()
@@ -137,6 +249,53 @@ func (s *fakeSession) Resize(columns, rows uint16) error {
 }
 func (s *fakeSession) Wait() error  { <-s.closed; return nil }
 func (s *fakeSession) Close() error { s.once.Do(func() { close(s.closed) }); return nil }
+
+func waitSessionState(t *testing.T, session *fakeSession, input string, columns, rows uint16) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		session.mu.Lock()
+		gotInput, gotColumns, gotRows := session.input.String(), session.columns, session.rows
+		session.mu.Unlock()
+		if gotInput == input && gotColumns == columns && gotRows == rows {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	session.mu.Lock()
+	gotInput, gotColumns, gotRows := session.input.String(), session.columns, session.rows
+	session.mu.Unlock()
+	t.Fatalf("session state = %q %dx%d, want %q %dx%d", gotInput, gotColumns, gotRows, input, columns, rows)
+}
+
+func testRegistryOwner(credentialID string) *connection {
+	return &connection{
+		credential: Credential{ID: credentialID},
+		device:     "device-1",
+		done:       make(chan struct{}),
+		machine:    protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0),
+	}
+}
+
+func awaitTestError(t *testing.T, label string, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s did not complete", label)
+		return nil
+	}
+}
+
+func requireTestSessionClosed(t *testing.T, label string, session *fakeSession) {
+	t.Helper()
+	select {
+	case <-session.closed:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s left a terminal active", label)
+	}
+}
 
 type testClient struct {
 	t        *testing.T
@@ -235,7 +394,47 @@ func authorizeExisting(t *testing.T, server *httptest.Server, credential Credent
 	return client
 }
 
-func TestPrivateWSSLifecycleDetachResumeAndCleanup(t *testing.T) {
+// This proves only the server-side once-per-device credential behavior.
+// Browser certificate import, selection, and persistence remain external
+// platform behavior and are not asserted by this test.
+func TestStoredCredentialReconnectDoesNotRepeatLocalPairingApproval(t *testing.T) {
+	adapter := &fakeAdapter{}
+	store := newMemoryCredentialStore()
+	var approvals atomic.Int64
+	endpoint, err := New(Config{
+		AllowedOrigin: testOrigin,
+		AgentID:       testAgentID,
+		Terminal:      adapter,
+		Credentials:   store,
+		ApprovePairing: func(context.Context, PairingApproval) bool {
+			approvals.Add(1)
+			return true
+		},
+		ResolveDevice: func(*http.Request) (string, error) { return "credential-reuse-device", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	if got := approvals.Load(); got != 1 {
+		t.Fatalf("local pairing approvals = %d, want 1 after initial pairing", got)
+	}
+	if err := first.ws.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reconnected := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000098")
+	defer reconnected.ws.Close()
+	if got := approvals.Load(); got != 1 {
+		t.Fatalf("local pairing approvals = %d, want 1 after stored-credential reconnect", got)
+	}
+}
+
+func TestPrivateWSSLifecycleDetachReopenHistoryAndCleanup(t *testing.T) {
 	endpoint, adapter, _ := newTestEndpoint(t)
 	server := httptest.NewTLSServer(endpoint)
 	defer server.Close()
@@ -269,57 +468,358 @@ func TestPrivateWSSLifecycleDetachResumeAndCleanup(t *testing.T) {
 		t.Fatalf("input/resize = %q %dx%d", gotInput, columns, rows)
 	}
 	session.output <- []byte("output-marker")
-	output := client.read("terminal_output").Value.(*protocol.TerminalPayload)
+	output := client.read("terminal_output").Value.(*protocol.TerminalOutputPayload)
 	decoded, _ := protocol.DecodeBase64(output.Data, -1)
-	if string(decoded) != "output-marker" {
+	if string(decoded) != "output-marker" || output.Offset != 0 {
 		t.Fatal("output mismatch")
 	}
 	client.send("detach", protocol.SessionIDPayload{SessionID: sessionID})
-	detached := client.read("session_detached").Value.(*protocol.SessionDetachedPayload)
-	client.send("resume_session", protocol.ResumeSessionPayload{SessionID: sessionID, ResumeGrant: detached.ResumeGrant, Dimensions: protocol.Dimensions{Columns: 90, Rows: 30}})
-	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.ResumeRejected {
-		t.Fatalf("same-connection resume code = %s", got)
-	}
+	client.read("session_detached")
 	_ = client.ws.Close()
 	session.output <- []byte("pending-marker")
-	resumed := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000002")
-	resumed.send("resume_session", protocol.ResumeSessionPayload{SessionID: sessionID, ResumeGrant: detached.ResumeGrant, Dimensions: protocol.Dimensions{Columns: 90, Rows: 30}})
-	resumed.read("session_resumed")
-	pending := resumed.read("terminal_output").Value.(*protocol.TerminalPayload)
-	pendingBytes, _ := protocol.DecodeBase64(pending.Data, -1)
-	if string(pendingBytes) != "pending-marker" {
-		t.Fatal("pending output mismatch")
+	reopened := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000002")
+	reopened.send("reopen_session", protocol.ReopenSessionPayload{SessionID: sessionID, Dimensions: protocol.Dimensions{Columns: 90, Rows: 30}})
+	reopened.read("session_reopened")
+	begin := reopened.read("history_begin").Value.(*protocol.HistoryBeginPayload)
+	var history []byte
+	for uint64(len(history))+begin.StartOffset < begin.EndOffset {
+		chunk := reopened.read("history_chunk").Value.(*protocol.HistoryChunkPayload)
+		decoded, _ := protocol.DecodeBase64(chunk.Data, -1)
+		history = append(history, decoded...)
 	}
-	replay := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000003")
-	replay.send("resume_session", protocol.ResumeSessionPayload{SessionID: sessionID, ResumeGrant: detached.ResumeGrant, Dimensions: protocol.Dimensions{Columns: 90, Rows: 30}})
-	if got := replay.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.ResumeRejected {
-		t.Fatalf("replayed grant code = %s", got)
+	end := reopened.read("history_end").Value.(*protocol.HistoryEndPayload)
+	if string(history) != "output-markerpending-marker" || begin.StartOffset != 0 || begin.Truncated || end.EndOffset != uint64(len(history)) {
+		t.Fatalf("history = %q begin=%+v end=%+v", history, begin, end)
 	}
-	resumed.send("close_session", protocol.CloseSessionPayload{SessionID: sessionID, Reason: "user_request"})
-	resumed.read("session_closed")
+
+	loser := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000003")
+	loser.send("reopen_session", protocol.ReopenSessionPayload{SessionID: sessionID, Dimensions: protocol.Dimensions{Columns: 90, Rows: 30}})
+	if got := loser.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.SessionReopenRejected {
+		t.Fatalf("concurrent reopen code = %s", got)
+	}
+	reopened.send("close_session", protocol.CloseSessionPayload{SessionID: sessionID, Reason: "new_session"})
+	reopened.read("session_closed")
 	select {
 	case <-session.closed:
 	case <-time.After(time.Second):
 		t.Fatal("terminal was not closed")
 	}
+	endpoint.sessions.mu.Lock()
+	historyBytes := endpoint.sessions.historyBytes
+	endpoint.sessions.mu.Unlock()
+	if historyBytes != 0 {
+		t.Fatalf("history bytes after close = %d", historyBytes)
+	}
+	closedID := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000004")
+	closedID.send("reopen_session", protocol.ReopenSessionPayload{SessionID: sessionID, Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	if got := closedID.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.SessionReopenRejected {
+		t.Fatalf("closed ID reopen code = %s", got)
+	}
 }
 
-func TestAttachedClientLossCleansTerminal(t *testing.T) {
+func TestAttachedClientLossDetachesAndReopensTerminal(t *testing.T) {
 	endpoint, adapter, _ := newTestEndpoint(t)
 	server := httptest.NewTLSServer(endpoint)
 	defer server.Close()
 	defer endpoint.Close()
-	client, _ := pairAndAuthorize(t, endpoint, server)
+	client, credential := pairAndAuthorize(t, endpoint, server)
 	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
-	client.read("session_opened")
+	sessionID := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
 	adapter.mu.Lock()
 	session := adapter.sessions[0]
 	adapter.mu.Unlock()
 	_ = client.ws.Close()
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-session.closed:
+		t.Fatal("ordinary client loss closed retained terminal")
+	default:
+	}
+	reopened := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000097")
+	reopened.send("reopen_session", protocol.ReopenSessionPayload{SessionID: sessionID, Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	reopened.read("session_reopened")
+	reopened.read("history_begin")
+	reopened.read("history_end")
+	reopened.send("close_session", protocol.CloseSessionPayload{SessionID: sessionID, Reason: "user_request"})
+	reopened.read("session_closed")
+}
+
+func TestSessionIDFormatUniquenessAndCollisionRetriesBeforeOpen(t *testing.T) {
+	seen := make(map[string]struct{})
+	for range 1_000 {
+		id, err := randomSessionID()
+		if err != nil || !protocol.ValidSessionID(id) {
+			t.Fatalf("generated session ID %q: %v", id, err)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			t.Fatalf("duplicate generated session ID %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+
+	adapter := &fakeAdapter{}
+	registry := sessionRegistry{adapter: adapter, active: map[string]*managedSession{"abcd-efgh-jkmn": {id: "abcd-efgh-jkmn"}}}
+	registry.newSessionID = func() (string, error) { return "abcd-efgh-jkmn", nil }
+	owner := testRegistryOwner("30000000-0000-4000-8000-000000000091")
+	if _, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
+		t.Fatal("collision exhaustion unexpectedly opened a terminal")
+	}
+	adapter.mu.Lock()
+	opens := len(adapter.sessions)
+	adapter.mu.Unlock()
+	if opens != 0 {
+		t.Fatalf("terminal opens after ID collision exhaustion = %d", opens)
+	}
+}
+
+func TestHistoryBudgetsEvictOldestBytesWithoutClosingSessions(t *testing.T) {
+	registry := sessionRegistry{active: make(map[string]*managedSession)}
+	sessions := make([]*managedSession, 0, 65)
+	for index := range 65 {
+		id, err := randomSessionID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		managed := &managedSession{id: id, closeDone: make(chan struct{})}
+		registry.active[id] = managed
+		sessions = append(sessions, managed)
+		if index < 64 {
+			for range protocol.MaxSessionHistory / protocol.MaxTerminalOutput {
+				if _, ok := registry.appendHistoryLocked(managed, make([]byte, protocol.MaxTerminalOutput)); !ok {
+					t.Fatal("history append failed")
+				}
+			}
+		}
+	}
+	if _, ok := registry.appendHistoryLocked(sessions[64], []byte{1}); !ok {
+		t.Fatal("newest history append failed")
+	}
+	oldest := sessions[0]
+	if registry.historyBytes != protocol.MaxAgentHistory || oldest.historyBytes != protocol.MaxSessionHistory-1 || oldest.history.Front().Value.(*historyEntry).offset != 1 || sessions[64].historyBytes != 1 {
+		t.Fatalf("global eviction bytes=%d oldest=%d/%d newest=%d", registry.historyBytes, oldest.history.Front().Value.(*historyEntry).offset, oldest.historyBytes, sessions[64].historyBytes)
+	}
+	if len(registry.active) != 65 {
+		t.Fatalf("global history pressure closed sessions: active=%d", len(registry.active))
+	}
+	for _, managed := range sessions {
+		if managed.closed {
+			t.Fatalf("history pressure closed session %s", managed.id)
+		}
+		registry.removeHistoryLocked(managed)
+	}
+	if registry.historyBytes != 0 {
+		t.Fatalf("history cleanup bytes = %d", registry.historyBytes)
+	}
+}
+
+func TestAtomicReopenRequiresCredentialAndSourceDevice(t *testing.T) {
+	session := &fakeSession{output: make(chan []byte, 1), closed: make(chan struct{})}
+	registry := sessionRegistry{active: make(map[string]*managedSession), revokedCredentials: make(map[string]struct{})}
+	managed := &managedSession{
+		id: "abcd-efgh-jkmn", credentialID: "30000000-0000-4000-8000-000000000092", deviceIdentity: "device-1",
+		terminal: session, cancel: func() {}, detached: true, closeDone: make(chan struct{}),
+	}
+	registry.active[managed.id] = managed
+	dimensions := protocol.Dimensions{Columns: 80, Rows: 24}
+
+	unknownOwner := testRegistryOwner(managed.credentialID)
+	_, unknown := registry.beginReopen(unknownOwner, "rstv-wxyz-2345", dimensions)
+	wrongCredential := testRegistryOwner("30000000-0000-4000-8000-000000000093")
+	_, wrongCredentialErr := registry.beginReopen(wrongCredential, managed.id, dimensions)
+	wrongDevice := testRegistryOwner(managed.credentialID)
+	wrongDevice.device = "device-2"
+	_, wrongDeviceErr := registry.beginReopen(wrongDevice, managed.id, dimensions)
+	missingDevice := testRegistryOwner(managed.credentialID)
+	missingDevice.device = ""
+	_, missingDeviceErr := registry.beginReopen(missingDevice, managed.id, dimensions)
+	for label, err := range map[string]error{"unknown": unknown, "credential": wrongCredentialErr, "device": wrongDeviceErr, "missing": missingDeviceErr} {
+		if err == nil || err.Error() != "session reopen rejected" {
+			t.Fatalf("%s denial = %v", label, err)
+		}
+	}
+
+	owners := []*connection{testRegistryOwner(managed.credentialID), testRegistryOwner(managed.credentialID)}
+	start := make(chan struct{})
+	results := make(chan struct {
+		owner    *connection
+		snapshot reopenSnapshot
+		err      error
+	}, len(owners))
+	for _, owner := range owners {
+		go func(owner *connection) {
+			<-start
+			snapshot, err := registry.beginReopen(owner, managed.id, dimensions)
+			results <- struct {
+				owner    *connection
+				snapshot reopenSnapshot
+				err      error
+			}{owner: owner, snapshot: snapshot, err: err}
+		}(owner)
+	}
+	close(start)
+	winners := 0
+	var winner struct {
+		owner    *connection
+		snapshot reopenSnapshot
+	}
+	for range owners {
+		result := <-results
+		if result.err == nil {
+			winners++
+			winner.owner, winner.snapshot = result.owner, result.snapshot
+		} else if result.err.Error() != "session reopen rejected" {
+			t.Fatalf("concurrent denial = %v", result.err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("atomic reopen winners = %d", winners)
+	}
+	registry.releaseReopen(winner.owner, winner.snapshot.managed)
+	if err := registry.closeManaged(managed, "user_request"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplayBackpressureReturnsRunningSessionToDetached(t *testing.T) {
+	session := &fakeSession{output: make(chan []byte, 1), closed: make(chan struct{})}
+	registry := sessionRegistry{active: make(map[string]*managedSession), revokedCredentials: make(map[string]struct{})}
+	managed := &managedSession{
+		id: "abcd-efgh-jkmn", credentialID: "30000000-0000-4000-8000-000000000094", deviceIdentity: "device-1",
+		terminal: session, cancel: func() {}, detached: true, closeDone: make(chan struct{}),
+	}
+	registry.active[managed.id] = managed
+	registry.appendHistoryLocked(managed, []byte("bounded-history"))
+	owner := testRegistryOwner(managed.credentialID)
+	owner.id = "10000000-0000-4000-8000-000000000094"
+	owner.writes = make(chan outbound)
+	request, err := protocol.NewFrame("reopen_session", owner.id, 0, protocol.ReopenSessionPayload{SessionID: managed.id, Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := protocol.DecodedFrame{Frame: request, Value: &protocol.ReopenSessionPayload{SessionID: managed.id, Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}}}
+	if err := owner.machine.Apply(protocol.ClientToAgent, decoded); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := registry.beginReopen(owner, managed.id, protocol.Dimensions{Columns: 80, Rows: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = registry.replay(owner, snapshot)
+	if code, _, ok := protocol.ErrorDetails(err); !ok || code != protocol.BackpressureLimit {
+		t.Fatalf("replay backpressure = %v (%s)", err, code)
+	}
+	registry.mu.Lock()
+	detached := registry.active[managed.id] == managed && managed.detached && managed.owner == nil && !managed.closed
+	registry.mu.Unlock()
+	if !detached {
+		t.Fatal("replay backpressure did not preserve a detached running session")
+	}
+	select {
+	case <-session.closed:
+		t.Fatal("replay backpressure closed the terminal")
+	default:
+	}
+	if err := registry.closeManaged(managed, "user_request"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplaySnapshotBarrierPrecedesResizeOutput(t *testing.T) {
+	fake := &fakeSession{output: make(chan []byte, 4), closed: make(chan struct{})}
+	session := &resizeOutputSession{fakeSession: fake, outputOnResize: []byte("after-snapshot")}
+	adapter := &resizeOutputAdapter{session: session}
+	store := newMemoryCredentialStore()
+	endpoint, err := New(Config{AllowedOrigin: testOrigin, AgentID: testAgentID, Terminal: adapter, Credentials: store,
+		ApprovePairing: func(context.Context, PairingApproval) bool { return true }, ResolveDevice: func(*http.Request) (string, error) { return "barrier-device", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+	client, credential := pairAndAuthorize(t, endpoint, server)
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	sessionID := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
+	fake.output <- []byte("snapshot")
+	client.read("terminal_output")
+	client.send("detach", protocol.SessionIDPayload{SessionID: sessionID})
+	client.read("session_detached")
+	_ = client.ws.Close()
+
+	reopened := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000095")
+	reopened.send("reopen_session", protocol.ReopenSessionPayload{SessionID: sessionID, Dimensions: protocol.Dimensions{Columns: 90, Rows: 30}})
+	reopened.read("session_reopened")
+	begin := reopened.read("history_begin").Value.(*protocol.HistoryBeginPayload)
+	chunk := reopened.read("history_chunk").Value.(*protocol.HistoryChunkPayload)
+	history, _ := protocol.DecodeBase64(chunk.Data, -1)
+	if string(history) != "snapshot" || begin.EndOffset != uint64(len(history)) {
+		t.Fatalf("snapshot history = %q begin=%+v", history, begin)
+	}
+	reopened.read("history_end")
+	live := reopened.read("terminal_output").Value.(*protocol.TerminalOutputPayload)
+	liveBytes, _ := protocol.DecodeBase64(live.Data, -1)
+	if string(liveBytes) != "after-snapshot" || live.Offset != begin.EndOffset {
+		t.Fatalf("post-barrier output = %q offset=%d want=%d", liveBytes, live.Offset, begin.EndOffset)
+	}
+	reopened.send("close_session", protocol.CloseSessionPayload{SessionID: sessionID, Reason: "user_request"})
+	reopened.read("session_closed")
+}
+
+func TestDetachedHistoryTruncationAndRevocationCleanup(t *testing.T) {
+	endpoint, adapter, _ := newTestEndpoint(t)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+	client, credential := pairAndAuthorize(t, endpoint, server)
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	sessionID := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
+	client.send("detach", protocol.SessionIDPayload{SessionID: sessionID})
+	client.read("session_detached")
+	adapter.mu.Lock()
+	session := adapter.sessions[0]
+	adapter.mu.Unlock()
+	for range protocol.MaxSessionHistory / protocol.MaxTerminalOutput {
+		session.output <- make([]byte, protocol.MaxTerminalOutput)
+	}
+	session.output <- []byte{1}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		endpoint.sessions.mu.Lock()
+		managed := endpoint.sessions.active[sessionID]
+		ready := managed != nil && managed.nextOffset == protocol.MaxSessionHistory+1 && managed.historyBytes == protocol.MaxSessionHistory
+		endpoint.sessions.mu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	reopened := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000096")
+	reopened.send("reopen_session", protocol.ReopenSessionPayload{SessionID: sessionID, Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	reopened.read("session_reopened")
+	begin := reopened.read("history_begin").Value.(*protocol.HistoryBeginPayload)
+	if begin.StartOffset != 1 || begin.EndOffset != protocol.MaxSessionHistory+1 || !begin.Truncated {
+		t.Fatalf("truncated begin = %+v", begin)
+	}
+	remaining := begin.EndOffset - begin.StartOffset
+	for remaining > 0 {
+		chunk := reopened.read("history_chunk").Value.(*protocol.HistoryChunkPayload)
+		data, _ := protocol.DecodeBase64(chunk.Data, -1)
+		remaining -= uint64(len(data))
+	}
+	reopened.read("history_end")
+	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-session.closed:
 	case <-time.After(time.Second):
-		t.Fatal("client loss left terminal active")
+		t.Fatal("revocation did not close reopened terminal")
+	}
+	endpoint.sessions.mu.Lock()
+	active, historyBytes := len(endpoint.sessions.active), endpoint.sessions.historyBytes
+	endpoint.sessions.mu.Unlock()
+	if active != 0 || historyBytes != 0 {
+		t.Fatalf("revocation cleanup active=%d history=%d", active, historyBytes)
 	}
 }
 
@@ -330,7 +830,7 @@ func TestHandshakeOriginProtocolAndTLSRejections(t *testing.T) {
 	for _, item := range []struct {
 		name, origin, subprotocol string
 		status                    int
-	}{{"origin", "https://attacker.invalid", protocol.Subprotocol, 403}, {"missing-origin", "", protocol.Subprotocol, 403}, {"subprotocol", testOrigin, "other.v1", 426}} {
+	}{{"origin", "https://attacker.invalid", protocol.Subprotocol, 403}, {"missing-origin", "", protocol.Subprotocol, 403}, {"subprotocol", testOrigin, "other.v1", 426}, {"old-subprotocol", testOrigin, "terminus.v0_1", 426}} {
 		t.Run(item.name, func(t *testing.T) {
 			ws, response, err := dial(t, server, item.origin, item.subprotocol)
 			if ws != nil {
@@ -351,7 +851,7 @@ func TestHandshakeOriginProtocolAndTLSRejections(t *testing.T) {
 	}
 }
 
-func TestAuthorizationExpiryClosesConnection(t *testing.T) {
+func TestAuthorizationExpiryDetachesRunningSession(t *testing.T) {
 	base := time.Now().UTC().Truncate(time.Millisecond)
 	var nanos atomic.Int64
 	nanos.Store(base.UnixNano())
@@ -366,11 +866,25 @@ func TestAuthorizationExpiryClosesConnection(t *testing.T) {
 	server := httptest.NewTLSServer(endpoint)
 	defer server.Close()
 	client, _ := pairAndAuthorize(t, endpoint, server)
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	sessionID := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
 	nanos.Store(base.Add(13 * time.Hour).UnixNano())
 	client.send("heartbeat", protocol.HeartbeatPayload{Kind: "ping", Nonce: protocol.EncodeBase64(make([]byte, 16))})
 	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthorizationExpired {
 		t.Fatalf("code = %s", got)
 	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		endpoint.sessions.mu.Lock()
+		managed := endpoint.sessions.active[sessionID]
+		detached := managed != nil && managed.detached && managed.owner == nil
+		endpoint.sessions.mu.Unlock()
+		if detached {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("authorization expiry did not detach the running session")
 }
 
 func TestAuthorizationDeadlineProactivelyCloses(t *testing.T) {
@@ -388,6 +902,9 @@ func TestAuthorizationDeadlineProactivelyCloses(t *testing.T) {
 	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
 	client.read("session_opened")
 	_ = client.ws.SetReadDeadline(time.Now().Add(time.Second))
+	if got := client.read("session_closed").Value.(*protocol.SessionClosedPayload).Reason; got != "credential_expired" {
+		t.Fatalf("close reason = %s", got)
+	}
 	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthorizationExpired {
 		t.Fatalf("code = %s", got)
 	}
@@ -398,6 +915,40 @@ func TestAuthorizationDeadlineProactivelyCloses(t *testing.T) {
 	case <-session.closed:
 	case <-time.After(time.Second):
 		t.Fatal("expired authorization left terminal open")
+	}
+}
+
+func TestCredentialExpiryClosesDetachedSessionAndHistory(t *testing.T) {
+	endpoint, adapter, store := newTestEndpoint(t)
+	credential := Credential{ID: "30000000-0000-4000-8000-000000000051", ExpiresAt: time.Now().Add(800 * time.Millisecond)}
+	for index := range credential.Secret {
+		credential.Secret[index] = byte(index)
+	}
+	if err := store.Put(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+	client := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000051")
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	sessionID := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
+	client.send("detach", protocol.SessionIDPayload{SessionID: sessionID})
+	client.read("session_detached")
+	adapter.mu.Lock()
+	session := adapter.sessions[0]
+	adapter.mu.Unlock()
+	session.output <- []byte("volatile-only")
+	select {
+	case <-session.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("credential expiry left detached terminal active")
+	}
+	endpoint.sessions.mu.Lock()
+	active, historyBytes := len(endpoint.sessions.active), endpoint.sessions.historyBytes
+	endpoint.sessions.mu.Unlock()
+	if active != 0 || historyBytes != 0 {
+		t.Fatalf("credential expiry cleanup active=%d history=%d", active, historyBytes)
 	}
 }
 
@@ -433,6 +984,23 @@ func TestConcurrentRateLimitReservations(t *testing.T) {
 	}
 }
 
+func TestRejectedReopenRateLimitUsesTwentyAttemptWindow(t *testing.T) {
+	limiter := newRateLimiter(20)
+	now := time.Now()
+	for attempt := range 20 {
+		if !limiter.begin("credential\x00device", now) {
+			t.Fatalf("reopen attempt %d rejected before limit", attempt+1)
+		}
+		limiter.finish("credential\x00device", now, false)
+	}
+	if limiter.begin("credential\x00device", now) || limiter.allowed("credential\x00device", now) {
+		t.Fatal("twenty rejected reopens did not start cooldown")
+	}
+	if !limiter.allowed("credential\x00device", now.Add(5*time.Minute+time.Millisecond)) {
+		t.Fatal("reopen cooldown did not expire")
+	}
+}
+
 func TestConnectionIDCannotBeReused(t *testing.T) {
 	endpoint, _, _ := newTestEndpoint(t)
 	server := httptest.NewTLSServer(endpoint)
@@ -440,11 +1008,11 @@ func TestConnectionIDCannotBeReused(t *testing.T) {
 	id := "10000000-0000-4000-8000-000000000060"
 	firstWS, _, _ := dial(t, server, testOrigin, protocol.Subprotocol)
 	first := &testClient{t: t, ws: firstWS, id: id}
-	first.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	first.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	first.read("hello_ack")
 	secondWS, _, _ := dial(t, server, testOrigin, protocol.Subprotocol)
 	second := &testClient{t: t, ws: secondWS, id: id}
-	second.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	second.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	if got := second.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.InvalidState {
 		t.Fatalf("code = %s", got)
 	}
@@ -452,27 +1020,270 @@ func TestConnectionIDCannotBeReused(t *testing.T) {
 	secondWS.Close()
 }
 
-func TestCredentialRevocationClosesAuthorizationAndSession(t *testing.T) {
+func TestCredentialRevocationClosesAllAuthorizationsAndSessions(t *testing.T) {
 	endpoint, adapter, _ := newTestEndpoint(t)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	second := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000079")
+	clients := []*testClient{first, second}
+	for _, client := range clients {
+		client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+		client.read("session_opened")
+	}
+	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	sessions := append([]*fakeSession(nil), adapter.sessions...)
+	adapter.mu.Unlock()
+	for index, session := range sessions {
+		select {
+		case <-session.closed:
+		case <-time.After(time.Second):
+			t.Fatalf("revocation left terminal %d open", index)
+		}
+	}
+	for _, client := range clients {
+		if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
+			t.Fatalf("code = %s", got)
+		}
+	}
+}
+
+func TestCredentialRevocationSendsAuthenticationFailureBeforeBlockingTerminalClose(t *testing.T) {
+	inner := &fakeSession{output: make(chan []byte, 4), closed: make(chan struct{})}
+	blocking := &blockingCloseSession{fakeSession: inner, closeStarted: make(chan struct{}), releaseClose: make(chan struct{})}
+	store := newMemoryCredentialStore()
+	endpoint, err := New(Config{
+		AllowedOrigin: testOrigin, AgentID: testAgentID, Terminal: &blockingCloseAdapter{session: blocking}, Credentials: store,
+		ApprovePairing: func(context.Context, PairingApproval) bool { return true }, ResolveDevice: func(*http.Request) (string, error) { return "blocked-revocation-device", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewTLSServer(endpoint)
 	defer server.Close()
 	client, credential := pairAndAuthorize(t, endpoint, server)
 	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
 	client.read("session_opened")
-	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
+
+	revokeDone := make(chan error, 1)
+	go func() { revokeDone <- endpoint.RevokeCredential(context.Background(), credential.ID) }()
+	select {
+	case <-blocking.closeStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("credential revocation did not reach terminal cleanup")
+	}
+	if err := client.ws.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	adapter.mu.Lock()
-	session := adapter.sessions[0]
-	adapter.mu.Unlock()
-	select {
-	case <-session.closed:
-	case <-time.After(time.Second):
-		t.Fatal("revocation left terminal open")
-	}
-	client.read("session_closed")
 	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.AuthenticationFailed {
-		t.Fatalf("code = %s", got)
+		t.Fatalf("code = %s, want %s", got, protocol.AuthenticationFailed)
+	}
+	select {
+	case err := <-revokeDone:
+		t.Fatalf("revocation returned before blocked terminal cleanup was released: %v", err)
+	default:
+	}
+	close(blocking.releaseClose)
+	if err := awaitTestError(t, "credential revocation cleanup", revokeDone); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplayStopsAtCloseFenceWhileTerminalCleanupIsBlocked(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger func(*sessionRegistry, *managedSession, *blockingCloseSession) <-chan error
+	}{
+		{
+			name: "credential revocation",
+			trigger: func(registry *sessionRegistry, managed *managedSession, _ *blockingCloseSession) <-chan error {
+				result := make(chan error, 1)
+				go func() { result <- registry.revokeCredential(managed.credentialID) }()
+				return result
+			},
+		},
+		{
+			name: "process exit",
+			trigger: func(_ *sessionRegistry, managed *managedSession, blocking *blockingCloseSession) <-chan error {
+				result := make(chan error, 1)
+				go func() {
+					blocking.fakeSession.once.Do(func() { close(blocking.fakeSession.closed) })
+					<-managed.closeDone
+					result <- managed.closeErr
+				}()
+				return result
+			},
+		},
+		{
+			name: "agent shutdown",
+			trigger: func(registry *sessionRegistry, _ *managedSession, _ *blockingCloseSession) <-chan error {
+				result := make(chan error, 1)
+				go func() { result <- registry.shutdown() }()
+				return result
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			inner := &fakeSession{output: make(chan []byte, 4), closed: make(chan struct{})}
+			blocking := &blockingCloseSession{fakeSession: inner, closeStarted: make(chan struct{}), releaseClose: make(chan struct{})}
+			registry := sessionRegistry{adapter: &blockingCloseAdapter{session: blocking}, now: time.Now}
+			credentialID := fmt.Sprintf("30000000-0000-4000-8000-%012d", 600+index)
+			firstOwner := testRegistryOwner(credentialID)
+			id, err := registry.open(firstOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := registry.detach(firstOwner, id); err != nil {
+				t.Fatal(err)
+			}
+			inner.output <- []byte("first-history-frame")
+			inner.output <- []byte("second-history-frame")
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				registry.mu.Lock()
+				managed := registry.active[id]
+				ready := managed != nil && managed.history.Len() == 2
+				registry.mu.Unlock()
+				if ready {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("terminal output did not reach the replay history")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			reopener := testRegistryOwner(credentialID)
+			reopener.id = fmt.Sprintf("10000000-0000-4000-8000-%012d", 600+index)
+			reopener.machine = protocol.NewMachine(protocol.ConnectionReady, protocol.SessionReopening, 0, 0)
+			reopener.writes = make(chan outbound)
+			snapshot, err := registry.beginReopen(reopener, id, protocol.Dimensions{Columns: 80, Rows: 24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayDone := make(chan error, 1)
+			go func() { replayDone <- registry.replay(reopener, snapshot) }()
+			var blockedChunk outbound
+			for _, want := range []string{"session_reopened", "history_begin", "history_chunk"} {
+				select {
+				case item := <-reopener.writes:
+					if item.frame.Type != want {
+						t.Fatalf("replay frame = %s, want %s", item.frame.Type, want)
+					}
+					if want == "history_chunk" {
+						blockedChunk = item
+					} else {
+						item.result <- nil
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatalf("replay did not emit %s", want)
+				}
+			}
+			closeDone := test.trigger(&registry, snapshot.managed, blocking)
+			select {
+			case <-blocking.closeStarted:
+			case <-time.After(3 * time.Second):
+				t.Fatal("terminal cleanup did not reach the blocking close")
+			}
+			blockedChunk.result <- nil
+			if err := awaitTestError(t, "fenced replay", replayDone); err == nil {
+				t.Fatal("replay completed after its session was fenced closed")
+			}
+			select {
+			case item := <-reopener.writes:
+				t.Fatalf("replay emitted %s after the close fence", item.frame.Type)
+			default:
+			}
+			close(blocking.releaseClose)
+			if err := awaitTestError(t, "blocked terminal cleanup", closeDone); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestCredentialRevocationWinsAgainstStalledOpenAndClosesLateTerminal(t *testing.T) {
+	adapter := newLateTerminalAfterCancellationAdapter()
+	store := newMemoryCredentialStore()
+	endpoint, err := New(Config{
+		AllowedOrigin:  testOrigin,
+		AgentID:        testAgentID,
+		Terminal:       adapter,
+		Credentials:    store,
+		ApprovePairing: func(context.Context, PairingApproval) bool { return true },
+		ResolveDevice:  func(*http.Request) (string, error) { return "stalled-open-revocation-device", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	client, credential := pairAndAuthorize(t, endpoint, server)
+	defer client.ws.Close()
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	select {
+	case <-adapter.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("terminal creation did not reach the stalled adapter")
+	}
+
+	revokeDone := make(chan error, 1)
+	go func() { revokeDone <- endpoint.RevokeCredential(context.Background(), credential.ID) }()
+	if err := awaitTestError(t, "credential revocation during stalled open", revokeDone); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.ws.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	failure := client.read("error").Value.(*protocol.ErrorPayload)
+	if failure.Code != protocol.AuthenticationFailed {
+		t.Fatalf("revocation error = %s, want %s (and not %s)", failure.Code, protocol.AuthenticationFailed, protocol.SessionOpenFailed)
+	}
+	if !failure.Fatal {
+		t.Fatal("revocation error was not fatal")
+	}
+
+	select {
+	case <-adapter.cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("connection shutdown did not cancel the pending terminal open")
+	}
+	var late *fakeSession
+	select {
+	case late = <-adapter.created:
+	case <-time.After(3 * time.Second):
+		t.Fatal("adapter did not return its late terminal")
+	}
+	requireTestSessionClosed(t, "revocation revalidation", late)
+	endpoint.sessions.mu.Lock()
+	active, pending := len(endpoint.sessions.active), len(endpoint.sessions.pending)
+	endpoint.sessions.mu.Unlock()
+	if active != 0 || pending != 0 {
+		t.Fatalf("revoked admission accounting: active=%d pending=%d", active, pending)
+	}
+}
+
+func TestSessionRegistryRejectsClosedConnectionBeforeProcessCreation(t *testing.T) {
+	adapter := &fakeAdapter{}
+	registry := sessionRegistry{adapter: adapter, now: time.Now}
+	done := make(chan struct{})
+	close(done)
+	owner := &connection{done: done, credential: Credential{ID: "30000000-0000-4000-8000-000000000079"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+	if _, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
+		t.Fatal("closed connection opened a terminal session")
+	}
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != 0 {
+		t.Fatalf("closed connection created %d terminal sessions", created)
 	}
 }
 
@@ -495,7 +1306,7 @@ func TestRevocationCannotRaceCredentialBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &testClient{t: t, ws: ws, id: "10000000-0000-4000-8000-000000000080"}
-	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, CredentialID: credential.ID, SupportedVersions: []string{"0.1"}})
+	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, CredentialID: credential.ID, SupportedVersions: []string{protocol.Version}})
 	client.read("hello_ack")
 	<-store.getStarted
 	if err := endpoint.RevokeCredential(context.Background(), credential.ID); err != nil {
@@ -507,7 +1318,7 @@ func TestRevocationCannotRaceCredentialBinding(t *testing.T) {
 	}
 }
 
-func TestClosingSessionKeepsReservationAndReturnsCleanupError(t *testing.T) {
+func TestEndpointShutdownRejectsOpenWhileCleanupInProgressAndReturnsCleanupError(t *testing.T) {
 	sentinel := errors.New("synthetic cleanup failure")
 	inner := &fakeSession{output: make(chan []byte), closed: make(chan struct{})}
 	blocking := &blockingCloseSession{fakeSession: inner, closeStarted: make(chan struct{}), releaseClose: make(chan struct{}), closeErr: sentinel}
@@ -560,7 +1371,7 @@ func TestUnsupportedNegotiationAndExpiredChallenge(t *testing.T) {
 		t.Fatal(err)
 	}
 	unsupported := &testClient{t: t, ws: unsupportedWS, id: "10000000-0000-4000-8000-000000000030"}
-	unsupported.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.2"}})
+	unsupported.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"9.9"}})
 	if got := unsupported.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.UnsupportedVersion {
 		t.Fatalf("code = %s", got)
 	}
@@ -571,7 +1382,7 @@ func TestUnsupportedNegotiationAndExpiredChallenge(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &testClient{t: t, ws: ws, id: "10000000-0000-4000-8000-000000000031"}
-	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	client.read("hello_ack")
 	client.send("pairing_request", protocol.PairingRequestPayload{PairingCode: code})
 	pair := client.read("pairing_result").Value.(*protocol.PairingResultPayload)
@@ -590,7 +1401,7 @@ func TestAuthenticationReplayOversizeAndPairingConsumption(t *testing.T) {
 	code, _, _ := endpoint.IssuePairingCode()
 	ws, _, _ := dial(t, server, testOrigin, protocol.Subprotocol)
 	client := &testClient{t: t, ws: ws, id: "10000000-0000-4000-8000-000000000010"}
-	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	client.read("hello_ack")
 	wrong := protocol.EncodeBase64(make([]byte, 16))
 	client.send("pairing_request", protocol.PairingRequestPayload{PairingCode: wrong})
@@ -598,7 +1409,7 @@ func TestAuthenticationReplayOversizeAndPairingConsumption(t *testing.T) {
 	ws.Close()
 	ws2, _, _ := dial(t, server, testOrigin, protocol.Subprotocol)
 	c2 := &testClient{t: t, ws: ws2, id: "10000000-0000-4000-8000-000000000011"}
-	c2.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	c2.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	c2.read("hello_ack")
 	c2.send("pairing_request", protocol.PairingRequestPayload{PairingCode: code})
 	frame := c2.read("error")
@@ -606,11 +1417,11 @@ func TestAuthenticationReplayOversizeAndPairingConsumption(t *testing.T) {
 		t.Fatal("pairing code was not consumed")
 	}
 	ws2.Close()
-	if _, err := protocol.Decode(append([]byte(`{"version":"0.1"}`), bytes.Repeat([]byte(" "), protocol.MaxWireBytes)...)); errorCode(err) != protocol.FrameTooLarge {
+	if _, err := protocol.Decode(append([]byte(`{"version":"0.2"}`), bytes.Repeat([]byte(" "), protocol.MaxWireBytes)...)); errorCode(err) != protocol.FrameTooLarge {
 		t.Fatal("oversize frame accepted")
 	}
 	machine := protocol.NewMachine(protocol.ConnectionNew, protocol.SessionNone, 0, 0)
-	hello, _ := protocol.NewFrame("hello", "10000000-0000-4000-8000-000000000012", 0, protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	hello, _ := protocol.NewFrame("hello", "10000000-0000-4000-8000-000000000012", 0, protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	data, _ := protocol.Marshal(hello)
 	decoded, _ := protocol.Decode(data)
 	if err := machine.Apply(protocol.ClientToAgent, decoded); err != nil {
@@ -630,7 +1441,7 @@ func TestWSSOversizeMessageClosesWith1009(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &testClient{t: t, ws: ws, id: "10000000-0000-4000-8000-000000000013"}
-	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	client.read("hello_ack")
 	if err := ws.WriteMessage(websocket.TextMessage, bytes.Repeat([]byte(" "), protocol.MaxWireBytes+1)); err != nil {
 		t.Fatal(err)
@@ -658,7 +1469,7 @@ func TestWrongAuthenticationProofAndSequenceReplayAreRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &testClient{t: t, ws: ws, id: "10000000-0000-4000-8000-000000000020"}
-	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, CredentialID: credential.ID, SupportedVersions: []string{"0.1"}})
+	client.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, CredentialID: credential.ID, SupportedVersions: []string{protocol.Version}})
 	client.read("hello_ack")
 	challenge := client.read("auth_challenge").Value.(*protocol.AuthChallengePayload)
 	client.send("auth_response", protocol.AuthResponsePayload{ChallengeID: challenge.ChallengeID, CredentialID: credential.ID, Proof: protocol.EncodeBase64(make([]byte, 32))})
@@ -672,9 +1483,9 @@ func TestWrongAuthenticationProofAndSequenceReplayAreRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	replay := &testClient{t: t, ws: replayWS, id: "10000000-0000-4000-8000-000000000021"}
-	replay.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	replay.send("hello", protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	replay.read("hello_ack")
-	duplicate, _ := protocol.NewFrame("hello", replay.id, 0, protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{"0.1"}})
+	duplicate, _ := protocol.NewFrame("hello", replay.id, 0, protocol.HelloPayload{ClientInstanceID: testClientID, SupportedVersions: []string{protocol.Version}})
 	raw, _ := protocol.Marshal(duplicate)
 	if err := replayWS.WriteMessage(websocket.TextMessage, raw); err != nil {
 		t.Fatal(err)
@@ -716,20 +1527,350 @@ func TestEndpointCloseCleansActiveTerminal(t *testing.T) {
 	}
 }
 
-func TestSessionRegistryEnforcesOneSession(t *testing.T) {
+func TestEndpointAllowsIndependentSessionsAboveLegacyBoundary(t *testing.T) {
+	endpoint, adapter, _ := newTestEndpoint(t)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	const sessionCount = 12
+	first, credential := pairAndAuthorize(t, endpoint, server)
+	clients := []*testClient{first}
+	for index := 2; index <= sessionCount; index++ {
+		connectionID := fmt.Sprintf("10000000-0000-4000-8000-%012d", index)
+		clients = append(clients, authorizeExisting(t, server, credential, connectionID))
+	}
+	sessionIDs := make([]string, 0, len(clients))
+	for _, client := range clients {
+		client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+		sessionIDs = append(sessionIDs, client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID)
+	}
+
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	sessions := append([]*fakeSession(nil), adapter.sessions...)
+	adapter.mu.Unlock()
+	if created != sessionCount {
+		t.Fatalf("created sessions = %d, want %d", created, sessionCount)
+	}
+
+	firstID := sessionIDs[0]
+	lastID := sessionIDs[len(sessionIDs)-1]
+	first.send("terminal_input", protocol.TerminalPayload{SessionID: firstID, Data: protocol.EncodeBase64([]byte("first"))})
+	clients[len(clients)-1].send("terminal_input", protocol.TerminalPayload{SessionID: lastID, Data: protocol.EncodeBase64([]byte("last"))})
+	first.send("resize", protocol.ResizePayload{SessionID: firstID, Dimensions: protocol.Dimensions{Columns: 101, Rows: 31}})
+	clients[len(clients)-1].send("resize", protocol.ResizePayload{SessionID: lastID, Dimensions: protocol.Dimensions{Columns: 112, Rows: 42}})
+	waitSessionState(t, sessions[0], "first", 101, 31)
+	waitSessionState(t, sessions[len(sessions)-1], "last", 112, 42)
+
+	first.send("close_session", protocol.CloseSessionPayload{SessionID: firstID, Reason: "user_request"})
+	first.read("session_closed")
+}
+
+func TestSessionRegistryConcurrentAdmissionHasNoFixedCountLimit(t *testing.T) {
 	adapter := &fakeAdapter{}
 	registry := sessionRegistry{adapter: adapter, now: time.Now}
-	first := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000001"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
-	second := &connection{credential: Credential{ID: "30000000-0000-4000-8000-000000000002"}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
-	id, err := registry.open(first, protocol.Dimensions{Columns: 80, Rows: 24})
+	const attempts = 24
+	results := make(chan error, attempts)
+	for index := 0; index < attempts; index++ {
+		index := index
+		go func() {
+			owner := &connection{credential: Credential{ID: fmt.Sprintf("30000000-0000-4000-8000-%012d", index+1)}, machine: protocol.NewMachine(protocol.ConnectionReady, protocol.SessionNone, 0, 0)}
+			_, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24})
+			results <- err
+		}()
+	}
+	for index := 0; index < attempts; index++ {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent open %d failed: %v", index, err)
+		}
+	}
+	adapter.mu.Lock()
+	created := len(adapter.sessions)
+	adapter.mu.Unlock()
+	if created != attempts {
+		t.Fatalf("created sessions = %d, want %d", created, attempts)
+	}
+	if err := registry.close("agent_shutdown"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStalledOpenDoesNotBlockUnrelatedSessionLifecycle(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation func(*sessionRegistry, *connection, string) error
+		verify    func(*testing.T, *fakeSession)
+	}{
+		{
+			name: "input",
+			operation: func(registry *sessionRegistry, owner *connection, id string) error {
+				return registry.input(owner, id, []byte{0})
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				session.mu.Lock()
+				length := session.input.Len()
+				session.mu.Unlock()
+				if length != 1 {
+					t.Fatalf("input length = %d, want 1", length)
+				}
+			},
+		},
+		{
+			name: "resize",
+			operation: func(registry *sessionRegistry, owner *connection, id string) error {
+				return registry.resize(owner, id, protocol.Dimensions{Columns: 101, Rows: 31})
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				session.mu.Lock()
+				columns, rows := session.columns, session.rows
+				session.mu.Unlock()
+				if columns != 101 || rows != 31 {
+					t.Fatalf("dimensions = %dx%d, want 101x31", columns, rows)
+				}
+			},
+		},
+		{
+			name: "close",
+			operation: func(registry *sessionRegistry, owner *connection, id string) error {
+				return registry.closeBy(owner, id, "user_request")
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				requireTestSessionClosed(t, "close", session)
+			},
+		},
+		{
+			name: "disconnect cleanup",
+			operation: func(registry *sessionRegistry, owner *connection, _ string) error {
+				registry.disconnected(owner, true)
+				return nil
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				requireTestSessionClosed(t, "disconnect cleanup", session)
+			},
+		},
+		{
+			name: "credential revocation",
+			operation: func(registry *sessionRegistry, owner *connection, _ string) error {
+				return registry.revokeCredential(owner.credentialID())
+			},
+			verify: func(t *testing.T, session *fakeSession) {
+				requireTestSessionClosed(t, "credential revocation", session)
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := newIgnoringContextOpenAdapter(2, 1)
+			t.Cleanup(adapter.unblock)
+			registry := sessionRegistry{adapter: adapter, now: time.Now}
+			firstOwner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 200+index))
+			secondOwner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 300+index))
+			firstID, err := registry.open(firstOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstSession := adapter.snapshot()[0]
+
+			openDone := make(chan error, 1)
+			go func() {
+				_, openErr := registry.open(secondOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+				openDone <- openErr
+			}()
+			select {
+			case <-adapter.started:
+			case <-time.After(3 * time.Second):
+				t.Fatal("second terminal creation did not reach the adapter")
+			}
+
+			operationDone := make(chan error, 1)
+			go func() { operationDone <- test.operation(&registry, firstOwner, firstID) }()
+			if err := awaitTestError(t, test.name, operationDone); err != nil {
+				t.Fatal(err)
+			}
+			test.verify(t, firstSession)
+
+			adapter.unblock()
+			if err := awaitTestError(t, "stalled terminal creation", openDone); err != nil {
+				t.Fatal(err)
+			}
+			if err := registry.shutdown(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestStalledOpenDoesNotBlockShutdownAndLateTerminalIsClosed(t *testing.T) {
+	adapter := newIgnoringContextOpenAdapter(2, 1)
+	t.Cleanup(adapter.unblock)
+	registry := sessionRegistry{adapter: adapter, now: time.Now}
+	firstOwner := testRegistryOwner("30000000-0000-4000-8000-000000000401")
+	secondOwner := testRegistryOwner("30000000-0000-4000-8000-000000000402")
+	if _, err := registry.open(firstOwner, protocol.Dimensions{Columns: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	firstSession := adapter.snapshot()[0]
+	openDone := make(chan error, 1)
+	go func() {
+		_, err := registry.open(secondOwner, protocol.Dimensions{Columns: 80, Rows: 24})
+		openDone <- err
+	}()
+	select {
+	case <-adapter.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("second terminal creation did not reach the adapter")
+	}
+
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- registry.shutdown() }()
+	if err := awaitTestError(t, "shutdown", shutdownDone); err != nil {
+		t.Fatal(err)
+	}
+	requireTestSessionClosed(t, "shutdown", firstSession)
+
+	adapter.unblock()
+	if err := awaitTestError(t, "late terminal creation", openDone); err == nil {
+		t.Fatal("terminal created after shutdown was admitted")
+	}
+	sessions := adapter.snapshot()
+	if len(sessions) != 2 {
+		t.Fatalf("created sessions = %d, want 2", len(sessions))
+	}
+	requireTestSessionClosed(t, "shutdown revalidation", sessions[1])
+	registry.mu.Lock()
+	active, pending := len(registry.active), len(registry.pending)
+	registry.mu.Unlock()
+	if active != 0 || pending != 0 {
+		t.Fatalf("shutdown accounting: active=%d pending=%d", active, pending)
+	}
+}
+
+func TestLateTerminalIsClosedAfterOwnerOrCredentialInvalidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		invalidate func(*sessionRegistry, *connection) error
+	}{
+		{
+			name: "owner disconnect",
+			invalidate: func(registry *sessionRegistry, owner *connection) error {
+				close(owner.done)
+				registry.disconnected(owner)
+				return nil
+			},
+		},
+		{
+			name: "credential revocation",
+			invalidate: func(registry *sessionRegistry, owner *connection) error {
+				return registry.revokeCredential(owner.credentialID())
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := newIgnoringContextOpenAdapter(1, 1)
+			t.Cleanup(adapter.unblock)
+			registry := sessionRegistry{adapter: adapter, now: time.Now}
+			owner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 500+index))
+			openDone := make(chan error, 1)
+			go func() {
+				_, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24})
+				openDone <- err
+			}()
+			select {
+			case <-adapter.started:
+			case <-time.After(3 * time.Second):
+				t.Fatal("terminal creation did not reach the adapter")
+			}
+
+			invalidateDone := make(chan error, 1)
+			go func() { invalidateDone <- test.invalidate(&registry, owner) }()
+			if err := awaitTestError(t, test.name, invalidateDone); err != nil {
+				t.Fatal(err)
+			}
+			adapter.unblock()
+			if err := awaitTestError(t, "invalidated terminal creation", openDone); err == nil {
+				t.Fatal("terminal created after admission invalidation was admitted")
+			}
+			sessions := adapter.snapshot()
+			if len(sessions) != 1 {
+				t.Fatalf("created sessions = %d, want 1", len(sessions))
+			}
+			requireTestSessionClosed(t, test.name, sessions[0])
+			registry.mu.Lock()
+			active, pending := len(registry.active), len(registry.pending)
+			registry.mu.Unlock()
+			if active != 0 || pending != 0 {
+				t.Fatalf("invalidated admission accounting: active=%d pending=%d", active, pending)
+			}
+		})
+	}
+}
+
+func TestConcurrentStalledAdmissionsHaveNoFixedCountLimit(t *testing.T) {
+	const attempts = 24
+	adapter := newIgnoringContextOpenAdapter(1, attempts)
+	t.Cleanup(adapter.unblock)
+	registry := sessionRegistry{adapter: adapter, now: time.Now}
+	results := make(chan error, attempts)
+	for index := 0; index < attempts; index++ {
+		index := index
+		go func() {
+			owner := testRegistryOwner(fmt.Sprintf("30000000-0000-4000-8000-%012d", 600+index))
+			_, err := registry.open(owner, protocol.Dimensions{Columns: 80, Rows: 24})
+			results <- err
+		}()
+	}
+	for index := 0; index < attempts; index++ {
+		select {
+		case <-adapter.started:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("terminal creation %d of %d did not reach the adapter", index+1, attempts)
+		}
+	}
+	adapter.unblock()
+	for index := 0; index < attempts; index++ {
+		if err := awaitTestError(t, "concurrent terminal creation", results); err != nil {
+			t.Fatalf("concurrent open %d failed: %v", index, err)
+		}
+	}
+	registry.mu.Lock()
+	active, pending := len(registry.active), len(registry.pending)
+	registry.mu.Unlock()
+	if active != attempts || pending != 0 {
+		t.Fatalf("admission accounting: active=%d pending=%d, want %d/0", active, pending, attempts)
+	}
+	if created := len(adapter.snapshot()); created != attempts {
+		t.Fatalf("created sessions = %d, want %d", created, attempts)
+	}
+	if err := registry.shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEndpointReportsActualAdapterOpenFailure(t *testing.T) {
+	sentinel := errors.New("synthetic adapter open failure")
+	endpoint, err := New(Config{
+		AllowedOrigin:  testOrigin,
+		AgentID:        testAgentID,
+		Terminal:       failingOpenAdapter{err: sentinel},
+		Credentials:    newMemoryCredentialStore(),
+		ApprovePairing: func(context.Context, PairingApproval) bool { return true },
+		ResolveDevice:  func(*http.Request) (string, error) { return "open-failure-device", nil },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.open(second, protocol.Dimensions{Columns: 80, Rows: 24}); err == nil {
-		t.Fatal("second terminal session was accepted")
-	}
-	if err := registry.closeBy(first, id, "user_request"); err != nil {
-		t.Fatal(err)
+	server := httptest.NewTLSServer(endpoint)
+	defer server.Close()
+	defer endpoint.Close()
+
+	client, _ := pairAndAuthorize(t, endpoint, server)
+	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+	if got := client.read("error").Value.(*protocol.ErrorPayload).Code; got != protocol.SessionOpenFailed {
+		t.Fatalf("adapter open error = %s, want %s", got, protocol.SessionOpenFailed)
 	}
 }
 
@@ -741,23 +1882,8 @@ func TestCanonicalAuthenticationProof(t *testing.T) {
 		challenge[index] = byte(index + 32)
 	}
 	proof := protocol.EncodeBase64(authProof(secret, "10000000-0000-4000-8000-000000000001", "20000000-0000-4000-8000-000000000001", challenge))
-	if proof != "Lc7B_pWvNKrS7lyj12dhdOZOh4NHEmLDgR1Rgc4TVYE" {
+	if proof != "loDDHqUw_0yYrBFNf9-3WqETNRyemfXDwj0ooSubU2w" {
 		t.Fatalf("proof = %s", proof)
-	}
-}
-
-func TestGeneratedCredentialExpiresInsideThirtyDayClientBoundary(t *testing.T) {
-	now := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
-	credential, err := generateCredential(now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := now.Add(30*24*time.Hour - 5*time.Minute)
-	if !credential.ExpiresAt.Equal(want) {
-		t.Fatalf("expiry = %s, want %s", credential.ExpiresAt, want)
-	}
-	if !credential.ExpiresAt.Before(now.Add(30 * 24 * time.Hour)) {
-		t.Fatal("credential expiry must leave client clock-skew headroom")
 	}
 }
 
@@ -824,7 +1950,7 @@ func TestLoggerReceivesNoSecretsOrTerminalPlaintext(t *testing.T) {
 	log := func(event Event) { encoded, _ = json.Marshal(event) }
 	log(Event{Name: "connection_rejected", Code: protocol.AuthenticationFailed, ConnectionID: "10000000-0000-4000-8000-000000000001"})
 	text := string(encoded)
-	for _, forbidden := range []string{"input-marker", "credentialSecret", "resumeGrant", "challenge"} {
+	for _, forbidden := range []string{"input-marker", "history-marker", "credentialSecret", "challenge"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("log contained %q", forbidden)
 		}
