@@ -73,6 +73,7 @@ document
     }
 
     if (destination.value === localHandshakeDestination) {
+      status.textContent = "Connecting";
       const socket = new WebSocket(localHandshakeDestination);
       socket.addEventListener("open", () => {
         status.textContent = "Connected";

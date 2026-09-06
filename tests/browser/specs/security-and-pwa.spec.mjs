@@ -71,9 +71,11 @@ test("WebSocket handshake accepts the approved page Origin and rejects a differe
   await page.locator(selectors.destination).fill(handshakeDestination);
   await page.locator(selectors.connect).click();
   await expect(page.locator(selectors.status)).toHaveText("Connected");
-  expect(await readRecordedEvents(page)).toContainEqual(
-    expect.objectContaining({ type: "handshake-origin-accepted" }),
-  );
+  await expect
+    .poll(() => readRecordedEvents(page))
+    .toContainEqual(
+      expect.objectContaining({ type: "handshake-origin-accepted" }),
+    );
 
   await page.goto(alternateBrowserUrl);
   await page.locator(selectors.destination).fill(handshakeDestination);
@@ -81,9 +83,11 @@ test("WebSocket handshake accepts the approved page Origin and rejects a differe
   await expect(page.locator(selectors.status)).toHaveText(
     "Rejected browser origin",
   );
-  expect(await readRecordedEvents(page)).toContainEqual(
-    expect.objectContaining({ type: "handshake-origin-rejected" }),
-  );
+  await expect
+    .poll(() => readRecordedEvents(page))
+    .toContainEqual(
+      expect.objectContaining({ type: "handshake-origin-rejected" }),
+    );
 });
 
 test("target reports the selected candidate identity", async ({ page }) => {
