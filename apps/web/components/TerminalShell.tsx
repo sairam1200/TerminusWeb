@@ -388,6 +388,7 @@ export function TerminalShell({
   const [saved, setSaved] =
     useState<ReturnType<typeof readPersistedConnectState>>();
   const [selectedMode, setSelectedMode] = useState<ConnectionMode>();
+  const [language, setLanguage] = useState<Language>("en");
   useEffect(() => {
     const timer = window.setTimeout(
       () => setSaved(readPersistedConnectState()),
@@ -460,9 +461,21 @@ export function TerminalShell({
         adapterFactory === undefined ? undefined : () => adapterFactory(profile)
       }
       protocolConfig={profile}
-      profiles={protocolConfig === undefined ? profiles : NO_PROFILES}
+      profiles={
+        protocolConfig === undefined
+          ? profiles
+          : profile
+            ? [profile]
+            : NO_PROFILES
+      }
+      language={language}
+      onSetLanguage={setLanguage}
       selectedMode={profile?.mode}
-      availableModes={availableProfiles.map((candidate) => candidate.mode)}
+      availableModes={
+        protocolConfig !== undefined && profile
+          ? [profile.mode]
+          : availableProfiles.map((candidate) => candidate.mode)
+      }
       onSelectProfile={selectProfile}
     />
   );
@@ -475,8 +488,12 @@ function TerminalWorkspace({
   selectedMode,
   onSelectProfile,
   availableModes,
+  language,
+  onSetLanguage,
 }: TerminalShellProps & {
   profiles: ConnectProfile[];
+  language: Language;
+  onSetLanguage: (language: Language) => void;
   availableModes: ConnectionMode[];
   selectedMode?: ConnectionMode;
   onSelectProfile: (mode: ConnectionMode) => void;
@@ -499,7 +516,6 @@ function TerminalWorkspace({
   const [markers, setMarkers] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [pairingCode, setPairingCode] = useState("");
-  const [language, setLanguage] = useState<Language>("en");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accent, setAccent] = useState<AccentKey>("violet");
   const [glow, setGlow] = useState<GlowKey>("medium");
@@ -893,44 +909,6 @@ function TerminalWorkspace({
       <div className="ambientGlow" aria-hidden="true" />
       <div className="ambientGrid" aria-hidden="true" />
 
-      {profiles.length > 1 && (
-        <label className="connectionMode">
-          {language === "en" ? "Connection mode" : "Anslutningsläge"}
-          <select
-            aria-label={
-              language === "en" ? "Connection mode" : "Anslutningsläge"
-            }
-            value={selectedMode}
-            disabled={busy || connected || connectionState === "pairing"}
-            onChange={(event) =>
-              onSelectProfile(event.currentTarget.value as ConnectionMode)
-            }
-          >
-            {profiles.map((profile) => (
-              <option
-                key={profile.mode}
-                value={profile.mode}
-                disabled={!availableModes.includes(profile.mode)}
-              >
-                {profile.mode === "local"
-                  ? language === "en"
-                    ? "Local (same machine)"
-                    : "Lokalt (samma dator)"
-                  : language === "en"
-                    ? "Private (Tailscale)"
-                    : "Privat (Tailscale)"}
-              </option>
-            ))}
-          </select>
-          {connected && (
-            <span>
-              {language === "en"
-                ? "Detach before changing connection mode."
-                : "Lämna sessionen innan du byter anslutningsläge."}
-            </span>
-          )}
-        </label>
-      )}
       <header className="neuralHeader">
         <div className="brandLockup">
           <span className="brandIcon">
@@ -943,26 +921,93 @@ function TerminalWorkspace({
         </div>
 
         <div className="headerActions">
-          <button
-            className="languageSwitch"
-            type="button"
-            aria-label={t.switchLanguage}
-            title={t.switchLanguage}
-            onClick={() =>
-              setLanguage((current) => (current === "en" ? "sv" : "en"))
-            }
-          >
-            {language === "en" ? <EnglishFlag /> : <SwedishFlag />}
-            <span>{language.toUpperCase()}</span>
-            <svg aria-hidden="true" width="9" height="9" viewBox="0 0 10 10">
-              <path
-                d="M2 4 5 1l3 3M2 6l3 3 3-3"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                fill="none"
-              />
-            </svg>
-          </button>
+          <div className="connectionPreferences">
+            <div
+              className="connectionMode"
+              role="group"
+              aria-label={
+                language === "en" ? "Connection mode" : "Anslutningsläge"
+              }
+            >
+              {(["local", "private"] as const).map((mode) => {
+                const target = profiles.find(
+                  (candidate) => candidate.mode === mode,
+                );
+                const label =
+                  mode === "local"
+                    ? language === "en"
+                      ? "Local"
+                      : "Lokalt"
+                    : language === "en"
+                      ? "Private"
+                      : "Privat";
+                const description =
+                  mode === "local"
+                    ? language === "en"
+                      ? "Local terminal on this computer"
+                      : "Lokal terminal på denna dator"
+                    : language === "en"
+                      ? "Private terminal over Tailscale"
+                      : "Privat terminal via Tailscale";
+                const locked =
+                  busy || connected || connectionState === "pairing";
+                const hint = locked
+                  ? language === "en"
+                    ? "Detach or cancel the connection before switching."
+                    : "Lämna eller avbryt anslutningen innan du byter."
+                  : !target
+                    ? language === "en"
+                      ? `${description}: not configured.`
+                      : `${description}: inte konfigurerad.`
+                    : description;
+                if (target && !availableModes.includes(mode) && !locked) {
+                  // Each agent permits its configured page origin. Navigate without
+                  // carrying session fragments or credentials to the other profile.
+                  return (
+                    <a
+                      key={mode}
+                      href={target.expectedWebOrigin}
+                      title={hint}
+                      aria-label={description}
+                    >
+                      {label}
+                    </a>
+                  );
+                }
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-label={description}
+                    aria-pressed={selectedMode === mode}
+                    title={hint}
+                    disabled={locked || !target}
+                    onClick={() => onSelectProfile(mode)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              className="languageSwitch"
+              type="button"
+              aria-label={t.switchLanguage}
+              title={t.switchLanguage}
+              onClick={() => onSetLanguage(language === "en" ? "sv" : "en")}
+            >
+              {language === "en" ? <EnglishFlag /> : <SwedishFlag />}
+              <span>{language.toUpperCase()}</span>
+              <svg aria-hidden="true" width="9" height="9" viewBox="0 0 10 10">
+                <path
+                  d="M2 4 5 1l3 3M2 6l3 3 3-3"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  fill="none"
+                />
+              </svg>
+            </button>
+          </div>
 
           <p
             className={`statusPill status-${connectionState}`}
