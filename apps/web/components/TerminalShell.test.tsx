@@ -643,14 +643,23 @@ describe("merged connection profiles with renderer", () => {
         adapterFactory={factory}
       />,
     );
-    const selector = screen.getByRole("combobox", { name: "Connection mode" });
-    expect(selector).toHaveValue("private");
+    const selector = screen.getByRole("button", {
+      name: "Local terminal on this computer",
+    });
+    expect(
+      screen.getByRole("button", { name: "Private terminal over Tailscale" }),
+    ).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Reconnect" }));
     expect(selector).toBeDisabled();
     window.history.replaceState(null, "", "#/s/k7m4-p2q9-wxyz");
     await user.click(screen.getAllByRole("button", { name: "Detach" })[0]);
     await waitFor(() => expect(selector).toBeEnabled());
-    await user.selectOptions(selector, "local");
+    await user.click(screen.getByRole("button", { name: "Switch to Swedish" }));
+    await user.click(selector);
+    expect(
+      screen.getByRole("button", { name: "Byt till engelska" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Byt till engelska" }));
     expect(window.location.hash).toBe("");
     expect(xtermMock.dispose).toHaveBeenCalled();
     expect(
@@ -683,8 +692,8 @@ describe("merged connection profiles with renderer", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("combobox", { name: "Connection mode" }),
-      ).toHaveValue("private"),
+        screen.getByRole("button", { name: "Private terminal over Tailscale" }),
+      ).toHaveAttribute("aria-pressed", "true"),
     );
     expect(factory).toHaveBeenLastCalledWith(profiles[1]);
     expect(
@@ -715,7 +724,7 @@ it("shows origin guidance instead of constructing a mismatched protocol client",
   );
 });
 
-it("selects an origin-compatible real adapter and disables incompatible profiles", () => {
+it("selects an origin-compatible real adapter and links to the other configured origin", () => {
   render(
     <TerminalShell
       defaultMode="private"
@@ -733,12 +742,12 @@ it("selects an origin-compatible real adapter and disables incompatible profiles
       ]}
     />,
   );
-  expect(screen.getByRole("combobox", { name: "Connection mode" })).toHaveValue(
-    "local",
-  );
   expect(
-    screen.getByRole("option", { name: "Private (Tailscale)" }),
-  ).toBeDisabled();
+    screen.getByRole("button", { name: "Local terminal on this computer" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    screen.getByRole("link", { name: "Private terminal over Tailscale" }),
+  ).toHaveAttribute("href", "https://preview.example.invalid");
   expect(screen.getByRole("button", { name: "Connect locally" })).toBeVisible();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
@@ -750,4 +759,41 @@ it("returns protocol shortcut focus to xterm", async () => {
   xtermMock.focus.mockClear();
   await user.click(screen.getByRole("button", { name: "Send Tab" }));
   expect(xtermMock.focus).toHaveBeenCalledOnce();
+});
+
+it("shows both modes beside language when endpoints are not configured", () => {
+  render(<TerminalShell />);
+  const local = screen.getByRole("button", {
+    name: "Local terminal on this computer",
+  });
+  const remote = screen.getByRole("button", {
+    name: "Private terminal over Tailscale",
+  });
+  expect(local).toBeDisabled();
+  expect(remote).toBeDisabled();
+  expect(local).toHaveAttribute(
+    "title",
+    "Local terminal on this computer: not configured.",
+  );
+  expect(local.closest(".connectionPreferences")).toContainElement(
+    screen.getByRole("button", { name: "Switch to Swedish" }),
+  );
+});
+
+it("marks an explicitly configured local endpoint as selected", () => {
+  render(
+    <TerminalShell
+      protocolConfig={{
+        mode: "local",
+        endpoint: "wss://127.0.0.1:4176/terminal",
+        expectedWebOrigin: window.location.origin,
+      }}
+    />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Local terminal on this computer" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    screen.getByRole("button", { name: "Private terminal over Tailscale" }),
+  ).toBeDisabled();
 });
