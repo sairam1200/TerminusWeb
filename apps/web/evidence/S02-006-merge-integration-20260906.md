@@ -20,3 +20,10 @@ The user authorized merging all branches and retaining the best conflict/UI beha
 ## Evidence limits
 
 Tests use labelled adapters, fake WebSockets/IndexedDB, and JSDOM. Independent exact-product review and desktop/mobile real-browser simulation are pending with /root/verification. No real terminal, physical iPhone, deployment, push, live agent, certificate or Tailscale change is claimed. Session 06 integration/release gates remain separate.
+
+
+## Origin-selection review follow-up
+
+Independent reviewer /root/verification and maker self-review identified inherited main behavior: a configured/saved local profile could be chosen on a private HTTPS page, throwing during adapter construction. The follow-up waits for client hydration, chooses only profiles matching the actual page origin, disables incompatible mode options, and presents accessible configuration guidance if no profile matches. It does not fall back to a simulated terminal or relax endpoint validation. Two regressions exercise the real adapter constructor (no adapterFactory) for mismatched configuration and valid local fallback from an incompatible preferred private mode.
+
+Final follow-up owner tests: npm test PASS 73/73 across 9 files; typecheck PASS; lint initially caught an unescaped apostrophe in the new guidance, corrected and rerun PASS. Follow-up production build and independent browser outcome are recorded in the status handoff.

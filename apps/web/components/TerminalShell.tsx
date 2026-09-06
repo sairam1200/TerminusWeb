@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Terminal } from "@xterm/xterm";
 import {
@@ -12,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type {
   TerminalAdapter,
@@ -38,6 +39,7 @@ import {
 } from "../protocol/connectConfig";
 
 const NO_PROFILES: ConnectProfile[] = [];
+const subscribeToClient = () => () => undefined;
 
 type Language = "en" | "sv";
 type AccentKey = "violet" | "cyan" | "rose" | "emerald";
@@ -378,6 +380,11 @@ export function TerminalShell({
   protocolProfiles = NO_PROFILES,
   defaultMode,
 }: TerminalShellProps) {
+  const clientReady = useSyncExternalStore(
+    subscribeToClient,
+    () => true,
+    () => false,
+  );
   const [saved, setSaved] =
     useState<ReturnType<typeof readPersistedConnectState>>();
   const [selectedMode, setSelectedMode] = useState<ConnectionMode>();
@@ -392,6 +399,12 @@ export function TerminalShell({
     () => resolveProfiles(protocolProfiles, saved),
     [protocolProfiles, saved],
   );
+  const availableProfiles =
+    clientReady && adapterFactory === undefined
+      ? profiles.filter(
+          (candidate) => candidate.expectedWebOrigin === window.location.origin,
+        )
+      : profiles;
   const profile =
     protocolConfig !== undefined
       ? {
@@ -400,7 +413,7 @@ export function TerminalShell({
             protocolConfig.mode ?? defaultMode ?? ("private" as ConnectionMode),
         }
       : selectInitialProfile(
-          profiles,
+          availableProfiles,
           selectedMode ?? saved?.selectedMode,
           defaultMode,
         );
@@ -415,6 +428,31 @@ export function TerminalShell({
     setSelectedMode(mode);
     persistConnectState({ selectedMode: mode, profiles });
   };
+  if (!clientReady && (protocolConfig !== undefined || profiles.length > 0)) {
+    return (
+      <main className="terminusApp">
+        <p role="status">Preparing terminal connection...</p>
+      </main>
+    );
+  }
+  if (
+    adapterFactory === undefined &&
+    clientReady &&
+    ((protocolConfig !== undefined &&
+      protocolConfig.expectedWebOrigin !== window.location.origin) ||
+      (protocolConfig === undefined &&
+        profiles.length > 0 &&
+        availableProfiles.length === 0))
+  ) {
+    return (
+      <main className="terminusApp">
+        <p role="alert">
+          No connection profile matches the current page origin. Open Terminus
+          at the configured web address for local or private access.
+        </p>
+      </main>
+    );
+  }
   return (
     <TerminalWorkspace
       key={profile === undefined ? "simulation" : JSON.stringify(profile)}
@@ -424,6 +462,7 @@ export function TerminalShell({
       protocolConfig={profile}
       profiles={protocolConfig === undefined ? profiles : NO_PROFILES}
       selectedMode={profile?.mode}
+      availableModes={availableProfiles.map((candidate) => candidate.mode)}
       onSelectProfile={selectProfile}
     />
   );
@@ -435,8 +474,10 @@ function TerminalWorkspace({
   profiles,
   selectedMode,
   onSelectProfile,
+  availableModes,
 }: TerminalShellProps & {
   profiles: ConnectProfile[];
+  availableModes: ConnectionMode[];
   selectedMode?: ConnectionMode;
   onSelectProfile: (mode: ConnectionMode) => void;
 }) {
@@ -859,7 +900,11 @@ function TerminalWorkspace({
             }
           >
             {profiles.map((profile) => (
-              <option key={profile.mode} value={profile.mode}>
+              <option
+                key={profile.mode}
+                value={profile.mode}
+                disabled={!availableModes.includes(profile.mode)}
+              >
                 {profile.mode === "local"
                   ? language === "en"
                     ? "Local (same machine)"

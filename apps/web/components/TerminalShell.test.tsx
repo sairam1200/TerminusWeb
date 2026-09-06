@@ -691,3 +691,53 @@ describe("merged connection profiles with renderer", () => {
     ).toBeVisible();
   });
 });
+
+it("shows origin guidance instead of constructing a mismatched protocol client", () => {
+  render(
+    <TerminalShell
+      protocolProfiles={[
+        {
+          mode: "local",
+          endpoint: "wss://127.0.0.1:4176/terminal",
+          expectedWebOrigin: "http://127.0.0.1:4176",
+        },
+        {
+          mode: "private",
+          endpoint: "wss://agent.private.invalid/terminal",
+          expectedWebOrigin: "https://preview.example.invalid",
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "No connection profile matches",
+  );
+});
+
+it("selects an origin-compatible real adapter and disables incompatible profiles", () => {
+  render(
+    <TerminalShell
+      defaultMode="private"
+      protocolProfiles={[
+        {
+          mode: "local",
+          endpoint: "wss://127.0.0.1:4176/terminal",
+          expectedWebOrigin: window.location.origin,
+        },
+        {
+          mode: "private",
+          endpoint: "wss://agent.private.invalid/terminal",
+          expectedWebOrigin: "https://preview.example.invalid",
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByRole("combobox", { name: "Connection mode" })).toHaveValue(
+    "local",
+  );
+  expect(
+    screen.getByRole("option", { name: "Private (Tailscale)" }),
+  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Connect locally" })).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
