@@ -278,3 +278,10 @@ tasks:
     title: Independently review recovered branch assembly and UI integration repairs
     depends_on: []
     evidence: Exact recovered SHA, branch ancestry, conflict markers, CI preservation, focused repair review and deterministic browser evidence; explicitly retain live-device and S05-008-RESOURCE-001 release limitations.
+
+  - id: S01-007
+    owner: session_01
+    state: done
+    title: Protect main from direct branch pushes and unexpected local merges
+    depends_on: [S01-006]
+    evidence: User requested future branch commits and pushes remain isolated; interpreted as protecting main until an explicit merge. Independently reviewed GitHub main protection requires PRs for administrators, prohibits force pushes and deletion, and resolves conversations. API readback confirms main and feature branch behavior; local simple pushes and fast-forward-only pulls verified. No push or deployment performed; Vercel live settings remain unverified due account access.
