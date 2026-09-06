@@ -67,6 +67,7 @@ otherwise.
    when starting the TypeScript worker. The unchanged approved outside-sandbox
    rerun exited 0, compiled and typechecked, and statically generated `/`,
    `/_not-found`, and `/manifest.webmanifest`.
+
 6. Generated-output checks:
    - `.next/routes-manifest.json` contains the exact header
      `connect-src 'self' wss://sai.tailf8dcea.ts.net` and no other network
@@ -104,7 +105,7 @@ Selected API output was restricted to non-secret metadata.
   fields confirm `rootDirectory=apps/web`, `nodeVersion=24.x`,
   `buildCommand=null`, and `productionBranch=main`.
 - `curl.exe --silent --show-error --dump-header - --output NUL
-  https://terminus-web.vercel.app/`: exit 0; `HTTP/1.1 200 OK`, `Server: Vercel`,
+https://terminus-web.vercel.app/`: exit 0; `HTTP/1.1 200 OK`, `Server: Vercel`,
   HSTS enabled, and live CSP includes only
   `connect-src 'self' wss://sai.tailf8dcea.ts.net`.
 - Playwright CLI opened the stable Origin in Chromium, title `Terminus`.
