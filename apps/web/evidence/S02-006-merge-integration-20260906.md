@@ -27,3 +27,8 @@ Tests use labelled adapters, fake WebSockets/IndexedDB, and JSDOM. Independent e
 Independent reviewer /root/verification and maker self-review identified inherited main behavior: a configured/saved local profile could be chosen on a private HTTPS page, throwing during adapter construction. The follow-up waits for client hydration, chooses only profiles matching the actual page origin, disables incompatible mode options, and presents accessible configuration guidance if no profile matches. It does not fall back to a simulated terminal or relax endpoint validation. Two regressions exercise the real adapter constructor (no adapterFactory) for mismatched configuration and valid local fallback from an incompatible preferred private mode.
 
 Final follow-up owner tests: npm test PASS 73/73 across 9 files; typecheck PASS; lint initially caught an unescaped apostrophe in the new guidance, corrected and rerun PASS. Follow-up production build and independent browser outcome are recorded in the status handoff.
+
+
+## Independent browser focus follow-up
+
+Reviewer /root/verification exercised the actual UI on desktop and mobile simulation and found shortcut buttons retained focus. The shortcut-only helper now restores focus to xterm for the protocol renderer and the composer for simulation, without changing typing or paste handlers. Unit regression covers both paths. Final cumulative owner npm test PASS 74/74 across 9 files; npm run lint PASS; no-endpoint npm run build PASS including its TypeScript gate and static generation. No-endpoint production output supports the final independent simulation browser run.

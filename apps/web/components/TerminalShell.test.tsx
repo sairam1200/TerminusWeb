@@ -99,6 +99,7 @@ describe("TerminalShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Send Escape" }));
     expect(inputSpy).toHaveBeenCalledWith("\u001b");
+    expect(input).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(screen.getByRole("status")).toHaveTextContent(/disconnected/i);
@@ -740,4 +741,13 @@ it("selects an origin-compatible real adapter and disables incompatible profiles
   ).toBeDisabled();
   expect(screen.getByRole("button", { name: "Connect locally" })).toBeVisible();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("returns protocol shortcut focus to xterm", async () => {
+  const user = userEvent.setup();
+  const adapter = new ProtocolUiAdapter("connected");
+  render(<TerminalShell adapterFactory={() => adapter} />);
+  xtermMock.focus.mockClear();
+  await user.click(screen.getByRole("button", { name: "Send Tab" }));
+  expect(xtermMock.focus).toHaveBeenCalledOnce();
 });
