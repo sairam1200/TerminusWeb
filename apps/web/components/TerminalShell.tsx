@@ -808,6 +808,13 @@ function TerminalWorkspace({
     [adapter, connectionState],
   );
 
+  const sendShortcut = (value: string) => {
+    if (connectionState !== "connected") return;
+    send(value);
+    if (protocolClient) xtermRef.current?.focus();
+    else inputRef.current?.focus();
+  };
+
   const connect = async () => {
     setNewSessionFailed(false);
     const fragment =
@@ -1205,7 +1212,7 @@ function TerminalWorkspace({
                 type="button"
                 aria-label={t.sendKey(t.keyNames[key.id])}
                 disabled={!connected}
-                onClick={() => send(key.value)}
+                onClick={() => sendShortcut(key.value)}
               >
                 {key.label}
               </button>
@@ -1221,14 +1228,14 @@ function TerminalWorkspace({
                 label="↑"
                 name={t.keyNames.up}
                 disabled={!connected}
-                onPress={() => send("\u001b[A")}
+                onPress={() => sendShortcut("\u001b[A")}
               />
               <span />
               <ControlKey
                 label="←"
                 name={t.keyNames.left}
                 disabled={!connected}
-                onPress={() => send("\u001b[D")}
+                onPress={() => sendShortcut("\u001b[D")}
               />
               <span className="directionCenter" aria-hidden="true">
                 <span />
@@ -1237,14 +1244,14 @@ function TerminalWorkspace({
                 label="→"
                 name={t.keyNames.right}
                 disabled={!connected}
-                onPress={() => send("\u001b[C")}
+                onPress={() => sendShortcut("\u001b[C")}
               />
               <span />
               <ControlKey
                 label="↓"
                 name={t.keyNames.down}
                 disabled={!connected}
-                onPress={() => send("\u001b[B")}
+                onPress={() => sendShortcut("\u001b[B")}
               />
               <span />
             </div>
@@ -1255,7 +1262,7 @@ function TerminalWorkspace({
                 type="button"
                 aria-label={t.sendKey(t.keyNames.enter)}
                 disabled={!connected}
-                onClick={() => send("\r")}
+                onClick={() => sendShortcut("\r")}
               >
                 ENTER <span aria-hidden="true">↵</span>
               </button>
@@ -1264,7 +1271,7 @@ function TerminalWorkspace({
                   type="button"
                   aria-label={t.sendKey(t.keyNames.delete)}
                   disabled={!connected}
-                  onClick={() => send("\u007f")}
+                  onClick={() => sendShortcut("\u007f")}
                 >
                   ⌫ {language === "en" ? "DEL" : "RADERA"}
                 </button>
@@ -1272,7 +1279,7 @@ function TerminalWorkspace({
                   type="button"
                   aria-label={t.sendKey(t.keyNames.clear)}
                   disabled={!connected}
-                  onClick={() => send("\u000c")}
+                  onClick={() => sendShortcut("\u000c")}
                 >
                   ⌧ {language === "en" ? "CLR" : "RENSA"}
                 </button>
