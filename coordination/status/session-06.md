@@ -1,12 +1,77 @@
 # Session 06 Status
 
-- Current task: unassigned
-- State: not_started
+## S06-006 production Origin freeze
+
+- Current task: `S06-006` — Freeze the authorized production HTTPS Origin for the current web source.
+- State: owner `done`; named independent review passed. Session 01 owns the queue transition.
+- Branch: `session/06-verification-release`.
+- Exact input: detached, clean web product `bf7ca71b437907e7d25251e54d59355440797ad4`.
+- Frozen configuration: HTTPS Origin `https://terminus-web.vercel.app`; private WSS destination `wss://sai.tailf8dcea.ts.net`; Vercel project `gaddr/terminus-web`; Root Directory `apps/web`; Node `24.x`; production branch `main`; no build-command override.
+- Files changed:
+  - `infrastructure/vercel/S06-006-production-origin-evidence.md`: immutable, secret-free local build, generated CSP/configuration, live HTTPS/Vercel, browser-render, and failed-Preview identity evidence.
+- Commands/evidence:
+  - `npm ci`: sandbox `spawn EPERM`; unchanged approved rerun exit 0, 443 packages, 0 vulnerabilities.
+  - `npm run typecheck`: exit 0. `npm run lint`: exit 0.
+  - `npx vitest run --reporter=verbose`: sandbox `spawn EPERM`; unchanged approved rerun exit 0, 7 files/41 tests, 0 skipped.
+  - Process-scoped exact Origin/WSS `npm run build`: sandbox compiled then `spawn EPERM` at the TypeScript worker; unchanged approved rerun exit 0 and statically generated `/`, `/_not-found`, and `/manifest.webmanifest`.
+  - Generated `.next/routes-manifest.json` contains exact `connect-src 'self' wss://sai.tailf8dcea.ts.net`; prerender/server output embeds that endpoint and exact expected Origin. Manifest SHA-256: `4C1AE9980DF5CCDC2A0FCC68E8C64572E69E8C8489A037438334BFF7B104016B`.
+  - `npm run format:check`: exit 1 on 32 unchanged files because this Windows checkout is `i/lf w/crlf` under system `core.autocrlf=true`. The product worktree remained clean; `git diff --exit-code` and `git diff --check` exited 0. No product file was rewritten.
+  - Authenticated read-only Vercel CLI/API: project/root/runtime/default build settings and `productionBranch=main` independently reproduced.
+  - Live `curl` returned HTTPS 200, Vercel/HSTS headers, and the exact private WSS CSP. Playwright Chromium rendered desktop and `390 x 844` mobile snapshots with 0 console errors/warnings; this is asset evidence only.
+  - Stable alias deployment `dpl_9h1hGq6DPsQykoBkVogqcbUxxv2u` is READY but serves older ancestor `5762f5865608596c8198d583a2dbd394ac973a7b`, not `bf7ca71...`; no deployment claim is made for the candidate.
+  - Failed Preview `dpl_988Hz8bhsduMSowLoTKZBBJjRxiU` cloned `aa09734` and failed with no `pages` or `app` directory. Git confirms `aa09734...` has only `apps/web/.gitkeep` and no package manifest, so it is not web source.
+- Evidence classification: exact local real-code gates plus real read-only Vercel/HTTPS/Chromium metadata. No terminal path, mTLS/client-CA, mobile Firefox/Chrome/Safari, physical device, Tailscale, ConPTY, or certificate behavior is claimed.
+- Independent reviewer/evidence: `/root/mobile_cert_compat` returned conditional PASS for actual evidence commit `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5` and actual web product `bf7ca71b437907e7d25251e54d59355440797ad4`. The reviewer verified queue authorization at `097b2b085b7df02504d00c8274921db5f6e31885`, typecheck/lint PASS, Vitest 41/41, generated routes-manifest hash, exact CSP/Origin pair, 37 web paths, direct WebSocket/no API relay, single owned Markdown scope, and a clean secret scan. The reviewer did not independently re-query Vercel and retained the unchanged CRLF-only format-check caveat.
+- Review-request correction: the review request contained identifier typos only. The reviewer inspected the actual full SHAs above; no product or evidence defect resulted, and no commit was rewritten.
+- Assumptions/limitations: the task freezes an Origin and proves deployability; it intentionally does not deploy. Candidate deployment remains gated on the verified integration candidate.
+- Blockers/requests: none for S06-006 owner completion. Session 01 owns any queue transition.
+- Product/task commit: `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5`.
+- Initial status-only handoff: `13bed730095e3da2d37e4d157fa203cc0fa56594`.
+- Reviewed status-only handoff: resolve from branch HEAD after this new status-only commit.
+- Safety: lock `VERCEL-20260830-01` stayed read-only. No deploy, promotion, push, merge, setting/env, DNS/Tailscale/certificate, or browser-login mutation.
+
+## Prior S06-001 handoff
+
+- Current task: S06-001 — Create independent contract and browser verification harness
+- State: done; handoff ready for Session 01 queue review
 - Branch: `session/06-verification-release`
-- Files changed: none
-- Commands/evidence: none
-- Independent reviewer/evidence: none
-- Assumptions: none
-- Blockers/requests: none
-- Product/task commit: none
+- Files changed:
+  - `tests/contract/**`: transport-neutral runner, opaque capability cases, labelled double, fail-closed real adapter switch, and commit-object validation.
+  - `tests/browser/**`: Playwright desktop/iPhone-sized matrix, loopback-only PWA/terminal double, real-profile switch, actual WebSocket Origin allow/deny handshake, layout, keyboard, paste, resize, reconnect, focus, accessibility, CSP, destination, PWA, and candidate-identity checks.
+  - `tests/integration/**`: secret-safe environment schema/example/validator that separates browser HTTPS Origin from the private WSS destination and labels double/simulated/staging/real-device evidence.
+  - `.github/workflows/session-06-harness.yml`: path-scoped, read-only-permission CI jobs for the labelled contract, input-schema, and browser harnesses.
+  - `infrastructure/vercel/README.md`: preview evidence boundary only; no deployment configuration or live mutation.
+- Commands/evidence:
+  - Environment: Windows `10.0.26200.0`; PowerShell `5.1.26100.9168`; Node `v24.15.0`; npm `11.14.1`; Playwright `1.62.1`.
+  - `npm install --ignore-scripts --package-lock-only` in contract, integration, and browser harnesses: exit 0; lockfiles created; zero audit findings at install time.
+  - `npm view @playwright/test version dist.integrity`: exit 0 against the official npm registry; `1.62.1`, integrity `sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ==`.
+  - `npm view prettier version dist.integrity`: exit 0 against the official npm registry; `3.9.6`, integrity `sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==`.
+  - `git ls-remote` against the official `actions/checkout` and `actions/setup-node` repositories: exit 0; `v4` refs resolved to `11d5960a326750d5838078e36cf38b85af677262` and `49933ea5288caeca8642d1e84afbd3f7d6820020` respectively.
+  - `npm run format:check` from `tests/browser`: exit 0; every owned harness/workflow artifact matched Prettier formatting.
+  - `npm run lint` from `tests/browser`: exit 0; syntax-valid `18` JavaScript modules and `9` JSON/manifest files. No TypeScript exists in S06-001, so type checking is not applicable.
+  - `npm test` from `tests/contract`: exit 0; `17/17` passed, `0` skipped. Evidence class: `labelled-test-double`.
+  - `npm test` from `tests/integration`: exit 0; `4/4` passed, `0` skipped. This proves input validation only.
+  - `npm test` from `tests/browser`: exit 0; `24/24` passed across desktop Chromium and iPhone-sized Chromium, `0` skipped. Evidence class: local `labelled-test-double`.
+  - `npm run test:real` with missing required inputs: contract exit 1 and browser exit 1 as expected; real modes fail closed.
+  - Real-mode reruns with syntactically valid all-zero candidate SHAs: contract exit 1 and browser exit 1 because the SHA did not resolve to a local Git commit object.
+  - `npm run validate:real` without real inputs: exit 1 as expected; missing variable names reported without values.
+  - `Get-NetTCPConnection -State Listen -LocalPort 4176,4177`: both temporary test-double listeners were `127.0.0.1` only; after Ctrl+C neither listener remained.
+  - Credential-pattern scan over owned source/workflow paths: `rg` exit 1 with no matches. Skip/only/TODO/FIXME scan: `rg` exit 1 with no matches.
+  - Workflow YAML parsed locally with PyYAML `6.0.3`: exit 0, three jobs. `git diff --check`: exit 0.
+  - GitHub-hosted Ubuntu/Node 22 CI was defined but not run because nothing was pushed; no CI success is claimed.
+- Independent reviewer/evidence:
+  - Reviewer: `/root/s06_001_reviewer` (read-only subagent).
+  - Initial review of `eeec506d056c069e7992345acd12a52c9439af5e`: FAIL. It found destination allowlisting incorrectly labelled as browser Origin rejection, an incorrect WSS-origin integration input, and missing paste/accessibility coverage.
+  - Corrective commit `38cff84fe193a43eb7d0f2b13406fc06afda2835` preserved the initial commit and addressed every finding.
+  - Fresh cumulative review of exact candidate `38cff84fe193a43eb7d0f2b13406fc06afda2835`: PASS. Reviewer reproduced format, syntax, `17/17` contract, `4/4` integration-input, and `24/24` browser results; verified actual allowed/denied browser WebSocket upgrades, loopback-only listeners, no skips, no credential/plaintext logging, no ownership violations, exact candidate-object acceptance, and nonexistent-SHA rejection.
+  - Final diagnostic-redaction commit `4d01799ea9f802427fcc78c22dda7e7ef75c0d0e` removed printable `event.key` values and printable test input. Final delta review of that exact cumulative candidate: PASS. A direct Chromium probe returned only `content-redacted` plus modifier booleans; keyboard/paste behavior remained covered, `24/24` browser tests passed, and no content-bearing failure artifact was produced.
+- Assumptions/limitations:
+  - Protocol 0.1 and real consumer artifacts were unavailable on all local session refs when S06-001 began. Opaque harness cases are capability labels, not protocol fixtures.
+  - Browser results use local Chromium over a loopback `ws://` labelled double. They do not verify WSS, Vercel preview, Tailscale, real web/agent consumers, Safari, a physical iPhone, ConPTY, or live network policy.
+  - No deployment, merge, push, live infrastructure mutation, or product-code repair occurred.
+- Blockers/requests: none for S06-001. S06-002 remains dependency-blocked by the authoritative Session 01 queue.
+- Product/task commits:
+  - Base harness: `eeec506d056c069e7992345acd12a52c9439af5e`.
+  - Reviewer correction: `38cff84fe193a43eb7d0f2b13406fc06afda2835`.
+  - Diagnostic redaction and final cumulative candidate tip: `4d01799ea9f802427fcc78c22dda7e7ef75c0d0e`.
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit
