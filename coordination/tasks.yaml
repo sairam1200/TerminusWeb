@@ -249,3 +249,32 @@ tasks:
     title: Verify integrated first-slice candidate
     depends_on: [S01-003]
     evidence: Exact integration SHA, full deterministic gate results, negative paths, and final pass/fail report.
+
+  - id: S01-006
+    owner: session_01
+    state: in_progress
+    title: Recover repositories and consolidate all user-authorized branch histories
+    depends_on: []
+    requires_user_authorization: true
+    evidence: User request on 2026-09-06 explicitly authorizes merging all branches and resolving UI conflicts. Preserve source copies and bundles; reconcile local and remote histories on a recovery branch; record conflict decisions and deterministic evidence. This recovery assembly does not satisfy S01-002/S01-003 verified-release gates.
+
+  - id: S02-006
+    owner: session_02
+    state: in_progress
+    title: Combine protocol 0.2 renderer with local and private connection profiles
+    depends_on: [S02-005]
+    evidence: Preserve xterm, remembered sessions, settings, language and mobile controls; retain strict destination and Origin checks, clock-skew and browser-close fixes; test both connection modes and build the combined UI.
+
+  - id: S03-008
+    owner: session_03
+    state: in_progress
+    title: Preserve credential clock-skew headroom during repository recovery
+    depends_on: [S03-007]
+    evidence: Retain reviewed protocol 0.2 lifecycle and remembered sessions, restore bounded credential expiry headroom and its regression test, run Go tests and vet.
+
+  - id: S06-008
+    owner: session_06
+    state: ready
+    title: Independently review recovered branch assembly and UI integration repairs
+    depends_on: []
+    evidence: Exact recovered SHA, branch ancestry, conflict markers, CI preservation, focused repair review and deterministic browser evidence; explicitly retain live-device and S05-008-RESOURCE-001 release limitations.
