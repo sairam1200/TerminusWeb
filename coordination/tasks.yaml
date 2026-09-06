@@ -252,7 +252,7 @@ tasks:
 
   - id: S01-006
     owner: session_01
-    state: in_progress
+    state: done
     title: Recover repositories and consolidate all user-authorized branch histories
     depends_on: []
     requires_user_authorization: true
@@ -274,7 +274,7 @@ tasks:
 
   - id: S06-008
     owner: session_06
-    state: ready
+    state: done
     title: Independently review recovered branch assembly and UI integration repairs
     depends_on: []
     evidence: Exact recovered SHA, branch ancestry, conflict markers, CI preservation, focused repair review and deterministic browser evidence; explicitly retain live-device and S05-008-RESOURCE-001 release limitations.
