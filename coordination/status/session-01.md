@@ -1,5 +1,22 @@
 # Session 01 Status
 
+## S01-007 branch isolation safeguards (2026-09-06)
+
+- State: done for remote-main branch isolation and local safe defaults. User asked future commits/pushes to branches not affect other work. A clarification was offered; work proceeded with the stated assumption of protecting main until explicit merge. Live Vercel isolation is not claimed.
+- Worktree/branch: E:/terminus/.worktrees/branch-isolation on maintenance/branch-isolation-20260906. Root main remains de5f062632d3e0f60023ddae592e09eb696b0bd5 and four pre-existing untracked helper files remain untouched.
+- Product/evidence commit: 30c4f71cc322e63df863b371cf6245b0e0bb033e; contains only Session 01 queue/facts evidence. This status is the separate handoff commit. Both commits include the prompt-triggered Co-Authored-By trailer exactly once. Neither commit was pushed or merged into main.
+- Independent reviewer: /root/verification read the exact main-protection.json payload and local-default proposal; PASS for branch-isolation scope. Explicit caveats: zero approvals allows sole-owner PR merges; status checks are not required; local defaults are overridable; Vercel state remains unverified.
+- Actual remote change: GitHub main requires PRs for all users including administrators; force pushes and deletions are false; conversation resolution true. Zero required approvals avoids needing an unavailable second owner. No bypass identities, branch lock, or nonexistent CI check was added.
+- Local change: git config --local push.default simple; push.followTags false; pull.ff only; remote.origin.mirror false. Previous config preserved at tmp/branch-isolation-20260906/root-git-config.before. Exact applied API payload is tmp/branch-isolation-20260906/main-protection.json.
+- Read-only commands: gh api repos/sairam1200/TerminusWeb returned admin permission, public repository, default main, auto-merge false. Rulesets list empty; main/protection initially returned HTTP404 Branch not protected. Installed gh2.97.0 and official REST/Git documentation provided API/config evidence.
+- Mutation command: gh api --method PUT repos/sairam1200/TerminusWeb/branches/main/protection --input <reviewed-payload>, exit0. No git push command was issued.
+- Fresh verification: gh api main/protection, exit0, returned PR requirement, admin enforcement, zero approvals, force/delete false and conversation-resolution true. gh api branches/main, exit0: protected true, SHA4bc74e88df8a3c5f30e894b373caca444ed37655 unchanged. gh api branches/session/02-web-renderer, exit0: protected false. Local git config readback matches all four intended values.
+- Vercel: get_project(terminus-web,gaddr) returned403; list_teams exposes only majmap. No setting changed and no repeated blind mutation was attempted. Appropriate gaddr access is needed to verify production-branch/deployment behavior.
+- Tests: no application files changed; application tests were not rerun for configuration/documentation changes. API readback and local configuration checks verify the actual safeguards, not a simulated rejected push. Root and isolated-worktree tracked diffs checked clean after commits.
+- Limits: commits on local main still change local main; use feature worktrees. Explicit PR merge can change main and may deploy according to Vercel settings. This does not guarantee regression-free changes or disable all deployments. CI expansion and Vercel policy require their own concrete scope.
+
+## Previous Session 01 handoff
+
 ## S01-006 repository recovery complete (2026-09-06)
 
 - Current task: S01-006; state: done for local recovery. S02-006, S03-008 and S06-008 are done from exact reviewed evidence. Original S01-002/S01-003 and private release gates remain blocked; no verified-release claim.
