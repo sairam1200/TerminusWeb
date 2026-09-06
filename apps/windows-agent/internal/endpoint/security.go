@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -14,11 +15,12 @@ import (
 )
 
 const (
-	pairingLifetime       = 120 * time.Second
-	pairingApprovalLimit  = 60 * time.Second
-	credentialLifetime    = 30 * 24 * time.Hour
-	challengeLifetime     = 10 * time.Second
-	authorizationLifetime = 12 * time.Hour
+	pairingLifetime              = 120 * time.Second
+	pairingApprovalLimit         = 60 * time.Second
+	credentialClockSkewAllowance = 5 * time.Minute
+	credentialLifetime           = 30*24*time.Hour - credentialClockSkewAllowance
+	challengeLifetime            = 10 * time.Second
+	authorizationLifetime        = 12 * time.Hour
 )
 
 type Credential struct {
@@ -105,7 +107,7 @@ func newChallenge(now time.Time) (*challenge, error) {
 
 func authProof(secret []byte, connectionID, challengeID string, challengeValue []byte) []byte {
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte("Terminus/0.1/auth"))
+	mac.Write([]byte("Terminus/0.2/auth"))
 	mac.Write([]byte{0})
 	mac.Write([]byte(connectionID))
 	mac.Write([]byte{0})
@@ -125,9 +127,16 @@ type failureWindow struct {
 type rateLimiter struct {
 	mu      sync.Mutex
 	windows map[string]failureWindow
+	limit   int
 }
 
-func newRateLimiter() *rateLimiter { return &rateLimiter{windows: make(map[string]failureWindow)} }
+func newRateLimiter(limit ...int) *rateLimiter {
+	maximum := 5
+	if len(limit) > 0 {
+		maximum = limit[0]
+	}
+	return &rateLimiter{windows: make(map[string]failureWindow), limit: maximum}
+}
 
 func (r *rateLimiter) allowed(identity string, now time.Time) bool {
 	r.mu.Lock()
@@ -142,7 +151,7 @@ func (r *rateLimiter) allowed(identity string, now time.Time) bool {
 		w = failureWindow{started: now}
 	}
 	r.windows[identity] = w
-	return w.count+w.pending < 5
+	return w.count+w.pending < r.limit
 }
 
 func (r *rateLimiter) begin(identity string, now time.Time) bool {
@@ -157,7 +166,7 @@ func (r *rateLimiter) begin(identity string, now time.Time) bool {
 	} else if w.started.IsZero() || now.Sub(w.started) >= 5*time.Minute {
 		w = failureWindow{started: now}
 	}
-	if w.count+w.pending >= 5 {
+	if w.count+w.pending >= r.limit {
 		r.windows[identity] = w
 		return false
 	}
@@ -175,7 +184,7 @@ func (r *rateLimiter) finish(identity string, now time.Time, success bool) {
 	}
 	if !success {
 		w.count++
-		if w.count >= 5 {
+		if w.count >= r.limit {
 			w.cooldownUntil = now.Add(5 * time.Minute)
 		}
 	}
@@ -191,4 +200,20 @@ func randomUUID() (string, error) {
 	value[8] = value[8]&0x3f | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
+}
+
+const crockfordAlphabet = "0123456789abcdefghjkmnpqrstvwxyz"
+
+func randomSessionID() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	value := binary.BigEndian.Uint64(raw[:]) & ((uint64(1) << 60) - 1)
+	var encoded [12]byte
+	for index := len(encoded) - 1; index >= 0; index-- {
+		encoded[index] = crockfordAlphabet[value&31]
+		value >>= 5
+	}
+	return string(encoded[0:4]) + "-" + string(encoded[4:8]) + "-" + string(encoded[8:12]), nil
 }

@@ -63,3 +63,49 @@ Session 01 owns this file. Other sessions submit proposed corrections through `c
   authentication, authorization, exact Origin validation, expiry, credential
   revocation, private listener scope, and Funnel-disabled requirements remain
   unchanged.
+
+## Remembered private session decision (2026-08-30)
+
+- The user requires each terminal page to keep one stable, simple session ID
+  across reloads and network reconnects. A page changes identity only after its
+  explicit **New Session** action succeeds.
+- Protocol 0.2 uses a cryptographically random 60-bit Crockford Base32 locator
+  rendered as `xxxx-xxxx-xxxx`. The ID is metadata, not a secret or bearer token;
+  a successfully authenticated, unexpired originating credential is still
+  required to reopen it.
+- The browser represents the ID only in the URL fragment
+  `#/s/xxxx-xxxx-xxxx`, so it is not sent in an HTTP request to Vercel. Browser
+  persistence contains credential material and non-secret session metadata as
+  already contracted, but never terminal plaintext or replay chunks.
+- The Windows agent owns a bounded 262,144-byte volatile output-history ring
+  per running session and a 16,777,216-byte agent-wide history budget. Reopen
+  replays an offset-labelled snapshot before live
+  output. Truncation is explicit; output ordering and concurrent attachment are
+  fail-closed. History is never written to disk, logs, Vercel, a service worker,
+  analytics, crash reporting, or the control plane.
+- Network loss and per-connection authorization expiry detach rather than
+  destroy a running session. Explicit New Session/close, credential expiry or
+  revocation, process exit, unrecoverable resource/backpressure failure, and
+  agent shutdown/restart terminate the session and discard its retained
+  history.
+- Version 0.2 preserves one terminal per authenticated WebSocket and the
+  no-fixed-count-cap decision. It replaces version 0.1's 120-second one-time
+  resume grant with authenticated same-credential reopen and therefore is a
+  breaking, coordinated consumer update.
+
+## Repository recovery on 2026-09-06
+
+- The user explicitly authorized local consolidation of all branches and resolution of implementation/UI conflicts. S01-006 records this recovery scope; the original S01-002/S01-003 verified-release gates are not bypassed or marked complete.
+- All preserved local branch tips and freshly fetched origin tips are ancestors of the recovery assembly. Newer protocol 0.2, remembered-session agent and xterm UI implementations supersede the older temporary merge resolutions.
+- The recovery uses the Session 02 and Session 03 owners for implementation repairs and Session 06 for independent local review/browser verification. Local simulation and deterministic checks do not establish live private-device or physical-mobile compatibility.
+- Existing S05-008-RESOURCE-001 replay-copy memory accounting remains release-blocking. No remote push, deployment or live network/agent change was performed in this recovery.
+
+## Branch isolation safeguards (2026-09-06)
+
+- GitHub repository sairam1200/TerminusWeb main protection was absent before this task. It now requires a pull request, enforces the boundary for administrators, prohibits force pushes/deletion, and requires resolved PR conversations. Zero mandatory reviewer approvals allows the sole owner to explicitly merge a PR; this is not independent-review or CI enforcement.
+- No required CI contexts were invented: current workflows do not provide a general all-product gate. The configuration leaves status-check requirements unset. Passing tests remains a separate project release requirement.
+- Readback confirmed remote main remains 4bc74e88df8a3c5f30e894b373caca444ed37655 and is protected; session/02-web-renderer is unprotected and remains available for normal feature work. No repository contents were pushed or deployed.
+- The authoritative E:/terminus repository now explicitly sets push.default=simple, push.followTags=false, pull.ff=only, and remote.origin.mirror=false. These local defaults apply to this repository and its linked worktrees, not independent archived copies; explicit Git flags can override defaults. Remote main protection applies regardless of client.
+- Ordinary Git commits affect the checked-out local branch. The remote protection does not stop local main edits, explicit PR merges, or separately authorized deployments. Use isolated feature worktrees for changes to preserve the local main checkout.
+- The connected Vercel app exposes only the majmap team and returned 403 for gaddr/terminus-web. Historical productionBranch=main evidence was not presented as fresh state. Live deployment isolation is unverified until the gaddr project can be inspected with appropriate access; no Vercel setting changed.
+- API and Git semantics were checked against https://docs.github.com/en/rest/branches/branch-protection and https://git-scm.com/docs/git-config. Independent /root/verification reviewed the concrete protection payload and local defaults: PASS for branch-isolation scope, with the Vercel and explicit-override limits retained.

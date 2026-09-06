@@ -1,12 +1,41 @@
 # Session 04 Status
 
-- Current task: unassigned
-- State: not_started
+- Current task: `S04-002` — Remediate control-plane identity binding and final-owner invariants
+- State: done
 - Branch: `session/04-control-plane`
-- Files changed: none
-- Commands/evidence: none
-- Independent reviewer/evidence: none
-- Assumptions: none
-- Blockers/requests: none
-- Product/task commit: none
+- Authoritative queue: `session/01-architecture` commit `a9ffbab08f843c46b2321a34b4fdd4d6cc872f31`
+- Dependencies inspected:
+  - `S04-001` — done; Session 04 handoff `f1adc0afbb0b59b6c1a64b2cc1f9c49d90c74bb7`; reviewed product `83d110aa3f0bf582f811ce6922234f2183b2b93d`
+  - `S05-003` — done; Session 05 handoff `b1b6914397acca8c1fa31a540e3fe7cafbaa7756`; reviewed findings/request product `f4bbcd01b7fd45fdf52622c94b8875a6ad3f3ce0`
+- Files changed:
+  - `services/control-plane/src/authorization.mjs`: validated identity-bearing inputs, exact requested/resolved pairing binding, and removal of caller owner-count trust
+  - `services/control-plane/contracts/**` and `README.md`: identity-resolution and database-invariant boundaries
+  - `services/control-plane/test/**`: CP-AUTH-001..006 and identity/binding regressions
+  - `infrastructure/database/migrations/0001_control_plane.sql`: atomic database-owned final-owner counter and trigger
+  - `infrastructure/database/test/001_invariants.sql` and `run-isolated-tests.ps1`: direct, stale, insert/update/delete, retention, and two-connection concurrent revocation coverage
+  - Immutable response: `coordination/requests/from-04-to-05-s05-003-control-plane-findings.response.md`
+- Commands/evidence:
+  - Exact S05-003 authorization and migration probes against prior product `83d110a` — reproduced six CP-AUTH findings and CP-DB-001 with expected exit 1
+  - `npm run format:check` — PASS, 1/1
+  - `npm run lint` — PASS
+  - `npm run typecheck` — PASS
+  - `npm test` — PASS, 37/37
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\run-isolated-tests.ps1` — PASS against pinned disposable PostgreSQL 17 image; migration/RLS/invariants PASS; concurrent final-owner invariant PASS with exactly one successful revocation, one rejected revocation, and one remaining owner row/counter; container removed
+  - Exact S05-003 migration probe from `f4bbcd0` against remediation — PASS unchanged
+  - S05-003 authorization probe against remediation — PASS after adding the new required `deviceKeyId`, `entitlementKey`, and `requestedPairingId` to its positive fixture; all six original negative mutations unchanged
+  - `git diff --check e281a12^ e281a12` — PASS; product commit contains nine Session 04-owned product files only
+  - Known-secret-pattern scan — PASS, no matches
+- Independent reviewer/evidence:
+  - `s05_003_remediation_reviewer` reviewed exact product commit `e281a1287d7d43aa0c29c1feb24455e0bc09c420` read-only — PASS, no remaining findings
+  - Independently reran Node 37/37, isolated PostgreSQL/RLS/concurrency tests, counter insert/update/delete transitions, direct final-owner update/delete rejection, closed-tenant cleanup, scope/diff, and container-cleanup checks
+- Assumptions:
+  - `requestedPairingId` is parsed from the client request; the resolved pairing, host, device key, membership, and entitlement metadata are loaded by a trusted future handler before policy evaluation
+  - `active_owner_count` counts unrevoked owner role assignments; role assignment mutations are the database-owned source of truth
+  - The control plane remains an inactive metadata-only contract with no deployed handler, commercial activation, terminal relay, or terminal plaintext
+  - The product commit was created while startup queue commit `7422df6` had no S04-002 entry; Session 01 added S04-002 at `a9ffbab` during review. The immutable commit subject retains S04-001, while this handoff records its exact S04-002 scope; no history was rewritten
+- Blockers/requests:
+  - S05-004 re-review is owned by Session 05 and remains blocked until Session 01 consumes this S04-002 handoff
+  - Session 04 response commit: `2bb9f0b10f2b77e3c9aa1c25facffd10002328cd` at `coordination/requests/from-04-to-05-s05-003-control-plane-findings.response.md`
+- Product/task commit: `e281a1287d7d43aa0c29c1feb24455e0bc09c420`
+- Prior S04-001 product/handoff: `83d110aa3f0bf582f811ce6922234f2183b2b93d` / `f1adc0afbb0b59b6c1a64b2cc1f9c49d90c74bb7`
 - Handoff commit: resolve from branch HEAD after the status-only handoff commit

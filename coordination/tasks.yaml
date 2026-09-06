@@ -21,10 +21,10 @@ tasks:
 
   - id: S02-002
     owner: session_02
-    state: blocked
+    state: done
     title: Integrate browser terminal with protocol 0.1
-    depends_on: [S01-001, S02-001, S03-004, S05-005, S05-006, S06-004]
-    evidence: Shared fixtures pass and malformed frames fail closed.
+    depends_on: [S01-001, S02-001, S03-004, S05-005, S05-006, S06-006]
+    evidence: Shared fixtures pass and malformed frames fail closed; after one per-device certificate installation/selection and pairing, reconnect/resume silently reuses the existing identity without another certificate import, selection, or pairing prompt.
 
   - id: S03-001
     owner: session_03
@@ -56,7 +56,7 @@ tasks:
 
   - id: S05-002
     owner: session_05
-    state: blocked
+    state: done
     title: Review protocol 0.1 and both consumer implementations
     depends_on: [S01-001, S02-002, S03-002, S05-001]
     evidence: Independent first-slice findings with reproducible cases and severity.
@@ -77,10 +77,10 @@ tasks:
 
   - id: S06-002
     owner: session_06
-    state: blocked
+    state: ready
     title: Verify first end-to-end private terminal vertical slice
     depends_on: [S01-001, S02-002, S03-002, S05-002, S06-001]
-    evidence: Exact task commit SHAs, allowed and denied paths, browser matrix, logs, and pre-integration pass/fail report.
+    evidence: Exact task commit SHAs, allowed and denied paths, browser matrix, logs, and pre-integration pass/fail report; reconnect/resume proves the once-installed/selected device identity is silently reused without another certificate or pairing prompt.
 
   - id: S04-002
     owner: session_04
@@ -105,22 +105,22 @@ tasks:
 
   - id: S05-005
     owner: session_05
-    state: blocked
+    state: done
     title: Review TLS/private publication design and prove private-only access
     depends_on: [S03-004, S05-001]
     evidence: Read-only exact-design review explicitly deciding Tailscale Serve TLS termination versus raw-TCP/passthrough for end-to-end browser mTLS, then proving intended private access, denied LAN/public access, existing browser/OS certificate trust, Funnel disabled, and separation of Tailscale policy from application pairing/authentication; no live mutation.
 
   - id: S03-004
     owner: session_03
-    state: blocked
+    state: done
     title: Run the authorized private integration host with supplied trusted inputs
-    depends_on: [S03-003, S06-004]
+    depends_on: [S03-003, S06-006]
     requires_user_authorization: true
     evidence: Non-elevated Windows host wiring using externally supplied trusted server certificate/key, client-CA bundle, exact Vercel HTTPS Origin, protected credential storage, private-device resolution, mandatory local approval, loopback-only TLS listener, bounded health/reset/revoke lifecycle, secret-safe logs, and an immutable endpoint-ready response; no certificate generation/installation, Tailscale mutation, Funnel, LAN/public exposure, or deployment.
 
   - id: S02-003
     owner: session_02
-    state: review
+    state: done
     title: Publish the authorized Session 02 source branch for Preview bootstrap
     depends_on: [S02-001]
     requires_user_authorization: true
@@ -135,9 +135,17 @@ tasks:
     evidence: Preview-only deployment of the exact Session 02 source with Root Directory apps/web; initial WSS endpoint unset; exact final serialized HTTPS Origin recorded, NEXT_PUBLIC_TERMINUS_WEB_ORIGIN set to that origin, and redeployment metadata captured; no production promotion, DNS change, or terminal proxy.
     blocker: The first deployment of the empty Vercel project was automatically classified Production and deleted; current authorization does not permit retrying or temporarily accepting that classification.
 
+  - id: S06-006
+    owner: session_06
+    state: done
+    title: Freeze the authorized production HTTPS Origin for the current web source
+    depends_on: [S02-004, S06-001]
+    requires_user_authorization: true
+    evidence: Exact web product bf7ca71b437907e7d25251e54d59355440797ad4 is built from Root Directory apps/web; Vercel project production branch remains main; https://terminus-web.vercel.app and wss://sai.tailf8dcea.ts.net are recorded without terminal proxying, DNS change, Funnel, or public agent exposure; deployment remains gated on the verified integration candidate.
+
   - id: S05-006
     owner: session_05
-    state: blocked
+    state: done
     title: Configure authorized raw-TCP private Serve and prove allowed/denied paths
     depends_on: [S03-004, S05-001]
     requires_user_authorization: true
@@ -157,6 +165,13 @@ tasks:
     depends_on: [S01-004, S03-003]
     evidence: Concurrent positive sessions above eight with no count-based rejection, genuine adapter/Open and shutdown failure paths, independent input/resize/close, detach accounting, credential revocation, bounded per-session backpressure, and real Windows process-tree cleanup.
 
+  - id: S03-006
+    owner: session_03
+    state: done
+    title: Keep stalled terminal creation from blocking unrelated session lifecycle
+    depends_on: [S03-005, S05-007]
+    evidence: Adapter.Open runs without the registry-wide mutex; admission is atomically revalidated before registration; a terminal created after shutdown, connection invalidation, or credential revocation is closed; deterministic races prove unrelated input, resize, close, disconnect cleanup, revocation, and shutdown remain prompt without a fixed count cap.
+
   - id: S02-004
     owner: session_02
     state: done
@@ -166,23 +181,58 @@ tasks:
 
   - id: S05-007
     owner: session_05
-    state: ready
+    state: done
     title: Review uncapped-by-policy multi-session abuse and isolation controls
     depends_on: [S03-005, S02-004]
     evidence: Independent review of no fixed admission cap, above-eight isolation, detached accounting, actual resource-exhaustion behavior, per-session backpressure, authentication rate limits, revocation, cleanup, and unchanged private-access boundaries.
 
   - id: S06-005
     owner: session_06
-    state: blocked
+    state: ready
     title: Verify above-eight independent terminal behavior
-    depends_on: [S03-005, S02-004, S05-007]
+    depends_on: [S03-006, S02-004, S05-007]
     evidence: Exact-commit automated and real Chrome proof for more than eight independent sessions with no count-based rejection, genuine open-failure guidance, resize/reconnect, non-elevation, revocation, bounded backpressure, and leak-free cleanup.
+
+  - id: S01-005
+    owner: session_01
+    state: done
+    title: Freeze remembered-session and bounded-history contract version 0.2
+    depends_on: [S01-004]
+    evidence: Versioned schema, state machine, fixtures, security rules, short opaque session identifiers, credential/source-device-bound reopen, bounded volatile history replay, fragment-route privacy, and explicit compatibility notes.
+
+  - id: S02-005
+    owner: session_02
+    state: done
+    title: Implement remembered session pages and explicit New Session behavior
+    depends_on: [S01-005, S02-002]
+    evidence: Each page receives a simple unique session ID in a URL fragment; reload/reconnect of the same ID restores bounded history without storing terminal plaintext; New Session closes the old session and replaces the fragment; unknown/in-use IDs fail closed and pairing is not repeated.
+
+  - id: S03-007
+    owner: session_03
+    state: done
+    title: Implement credential-bound remembered sessions and bounded history replay
+    depends_on: [S01-005, S03-006]
+    evidence: Cryptographically random simple IDs, atomic same-credential/source-device reopen, bounded volatile per-session and agent-wide history with ordered offsets, disconnect retention, explicit close/new-session deletion, uniform rejection, concurrency tests, and deterministic ConPTY cleanup.
+
+  - id: S05-008
+    owner: session_05
+    state: ready
+    title: Review remembered-session isolation and history privacy
+    depends_on: [S02-005, S03-007]
+    evidence: Independent review of ID enumeration, credential ownership, concurrent claims, replay ordering, truncation, volatile-only plaintext, fragment privacy, revocation/expiry, resource abuse, and unchanged private-network boundaries.
+
+  - id: S06-007
+    owner: session_06
+    state: blocked
+    title: Verify remembered session pages and private history replay
+    depends_on: [S01-005, S02-005, S03-007, S05-008, S06-001]
+    evidence: Exact-commit contract and browser/agent proof that same-ID reload restores ordered bounded history, New Session replaces and invalidates the old ID, different pages receive different IDs, wrong credentials and concurrent claims fail closed, and no terminal plaintext reaches browser persistence, URLs sent to Vercel, logs, or control-plane paths.
 
   - id: S01-002
     owner: session_01
     state: blocked
     title: Prepare first-slice integration manifest
-    depends_on: [S06-002]
+    depends_on: [S06-002, S06-005, S06-007]
     evidence: Exact verified SHAs, merge order, compatibility statement, and unresolved conflict report; no merge.
 
   - id: S01-003
@@ -199,3 +249,39 @@ tasks:
     title: Verify integrated first-slice candidate
     depends_on: [S01-003]
     evidence: Exact integration SHA, full deterministic gate results, negative paths, and final pass/fail report.
+
+  - id: S01-006
+    owner: session_01
+    state: done
+    title: Recover repositories and consolidate all user-authorized branch histories
+    depends_on: []
+    requires_user_authorization: true
+    evidence: User request on 2026-09-06 explicitly authorizes merging all branches and resolving UI conflicts. Preserve source copies and bundles; reconcile local and remote histories on a recovery branch; record conflict decisions and deterministic evidence. This recovery assembly does not satisfy S01-002/S01-003 verified-release gates.
+
+  - id: S02-006
+    owner: session_02
+    state: done
+    title: Combine protocol 0.2 renderer with local and private connection profiles
+    depends_on: [S02-005]
+    evidence: Preserve xterm, remembered sessions, settings, language and mobile controls; retain strict destination and Origin checks, clock-skew and browser-close fixes; test both connection modes and build the combined UI.
+
+  - id: S03-008
+    owner: session_03
+    state: done
+    title: Preserve credential clock-skew headroom during repository recovery
+    depends_on: [S03-007]
+    evidence: Retain reviewed protocol 0.2 lifecycle and remembered sessions, restore bounded credential expiry headroom and its regression test, run Go tests and vet.
+
+  - id: S06-008
+    owner: session_06
+    state: done
+    title: Independently review recovered branch assembly and UI integration repairs
+    depends_on: []
+    evidence: Exact recovered SHA, branch ancestry, conflict markers, CI preservation, focused repair review and deterministic browser evidence; explicitly retain live-device and S05-008-RESOURCE-001 release limitations.
+
+  - id: S01-007
+    owner: session_01
+    state: done
+    title: Protect main from direct branch pushes and unexpected local merges
+    depends_on: [S01-006]
+    evidence: User requested future branch commits and pushes remain isolated; interpreted as protecting main until an explicit merge. Independently reviewed GitHub main protection requires PRs for administrators, prohibits force pushes and deletion, and resolves conversations. API readback confirms main and feature branch behavior; local simple pushes and fast-forward-only pulls verified. No push or deployment performed; Vercel live settings remain unverified due account access.

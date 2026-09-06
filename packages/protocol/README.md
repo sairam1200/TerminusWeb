@@ -2,6 +2,10 @@
 
 Status: frozen contract candidate for `S01-001`. The immutable task commit, independent review, and Session 06 verification remain separate gates.
 
+Protocol 0.1 remains frozen for compatibility evidence. New remembered-session
+consumers use the breaking 0.2 contract in `README-0.2.md`; `npm run verify`
+checks both versions without allowing their frames or subprotocols to mix.
+
 ## Consumer entry points
 
 - `schema/protocol-0.1.schema.json` is the language-neutral JSON Schema 2020-12 wire envelope and payload contract.

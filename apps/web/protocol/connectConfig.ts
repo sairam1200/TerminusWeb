@@ -81,8 +81,10 @@ export function resolveProfiles(
     }
   }
 
-  const mergedProfiles = [profileByMode.get("local"), profileByMode.get("private")]
-    .filter((profile): profile is ConnectProfile => profile !== undefined);
+  const mergedProfiles = [
+    profileByMode.get("local"),
+    profileByMode.get("private"),
+  ].filter((profile): profile is ConnectProfile => profile !== undefined);
   return mergedProfiles;
 }
 
@@ -92,31 +94,23 @@ export function selectInitialProfile(
   defaultMode: ConnectionMode | undefined,
 ): ConnectProfile | undefined {
   if (profiles.length === 0) return undefined;
-  if (
-    savedMode &&
-    profiles.some((profile) => profile.mode === savedMode)
-  ) {
+  if (savedMode && profiles.some((profile) => profile.mode === savedMode)) {
     return profiles.find((profile) => profile.mode === savedMode);
   }
-  if (
-    defaultMode &&
-    profiles.some((profile) => profile.mode === defaultMode)
-  ) {
+  if (defaultMode && profiles.some((profile) => profile.mode === defaultMode)) {
     return profiles.find((profile) => profile.mode === defaultMode);
   }
 
   return profiles[0];
 }
 
-export function readPersistedConnectState(
-): PersistedConnectState | undefined {
+export function readPersistedConnectState(): PersistedConnectState | undefined {
   if (typeof localStorage === "undefined") {
     return undefined;
   }
-  const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-  if (raw === null) return undefined;
-
   try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (raw === null) return undefined;
     const parsed = JSON.parse(raw) as PersistedConnectState | null;
     if (
       parsed === null ||
@@ -149,7 +143,11 @@ export function readPersistedConnectState(
 
 export function persistConnectState(state: PersistedConnectState): void {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Storage can be unavailable; the selected in-memory profile still works.
+  }
 }
 
 export function clearPersistedConnectState(): void {
@@ -157,7 +155,9 @@ export function clearPersistedConnectState(): void {
   localStorage.removeItem(LOCAL_STORAGE_KEY);
 }
 
-export function isConnectProfile(profile: PersistedConnectProfile): profile is ConnectProfile {
+export function isConnectProfile(
+  profile: PersistedConnectProfile,
+): profile is ConnectProfile {
   if (!isConnectionMode(profile.mode)) return false;
   if (
     typeof profile.endpoint !== "string" ||
@@ -165,7 +165,10 @@ export function isConnectProfile(profile: PersistedConnectProfile): profile is C
   ) {
     return false;
   }
-  if (profile.endpoint.trim() === "" || profile.expectedWebOrigin.trim() === "") {
+  if (
+    profile.endpoint.trim() === "" ||
+    profile.expectedWebOrigin.trim() === ""
+  ) {
     return false;
   }
   try {

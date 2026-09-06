@@ -1,5 +1,113 @@
 # Session 01 Status
 
+## S01-007 branch isolation safeguards (2026-09-06)
+
+- State: done for remote-main branch isolation and local safe defaults. User asked future commits/pushes to branches not affect other work. A clarification was offered; work proceeded with the stated assumption of protecting main until explicit merge. Live Vercel isolation is not claimed.
+- Worktree/branch: E:/terminus/.worktrees/branch-isolation on maintenance/branch-isolation-20260906. Root main remains de5f062632d3e0f60023ddae592e09eb696b0bd5 and four pre-existing untracked helper files remain untouched.
+- Product/evidence commit: 30c4f71cc322e63df863b371cf6245b0e0bb033e; contains only Session 01 queue/facts evidence. This status is the separate handoff commit. Both commits include the prompt-triggered Co-Authored-By trailer exactly once. Neither commit was pushed or merged into main.
+- Independent reviewer: /root/verification read the exact main-protection.json payload and local-default proposal; PASS for branch-isolation scope. Explicit caveats: zero approvals allows sole-owner PR merges; status checks are not required; local defaults are overridable; Vercel state remains unverified.
+- Actual remote change: GitHub main requires PRs for all users including administrators; force pushes and deletions are false; conversation resolution true. Zero required approvals avoids needing an unavailable second owner. No bypass identities, branch lock, or nonexistent CI check was added.
+- Local change: git config --local push.default simple; push.followTags false; pull.ff only; remote.origin.mirror false. Previous config preserved at tmp/branch-isolation-20260906/root-git-config.before. Exact applied API payload is tmp/branch-isolation-20260906/main-protection.json.
+- Read-only commands: gh api repos/sairam1200/TerminusWeb returned admin permission, public repository, default main, auto-merge false. Rulesets list empty; main/protection initially returned HTTP404 Branch not protected. Installed gh2.97.0 and official REST/Git documentation provided API/config evidence.
+- Mutation command: gh api --method PUT repos/sairam1200/TerminusWeb/branches/main/protection --input <reviewed-payload>, exit0. No git push command was issued.
+- Fresh verification: gh api main/protection, exit0, returned PR requirement, admin enforcement, zero approvals, force/delete false and conversation-resolution true. gh api branches/main, exit0: protected true, SHA4bc74e88df8a3c5f30e894b373caca444ed37655 unchanged. gh api branches/session/02-web-renderer, exit0: protected false. Local git config readback matches all four intended values.
+- Vercel: get_project(terminus-web,gaddr) returned403; list_teams exposes only majmap. No setting changed and no repeated blind mutation was attempted. Appropriate gaddr access is needed to verify production-branch/deployment behavior.
+- Tests: no application files changed; application tests were not rerun for configuration/documentation changes. API readback and local configuration checks verify the actual safeguards, not a simulated rejected push. Root and isolated-worktree tracked diffs checked clean after commits.
+- Limits: commits on local main still change local main; use feature worktrees. Explicit PR merge can change main and may deploy according to Vercel settings. This does not guarantee regression-free changes or disable all deployments. CI expansion and Vercel policy require their own concrete scope.
+
+## Previous Session 01 handoff
+
+## S01-006 repository recovery complete (2026-09-06)
+
+- Current task: S01-006; state: done for local recovery. S02-006, S03-008 and S06-008 are done from exact reviewed evidence. Original S01-002/S01-003 and private release gates remain blocked; no verified-release claim.
+- Authoritative repository/worktree: E:/terminus, local main. The root now has valid independent Git metadata and the combined product. Use this directory for subsequent work. Source branches are preserved locally; original main is recovery/original-main.
+- User authorization: requested merging all branches, best conflict resolutions and UI. This covered local recovery and owner repairs, not push or deployment.
+- Assembly product commit: c6b07e33e9cebc86b07f0f7dce9f0332945637b8. Independent source candidate a5f3227d7733b403eb26b68bc6ef4fc65bfe152c has identical web, agent, protocol and security product trees; later additions are coordinator records and independent evidence.
+- Web product: 9ddbd0bf213d3be9f218b33624c1386ebf783437; owner status handoff 2ea7d88fe96a40df64210ef3529595171c17c43b on recovery/web-integration.
+- Agent product: c4c8a828a432773f5da28d5fd84f69b9d172e106; owner status handoff 8c93edf54db5a7da2801245f2351dd6f3ad2cc72 on recovery/agent-integration.
+- Independent reviewer: /root/verification; PASS for local recovery, exact web and agent repairs. Evidence product 8ba74e039fae780e851081d933471973caf65c1a, status handoff d30400d080f9f58505773a1dd8ae13402da3e0d8 on recovery/verification. Report and desktop/mobile screenshots: tests/browser/evidence/S06-008/.
+- Coordinator queue commit: 3f6ba1499f0bb0195de66db509aec71a31fb825d. This final status is a separate status-only handoff commit; resolve it from main HEAD.
+
+### Result and preservation
+
+- All 20 saved source/recovery/current-origin refs pass git merge-base --is-ancestor against main. Fresh origin fetch included remote main 4bc74e88df8a3c5f30e894b373caca444ed37655. Nothing was pushed.
+- Kept protocol 0.2 remembered sessions, bounded-history interface, xterm renderer, English/Swedish settings, mobile shortcuts, New Session, browser-close and clock-skew handling. Combined local/private profiles without cross-host session-fragment reuse. Fixed incompatible-origin render crashes and restored shortcut typing focus.
+- Kept latest reviewed Windows session lifecycle and restored main-only five-minute credential-expiry headroom. Control-plane product and independent CI/harnesses remain intact. The prior uncommitted CI deletion was not adopted.
+- Source copies remain under merge-work/full-copy and merge-work/temp-work. Full-copy remains an intentionally preserved unfinished merge; its index hash still matches the original snapshot. Nine .worktrees links were repaired and remain associated with full-copy. Do not use those archived copies as the authoritative main workspace.
+- Backups: merge-work/recovery-20260906 contains original repository bundles, staged/unstaged patches, the original conflict index, root-files-before-recovery, root-files-at-publication, and final-assembly.bundle. No source copy, branch, or untracked file was deleted.
+- Root tracked files matched the recovered index and commit after publication and build. Four pre-existing untracked tmp_playwright_check scripts under tests/ and tests/browser/ remain unchanged. Governance and .agents files were byte-identical and not overwritten.
+
+### Commands and evidence
+
+- packages/protocol: npm run verify, exit 0; protocol 0.1: 22 transcripts/27 fixtures; 0.2: 23 transcripts/32 fixtures; each one auth vector and four negative mutations.
+- services/control-plane: npm test, exit 0, 37/37; npm run lint, npm run typecheck and npm run format:check, exit 0. These are local contract tests; database containers were not rerun.
+- tests/contract: npm test, exit 0, 17/17 labelled-double cases. tests/integration: npm test, exit 0, 4/4 configuration cases.
+- Session 06: tests/browser npm test, exit 0, 24/24 labelled-double desktop/mobile cases; lint exit 0. Actual production UI smoke at 1440x1000 and 390x844 used local simulation, passed settings/language/start/shortcut focus/rotation/disconnect/restart with zero page/console errors and off-loopback requests. Temporary server stopped; port 4188 had zero listeners.
+- Session 02: 74/74 web tests, typecheck, lint and production build pass. Session 06 independently reran all 74 tests against the exact final product. Configured synthetic-endpoint build also passed; no connection was made to the configured endpoints.
+- Session 03: go vet ./... and full go test -count=1 ./... pass, including local Windows lifecycle tests; expiry regression repeated 20 times passes. Independent focused expiry regression passes. See exact owner handoff for per-package timings and writable GOCACHE environment.
+- Root: Restore-Root.ps1 -ExpectedSha c6b07e33e9cebc86b07f0f7dce9f0332945637b8, exit 0. Independently reviewed script backs up existing paths and bundles history before restoring 247 tracked candidate paths.
+- Root apps/web: npm ci --ignore-scripts --offline failed because xterm 6.0.0 was absent from cache. npm ci --ignore-scripts fetched the exact lockfile dependencies, exit 0 (443 packages, audit reported zero vulnerabilities); npm run build exit 0, compiled/typechecked and generated /, /_not-found and /manifest.webmanifest. No dependency versions or lockfile changed.
+- Root: git fsck --full --no-reflogs, git diff --exit-code, git diff --cached --exit-code and git diff --check, all exit 0. All saved/current remote refs are ancestors; no unresolved index entries or conflict markers remain in main.
+- Initial Node test workers and Git local clone hit Windows sandbox spawn denial. Unchanged test commands passed with approved execution; repository cloning used local Git bundles. These environment failures were not test passes.
+
+### Remaining limits
+
+S05-008-RESOURCE-001 remains an existing release-blocking Medium memory-accounting issue in simultaneous history-replay copies. Physical iPhone/Safari, live private WSS/mTLS, certificate reuse, allowed/denied peer paths, and the integrated real terminal remain separate gates. No deployment, remote push, live host, certificate, Tailscale, DNS, billing or public-exposure change occurred.
+
+## Historical Session 01 handoffs
+
+## S01-005 remembered-session protocol 0.2 handoff (2026-08-30)
+
+- Current task: `S01-005` — Freeze remembered-session and bounded-history
+  contract version 0.2.
+- State: owner `done`; exact cumulative product received named independent
+  review PASS. This is not Session 06 integrated-candidate verification.
+- Exact dependency: S01-004 product
+  `6fc6737f5f6c64e1c06e7783ca9d5baecb4dbf17`, owner `done`.
+- Product: protocol 0.2 keeps one terminal per authenticated WebSocket and no
+  fixed aggregate session-count cap. Each page gets a canonical lowercase
+  60-bit Crockford Base32 ID formatted `xxxx-xxxx-xxxx` and represented only as
+  `#/s/{id}`. The ID is a locator, never authorization; reopen requires the
+  same authenticated credential and required private source-device identity.
+- History: the Windows agent retains only the latest 262,144 output bytes per
+  running session and 16,777,216 bytes agent-wide in volatile memory. Replay
+  uses contiguous byte offsets, explicit truncation, one atomic owner, a
+  snapshot barrier before live output, bounded queues, and no browser/disk/
+  Vercel/control-plane plaintext persistence. New Session closes and
+  invalidates the old ID before assigning a new fragment.
+- Files: `packages/protocol/README-0.2.md`, schema/state machine, accepted and
+  rejected 0.2 fixtures, reference verifier, 0.2 security contract/auth vector,
+  architecture/shared-contract docs, facts, and task queue. Frozen 0.1
+  executable artifacts remain unchanged and verify independently.
+- Owner evidence: `npm run verify` PASS — protocol 0.1: 22 transcripts, 27
+  fixtures, one positive auth vector, four negative mutations; protocol 0.2:
+  23 transcripts, 32 fixtures, one positive auth vector, four negative
+  mutations. JSON parse, `git diff --check`, exact `git show --check`, author,
+  compatibility, and secret/plaintext scans passed.
+- Independent reviewer/evidence: `/root/s06_006_origin` first returned FAIL on
+  exact `f631c2812140cdf8180579561372b6829b635977` with four Medium fixture/
+  verifier gaps. Cumulative `c010c446ddae77d74ff9aaede1437cee73d775a9`
+  closed separate device/credential denial, executable history budgets,
+  wrong-session offset, and New Session lifecycle coverage. A second FAIL
+  identified an unreachable global-budget seed and silent close-failure state;
+  cumulative exact tip `f9a70299974734c3eeb920697d2dfa4717148a9a`
+  replaced them with 64 valid full per-session rings plus one-byte global
+  eviction and visible `new_session_error`. Final fresh review of exact
+  `f9a7029...` returned PASS with no severity findings and independently
+  reproduced all gates and invalid-seed probes.
+- Assumptions/limits: history covers raw terminal output only and is deliberately
+  volatile; agent restart, explicit close/New Session, credential expiry or
+  revocation, process exit, containment/resource failure, and shutdown discard
+  it. Raw replay rendering must disable clipboard/navigation/notification/
+  external-load side effects. Physical browser and integrated live evidence
+  belong to S06-007 after consumers and security review complete.
+- Scope: no web/agent implementation, terminal plaintext, certificate,
+  listener, browser, Tailscale, Vercel, merge, push, or deployment mutation.
+- Product/task commits: `f631c2812140cdf8180579561372b6829b635977`,
+  `c010c446ddae77d74ff9aaede1437cee73d775a9`, and cumulative reviewed tip
+  `f9a70299974734c3eeb920697d2dfa4717148a9a`.
+- Handoff commit: resolve from branch HEAD after this status-only commit.
+
 - Current task: `S01-001` — freeze protocol and security contract version 0.1
 - State: done
 - Branch: `session/01-architecture`
@@ -263,3 +371,75 @@
 - S05-007 transitions deterministically from `blocked` to `ready` because S03-005 and S02-004 are now `done`. S06-005 remains `blocked` until S05-007 is owner-done; no integration, deployment, or live-state claim was made.
 - Queue commit author and committer are both `sairam1200 <sairamch10@gmail.com>` and its required co-author trailer occurs exactly once.
 - User-authorized history rewrite: the five Session 01 commits after `f35b64793e3b7e06f2af3268664c718c6f56b1c6` were recreated with author and committer `sairam1200 <sairamch10@gmail.com>` and unchanged commit messages/content except for this status-only SHA refresh. The pre-rewrite tip remains recoverable locally as `session01_pre_author_rewrite_backup`; the remote update uses an exact `--force-with-lease` against `0f78c1ff65420ef2f238c097fb2a5e585e0b51b8`.
+
+## Production-origin authorization reconciliation (2026-08-30)
+
+- User authorization: the current user follow-up authorizes using the existing local certificate/key and ClientAuth CA material, performing the required private integration work, checking integration/build/deployment failures, pushing the verified result to `main`, and deploying Vercel production. Public exposure, Funnel, DNS changes, and access-policy broadening remain prohibited.
+- Exact web input: Session 02 product `bf7ca71b437907e7d25251e54d59355440797ad4`; handoff/remote branch tip `1e52575afeacba4cff2b79567b229b9d84c00686`; `apps/web` tree `4e3ca54d405e145127fde25610d3c72a74ec4122`.
+- Vercel read-only evidence: authenticated project `gaddr/terminus-web`; Root Directory `apps/web`; Node `24.x`; production branch `main`; stable origin `https://terminus-web.vercel.app`; failed Preview `aa09734f5549ea69954a8c9817a610297c261f62` targeted Session 01, which contains only `apps/web/.gitkeep`, and is not a web build candidate.
+- Tailnet read-only evidence: selected profile `sairamch10@gmail.com`; `sai.tailf8dcea.ts.net` online; existing route `TCP/443 -> 127.0.0.1:8443` reports `tailnet only`; Funnel/public exposure is not enabled; local origin is not yet listening.
+- Certificate metadata evidence: existing server chain is time-valid, trusted, has ServerAuth, and covers `sai.tailf8dcea.ts.net`; existing browser leaf is time-valid, has ClientAuth, and verifies to the supplied client CA. No private-key or PFX contents were printed or committed.
+- Queue commit: `097b2b085b7df02504d00c8274921db5f6e31885` marks S02-003 done, adds ready task S06-006 for the authorized production-origin freeze, and repoints S03-004/S02-002 from obsolete Preview bootstrap S06-004 to S06-006.
+- Current gate: no product integration occurred. S06-006 must record exact-origin evidence before S03-004 starts; the remaining S05/S06 verification and integration tasks stay blocked until their dependencies pass.
+
+## Production-origin verification and private-host unlock (2026-08-30)
+
+- Session 06 evidence commit `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5` verifies exact web product `bf7ca71b437907e7d25251e54d59355440797ad4` for browser Origin `https://terminus-web.vercel.app` and private endpoint `wss://sai.tailf8dcea.ts.net`. Build, typecheck, lint, and 41/41 tests passed; the report explicitly does not claim candidate deployment or private-WSS verification.
+- Session 06 status commits `13bed730095e3da2d37e4d157fa203cc0fa56594` and `807042ebb6f4be3ef555897fc1f82f8ed8a2721f` preserve the initial pending-review state and then record named independent reviewer `/root/mobile_cert_compat`. The reviewer caught two identifiers mistyped in the review request, resolved and checked the actual full SHAs above, and returned conditional PASS. Unchanged CRLF formatting drift and non-reproduction of the report's external Vercel GETs remain disclosed caveats.
+- Queue commit `0c57852` transitions S06-006 from `ready` to owner `done` and S03-004 from `blocked` to `ready`. No other task state changed. This is not Session 06 release verification and does not authorize public exposure.
+- No merge, push, deployment, DNS/Tailscale policy or route mutation, Funnel, certificate generation/installation, or host start occurred in this queue transition.
+
+## Stalled-open availability remediation gate (2026-08-30)
+
+- Session 05 product `cec6ea3467e1a8b3eb31920280b91eb30c60fa7a` and status handoff `d34243a93c30690f3a450924976046133c0aad13` complete S05-007 with named independent reviewer `/root/s05_007_independent`: PASS for report/test accuracy, not release clearance.
+- Finding `S05-007-AVAIL-001` is Medium and release-blocking: exact S03 product `e13c4c8d2659125476c7458b45720892ee49fc24` holds the registry-wide mutex across synchronous `Adapter.Open`, so one stalled terminal creation blocks unrelated cleanup, revocation, and shutdown. Reviewer overlay tests passed 3/3 and 10 repeated runs; full exact S03 tests and focused S02 tests passed. Actual OS exhaustion was not induced or claimed.
+- Queue commit `e9b6dd023178c18638e03b96cfd0543670c7d7f3` marks S05-007 owner `done`, adds ready owner task S03-006 for lock-free terminal creation with atomic admission revalidation/cleanup, and makes S06-005 depend on the remediation. It does not restore a fixed numeric session cap.
+- No product repair, merge, push, deployment, certificate, listener, or Tailscale mutation occurred in this queue transition.
+
+## Authorized private endpoint ready (2026-08-30)
+
+- Session 03 product/evidence `ce5ac98b8a79abd42fee6083345709c77aaf669c` and status handoff `ec1e6520acfb7775b1ce20da5b83719c6df3d4c4` complete S03-004 with an exact independent reviewer PASS.
+- The non-elevated host is live only on `127.0.0.1:8443`; the pre-existing tailnet-only raw-TCP route forwards private 443 to that loopback port. The existing installed ClientAuth identity returned TLS 1.3 HTTP 200 `ok`; no-client-certificate requests failed before HTTP. A separate loopback lifecycle instance shut down cleanly. No new certificate was needed or generated.
+- User requirement: certificate installation/selection and pairing occur once per device. Automatic WebSocket reconnect/resume may occur, but it must silently reuse the existing device identity without another import, certificate selection, or pairing prompt. Queue commit `8e87e8f422bc10f77573e41555d6d46d237431ad` adds this acceptance evidence to S02-002 and S06-002.
+- The same queue commit marks S03-004 owner `done` and makes S05-005/S05-006 `ready`. No integration, push, deployment, DNS, policy, Serve/Funnel, certificate, or public-exposure mutation was performed by Session 01.
+
+## Stalled-open remediation completed (2026-08-30)
+
+- Session 03 cumulative product `0446e685489d2e9d09715d6cc5ba011a5471a540` (including immutable intermediate `b8bde676059d75b571deb3d8c0cbfe5d5f619ee1`) and status handoff `4ca86bbefe56ade1911bcc347d81d0e460e7fcfe` complete S03-006 with named independent reviewer `/root/s03_006_independent`: PASS, no findings.
+- Terminal creation now runs outside the registry-wide lock with pending cancellation and atomic final admission checks. Repeated tests prove unrelated lifecycle remains prompt, late-created invalid terminals are closed, endpoint revocation preserves `AUTHENTICATION_FAILED`, 24 stalled opens do not introduce a fixed cap, and a reconnect reuses stored application credentials without repeating local pairing approval.
+- Focused tests repeated 20 times, full endpoint short tests repeated 20 times, full Go suite, vet, gofmt, diff, ownership, and secret checks passed. Go race mode could not build because no GCC/CGO toolchain is installed; static deadlock/race review passed and the limitation remains explicit.
+- Queue commit `52e7c8c8c8159659742ffdd642b2abf5dd2b01ca` marks S03-006 owner `done` and S06-005 `ready`. No integration, push, deployment, certificate, or network mutation occurred in this queue transition.
+
+## Private network verification handoff (2026-08-30)
+
+- S05-005 product/status `e4a362922f2487b685d06e27dd02bd2f7b52e656` / `214af37854c86d68effc21c2cc59fbd432403713` and S05-006 product/status `e823add5f5495e9f66339dfcd3f81731d3e3cfd9` / `97823460b2474074e0f382ec1fd182a80dfd1703` are owner/reviewer `done`, not Session 06 verified.
+- Independent live evidence passes the exact raw-TCP tailnet-only route, loopback-only fixed host, two successive existing-identity HTTP 200 responses, exact WSS upgrade, no/unrelated-certificate denial, wrong-Origin 403, wrong-subprotocol 426, direct LAN/tailnet-origin denial, and unchanged pre/post route state. The authorized S03 fixed-host restart changed the time-bound listener PID from 5384 to 24048; the harness's supported process-ID override reproduced the matrix after restart.
+- Wrong-peer/full-policy/device-approval, external-public, physical mobile browser, and complete pairing/reconnect gates remain explicitly unclaimed for Session 06/follow-on verification.
+- Queue commit `3428aaa35ceca06fc21c41a001a370a463235aa5` marks S05-005 and S05-006 owner `done` and S02-002 `ready`. No integration, push, deployment, certificate, route, Funnel, DNS, or policy mutation occurred in this queue transition.
+
+## Integration dependency hardening (2026-08-30)
+
+- Queue commit `12e6dc93399c8392343a9e856708ae5f81521d14` makes S01-002 depend on both S06-002 and S06-005. The integration manifest therefore cannot select the superseded pre-remediation Windows-agent product merely because the original vertical-slice gate passed; Session 06 must independently verify exact S03-006 behavior first.
+- No task state, product file, integration, push, deployment, certificate, or network state changed.
+
+## Browser protocol owner handoff (2026-08-30)
+
+- S02-002 product/evidence `16e850a34b56a315fb78c137ddae6d38220180ea` and status handoff `c3c9786d987fa03a1d723d6d4574daf2c1be564d` are owner/reviewer `done`. Named reviewer `/root/s06_006_origin` returned PASS with no severity findings.
+- Focused adapter 11/11, full web 42/42, canonical protocol 22 transcripts/27 fixtures/1 positive vector/4 negative mutations, typecheck, lint, targeted Prettier, configured production build, exact CSP, diff, ownership, and secret checks passed. The new regression performs one synthetic pairing, reloads with a fresh store/adapter, reuses the non-extractable IndexedDB credential, authenticates/opens, and emits no second pairing request.
+- Generated Next HTML checksum is run-specific because build identity changes between exact builds; it is not treated as an exact-source reproducibility hash. Live Chrome Connect/reconnect and physical mobile certificate reuse remain explicitly unclaimed pending the action-time confirmation and Session 06 gates.
+- Queue commit `fd56e75f97f9ed4ad559aa653984bdefc8ed7037` marks S02-002 owner `done` and S05-002 `ready`. No live authentication, terminal session, integration, push, deployment, certificate, or network mutation occurred in this queue transition.
+
+## Combined consumer security handoff (2026-08-30)
+
+- S05-002 product/evidence `4c44f403a11160c23927f6eb35c142ea31e3f8a5` and status handoff `289389de45b9302ee754f75e9c9ed171b4eddc66` are owner/reviewer `done`, not Session 06 verified. Independent reviewer `/root` returned PASS with no severity findings after exact-object, product-tree parity, ownership, diff, clean-status, secret-scan, and report-accuracy checks.
+- Exact protocol verification, repeated agent adversarial tests, full/vet/real-ConPTY evidence, web focused/full/type/lint/build, and direct browser-to-agent source boundaries pass. No unresolved Critical, High, or Medium product finding remains in this owner review.
+- Live Chrome/mobile certificate persistence, named wrong-tailnet peer/full policy, external-public vantage, Go race, controlled host exhaustion, and exact deployed-candidate evidence remain explicit release gaps.
+- Queue commit `5d69505ec69612460f40c827132d828e0ba7d46b` marks S05-002 owner `done` and S06-002 `ready`. No live authentication, product repair, integration, push, deployment, certificate, or network mutation occurred in this queue transition.
+
+## Remembered-session consumer handoff reconciliation (2026-08-30)
+
+- S01-005 exact cumulative protocol/security product `f9a70299974734c3eeb920697d2dfa4717148a9a` and status handoff `14a613b2fd5149cd7f3f5fd0fb17a2cbce57f90c` remain the authoritative protocol 0.2 input.
+- S02-005 exact cumulative product `d8a9b52d3448958d8c1a53eeb7a5ee378813eff9` and status handoff `70666fac1fc9f696f630e91f947028b6c499a2ab` pass product-to-handoff ancestry, `git show --check`, exact author identity, and committed handoff audit. Named independent final reviewer `/root/s06_006_origin` returned PASS with no findings after the New Session retry-recovery fix.
+- S03-007 exact cumulative product `92a29e1673751893d3ef0b5ee9c937b91d0f93d0` and status handoff `a1a5c62874e2551ade3d994c056167007e8cdb64` pass product-to-handoff ancestry, `git show --check`, exact author identity, and committed handoff audit. Named independent final reviewer `/root/s03_004_host/s03_007_fresh_review` returned PASS with no findings after replay/cleanup fencing remediation.
+- Queue/request commit `464ce763890ef305cc4e4d4dab423fd86796bb12` marks S02-005 and S03-007 owner `done`, transitions S05-008 to `ready`, and records the immutable exact-SHA security-review request. These owner results are not Session 06 `verified` evidence.
+- The live 0.1 integration host remains stopped. No host, browser, pairing material, certificate, Tailscale route/policy, Funnel, integration, push, or deployment state changed during this reconciliation.

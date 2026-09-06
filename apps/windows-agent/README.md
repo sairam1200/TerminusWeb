@@ -1,6 +1,6 @@
 # Terminus Windows agent
 
-The agent contains the S03-001 ConPTY adapter and the S03-002 protocol 0.1
+The agent contains the S03-001 ConPTY adapter and the private protocol 0.2
 HTTPS/WSS endpoint. It is still an internal library: it does not install a
 service, change Tailscale policy, enable Funnel, or publish a live endpoint.
 
@@ -14,18 +14,22 @@ handles are discarded.
 ## Private endpoint boundary
 
 `internal/endpoint` consumes the exact protocol/security cumulative product
-tip `910b69e24f464bb3e89152f3e5881beb9b706b76`. It requires TLS 1.3 and an
+tip `f9a70299974734c3eeb920697d2dfa4717148a9a`. It requires TLS 1.3 and an
 already-created listener explicitly bound to a loopback IP. The only supported
 publication model is an independently approved Tailscale-private serving layer
 in front of that loopback origin. Wildcard, LAN, tailnet-interface, plaintext,
 and public listener binds are rejected by this package.
 
-The endpoint accepts only `/terminal`, the exact `terminus.v0_1` WebSocket
+The endpoint accepts only `/terminal`, the exact `terminus.v0_2` WebSocket
 subprotocol, and one configured serialized HTTPS Origin. Pairing, credential
 authentication, per-direction sequencing, payload limits, heartbeat/liveness,
-one terminal per WebSocket connection, detach/resume, output backpressure, and
-cleanup are enforced in process. The registry independently tracks every active
-or detached terminal session but applies no fixed numeric session cap. Every
+one terminal per WebSocket connection, detach/reopen, output backpressure, and
+cleanup are enforced in process. Each running terminal has a random 60-bit
+`xxxx-xxxx-xxxx` locator bound to its authenticated credential and resolved
+private-device identity. Transport loss and connection-authorization expiry
+detach the terminal; a newly authenticated connection can atomically reopen it
+without repeating pairing. The registry independently tracks every active or
+detached terminal session but applies no fixed numeric session cap. Every
 valid authenticated connection may attempt to create its one terminal unless
 endpoint shutdown has begun; genuine adapter, ConPTY, or system resource
 failures use the existing generic `SESSION_OPEN_FAILED` result. A caller must
@@ -35,6 +39,15 @@ facility appropriate to the eventual service identity. There is deliberately
 no plaintext credential-store implementation. Store deletion is part of the
 interface so local revocation atomically closes matching authorizations and
 active or detached terminal sessions.
+
+Only terminal output is retained, in volatile process memory, for remembered
+sessions. The newest 262,144 bytes per running session are subject to a
+16,777,216-byte agent-wide budget; pressure evicts globally oldest bytes without
+closing sessions. Replay uses contiguous byte offsets and a snapshot barrier
+before live output. Explicit close/New Session, credential expiry or revocation,
+process exit, containment loss, and agent shutdown remove the session and its
+history. Terminal input and history are never written to the credential store,
+disk, logs, Vercel, or a control plane.
 
 ## Temporary integration host
 

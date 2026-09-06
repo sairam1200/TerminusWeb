@@ -60,8 +60,13 @@ The first integration target is deliberately narrow:
 4. Open one independent non-elevated PowerShell session per authenticated
    browser tab through ConPTY, without a fixed protocol or application-policy
    limit on the number of concurrent sessions across the agent.
-5. Exchange input, output, resize, heartbeat, detach, and close frames.
+5. Exchange input, output, resize, heartbeat, detach, reopen/history, and close
+   frames.
 6. Reconnect after foreground/background or network interruption without exposing a public port.
+7. Keep one stable short session ID per page. Reloading
+   `#/s/xxxx-xxxx-xxxx` reopens that credential-owned running session and replays
+   bounded history from volatile agent memory; the fragment is never sent to
+   Vercel. The page requests a different ID only through **New Session**.
 
 The agent does not reject `open_session` solely because some numeric count of
 other sessions is active or detached. It attempts terminal creation for every
@@ -70,6 +75,12 @@ resource failure uses the existing `SESSION_OPEN_FAILED` result and cleans up
 any partially created resources. Each accepted tab retains its own connection,
 session identifier, ConPTY process, resize state, heartbeat, reconnect state,
 and cleanup lifecycle. Protocol 0.1 still carries at most one terminal per
-WebSocket and does not multiplex terminals.
+WebSocket and does not multiplex terminals. Protocol 0.2 retains at most
+262,144 terminal-output bytes per running session and 16,777,216 history bytes
+across the Windows agent. It
+does not persist terminal plaintext in browser storage, on disk, at Vercel, or
+in a control plane. Explicit close/New Session, credential expiry or
+revocation, process exit, unrecoverable failure, and agent shutdown remove that
+session and its retained history.
 
 Subscriptions, advertising, owners, multi-tenancy, and super-administration are outside this first vertical slice.

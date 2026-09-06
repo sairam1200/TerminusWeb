@@ -8,6 +8,11 @@ type Machine struct {
 	nextAgent       uint64
 	clientExhausted bool
 	agentExhausted  bool
+	sessionID       string
+	nextOutput      uint64
+	historyBegun    bool
+	historyCursor   uint64
+	historyEnd      uint64
 }
 
 func NewMachine(connection ConnectionState, session SessionState, nextClient, nextAgent uint64) *Machine {
@@ -22,6 +27,8 @@ func (m *Machine) NextSequence(direction Direction) (uint64, bool) {
 }
 
 func (m *Machine) SetSession(state SessionState) { m.Session = state }
+func (m *Machine) SetOutputOffset(offset uint64) { m.nextOutput = offset }
+func (m *Machine) OutputOffset() uint64          { return m.nextOutput }
 
 func (m *Machine) Apply(direction Direction, frame DecodedFrame) error {
 	if m.ConnectionID == "" {
@@ -58,6 +65,9 @@ func (m *Machine) Apply(direction Direction, frame DecodedFrame) error {
 		m.Connection = ConnectionClosing
 		return nil
 	}
+	if err := m.applySessionSemantics(frame); err != nil {
+		return err
+	}
 
 	if next, ok := connectionTransition(m.Connection, direction, frame.Type); ok {
 		m.Connection = next
@@ -71,6 +81,76 @@ func (m *Machine) Apply(direction Direction, frame DecodedFrame) error {
 		return protocolError(DirectionViolation, 1008, nil)
 	}
 	return protocolError(InvalidState, 1008, nil)
+}
+
+func (m *Machine) applySessionSemantics(frame DecodedFrame) error {
+	id, hasID := frameSessionID(frame.Value)
+	if hasID {
+		if m.sessionID == "" {
+			m.sessionID = id
+		} else if m.sessionID != id {
+			if frame.Type == "history_begin" || frame.Type == "history_chunk" || frame.Type == "history_end" || frame.Type == "terminal_output" {
+				return protocolError(OutputOffsetInvalid, 1008, nil)
+			}
+			return protocolError(SchemaInvalid, 1002, nil)
+		}
+	}
+	switch payload := frame.Value.(type) {
+	case *HistoryBeginPayload:
+		if m.historyBegun || payload.StartOffset > payload.EndOffset || payload.EndOffset-payload.StartOffset > MaxSessionHistory || (!payload.Truncated && payload.StartOffset != 0) || payload.EndOffset != m.nextOutput {
+			return protocolError(OutputOffsetInvalid, 1008, nil)
+		}
+		m.historyBegun = true
+		m.historyCursor = payload.StartOffset
+		m.historyEnd = payload.EndOffset
+	case *HistoryChunkPayload:
+		data, _ := DecodeBase64(payload.Data, -1)
+		length := uint64(len(data))
+		if !m.historyBegun || payload.Offset != m.historyCursor || length > m.historyEnd-m.historyCursor || m.historyCursor > MaxSequence-length {
+			return protocolError(OutputOffsetInvalid, 1008, nil)
+		}
+		m.historyCursor += length
+	case *HistoryEndPayload:
+		if !m.historyBegun || payload.EndOffset != m.historyEnd || m.historyCursor != m.historyEnd {
+			return protocolError(OutputOffsetInvalid, 1008, nil)
+		}
+		m.historyBegun = false
+	case *TerminalOutputPayload:
+		data, _ := DecodeBase64(payload.Data, -1)
+		length := uint64(len(data))
+		if payload.Offset != m.nextOutput || m.nextOutput > MaxSequence-length {
+			return protocolError(OutputOffsetInvalid, 1008, nil)
+		}
+		m.nextOutput += length
+	}
+	return nil
+}
+
+func frameSessionID(value any) (string, bool) {
+	switch payload := value.(type) {
+	case *SessionIDPayload:
+		return payload.SessionID, true
+	case *ReopenSessionPayload:
+		return payload.SessionID, true
+	case *TerminalPayload:
+		return payload.SessionID, true
+	case *TerminalOutputPayload:
+		return payload.SessionID, true
+	case *HistoryBeginPayload:
+		return payload.SessionID, true
+	case *HistoryChunkPayload:
+		return payload.SessionID, true
+	case *HistoryEndPayload:
+		return payload.SessionID, true
+	case *ResizePayload:
+		return payload.SessionID, true
+	case *CloseSessionPayload:
+		return payload.SessionID, true
+	case *SessionClosedPayload:
+		return payload.SessionID, true
+	default:
+		return "", false
+	}
 }
 
 func connectionTransition(state ConnectionState, direction Direction, message string) (ConnectionState, bool) {
@@ -106,13 +186,16 @@ func sessionTransition(connection ConnectionState, state SessionState, direction
 	transitions := map[key]SessionState{
 		{SessionNone, ClientToAgent, "open_session"}:          SessionOpening,
 		{SessionOpening, AgentToClient, "session_opened"}:     SessionOpen,
+		{SessionNone, ClientToAgent, "reopen_session"}:        SessionReopening,
+		{SessionReopening, AgentToClient, "session_reopened"}: SessionReplaying,
+		{SessionReplaying, AgentToClient, "history_begin"}:    SessionReplaying,
+		{SessionReplaying, AgentToClient, "history_chunk"}:    SessionReplaying,
+		{SessionReplaying, AgentToClient, "history_end"}:      SessionOpen,
 		{SessionOpen, ClientToAgent, "terminal_input"}:        SessionOpen,
 		{SessionOpen, AgentToClient, "terminal_output"}:       SessionOpen,
 		{SessionOpen, ClientToAgent, "resize"}:                SessionOpen,
 		{SessionOpen, ClientToAgent, "detach"}:                SessionDetaching,
 		{SessionDetaching, AgentToClient, "session_detached"}: SessionDetached,
-		{SessionDetached, ClientToAgent, "resume_session"}:    SessionResuming,
-		{SessionResuming, AgentToClient, "session_resumed"}:   SessionOpen,
 		{SessionOpen, ClientToAgent, "close_session"}:         SessionClosing,
 		{SessionClosing, AgentToClient, "session_closed"}:     SessionClosed,
 		{SessionOpen, AgentToClient, "session_closed"}:        SessionClosed,

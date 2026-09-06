@@ -19,13 +19,11 @@ import (
 )
 
 const (
-	helloLimit       = 5 * time.Second
-	heartbeatPeriod  = 15 * time.Second
-	livenessLimit    = 45 * time.Second
-	resumeLifetime   = 120 * time.Second
-	maxPendingOutput = 65_536
-	writeQueueSize   = 32
-	writeLimit       = 5 * time.Second
+	helloLimit      = 5 * time.Second
+	heartbeatPeriod = 15 * time.Second
+	livenessLimit   = 45 * time.Second
+	writeQueueSize  = 32
+	writeLimit      = 5 * time.Second
 )
 
 type DeviceResolver func(*http.Request) (string, error)
@@ -54,6 +52,7 @@ type Endpoint struct {
 	cfg                Config
 	pairing            pairingManager
 	limiter            *rateLimiter
+	reopenLimiter      *rateLimiter
 	sessions           sessionRegistry
 	upgrader           websocket.Upgrader
 	mu                 sync.Mutex
@@ -79,7 +78,7 @@ func New(config Config) (*Endpoint, error) {
 	if config.Log == nil {
 		config.Log = func(Event) {}
 	}
-	e := &Endpoint{cfg: config, limiter: newRateLimiter(), connections: make(map[*connection]struct{}), connectionIDs: make(map[string]struct{}), revokedCredentials: make(map[string]struct{})}
+	e := &Endpoint{cfg: config, limiter: newRateLimiter(), reopenLimiter: newRateLimiter(20), connections: make(map[*connection]struct{}), connectionIDs: make(map[string]struct{}), revokedCredentials: make(map[string]struct{})}
 	e.sessions.adapter = config.Terminal
 	e.sessions.now = config.Now
 	e.upgrader = websocket.Upgrader{
@@ -196,13 +195,13 @@ func (e *Endpoint) RevokeCredential(ctx context.Context, credentialID string) er
 		connections = append(connections, connection)
 	}
 	e.mu.Unlock()
-	sessionErr := e.sessions.revokeCredential(credentialID)
+	closeTickets := e.sessions.fenceCredentialRevocation(credentialID)
 	for _, connection := range connections {
 		if connection.credentialID() == credentialID {
 			connection.fail(protocol.NewError(protocol.AuthenticationFailed, 1008, nil))
 		}
 	}
-	return sessionErr
+	return e.sessions.finishCloseTickets(closeTickets)
 }
 
 func (e *Endpoint) bindCredential(connection *connection, credential Credential) bool {
@@ -274,6 +273,8 @@ type connection struct {
 	lastSeen         time.Time
 	attemptMu        sync.Mutex
 	attemptReserved  bool
+	disconnectMu     sync.Mutex
+	destroySession   bool
 }
 
 func newConnection(endpoint *Endpoint, ws *websocket.Conn, device, origin string) *connection {
@@ -329,6 +330,7 @@ func (c *connection) run() {
 func (c *connection) handle(frame protocol.DecodedFrame) error {
 	now := c.endpoint.cfg.Now()
 	if deadline := c.authorizationDeadline(); !deadline.IsZero() && !now.Before(deadline) {
+		c.expireCredentialIfNeeded(now)
 		return protocol.NewError(protocol.AuthorizationExpired, 1008, nil)
 	}
 	switch payload := frame.Value.(type) {
@@ -445,25 +447,22 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 		return c.endpoint.sessions.resize(c, payload.SessionID, payload.Dimensions)
 	case *protocol.SessionIDPayload:
 		if frame.Type == "detach" {
-			grant, expires, err := c.endpoint.sessions.detach(c, payload.SessionID)
-			if err != nil {
-				return protocol.NewError(protocol.ResumeRejected, 1008, err)
+			if err := c.endpoint.sessions.detach(c, payload.SessionID); err != nil {
+				return protocol.NewError(protocol.InvalidState, 1008, err)
 			}
-			if err := c.send("session_detached", protocol.SessionDetachedPayload{SessionID: payload.SessionID, ResumeGrant: grant, ExpiresAt: protocol.FormatTimestamp(expires)}); err != nil {
-				c.endpoint.sessions.abortTransition(payload.SessionID)
-				return err
-			}
-			return nil
+			return c.send("session_detached", protocol.SessionIDPayload{SessionID: payload.SessionID})
 		}
-	case *protocol.ResumeSessionPayload:
-		if err := c.endpoint.sessions.resume(c, payload.SessionID, payload.ResumeGrant, payload.Dimensions); err != nil {
-			return protocol.NewError(protocol.ResumeRejected, 1008, err)
+	case *protocol.ReopenSessionPayload:
+		identity := c.credentialID() + "\x00" + c.device
+		if !c.endpoint.reopenLimiter.begin(identity, now) {
+			return protocol.NewError(protocol.SessionReopenRejected, 1008, nil)
 		}
-		if err := c.send("session_resumed", protocol.SessionIDPayload{SessionID: payload.SessionID}); err != nil {
-			c.endpoint.sessions.abortTransition(payload.SessionID)
-			return err
+		snapshot, err := c.endpoint.sessions.beginReopen(c, payload.SessionID, payload.Dimensions)
+		c.endpoint.reopenLimiter.finish(identity, now, err == nil)
+		if err != nil {
+			return protocol.NewError(protocol.SessionReopenRejected, 1008, err)
 		}
-		return c.endpoint.sessions.activateResume(c, payload.SessionID)
+		return c.endpoint.sessions.replay(c, snapshot)
 	case *protocol.CloseSessionPayload:
 		if err := c.endpoint.sessions.closeBy(c, payload.SessionID, payload.Reason); err != nil {
 			return err
@@ -524,6 +523,7 @@ func (c *connection) send(messageType string, payload any) error {
 }
 
 func (c *connection) cleanSequenceClose() {
+	c.markSessionForDestruction()
 	_ = c.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
 	go c.shutdown()
 }
@@ -590,9 +590,6 @@ func (c *connection) applyIncoming(frame protocol.DecodedFrame) error {
 	if frame.ConnectionID != c.id {
 		return protocol.NewError(protocol.SchemaInvalid, 1002, nil)
 	}
-	if _, ok := frame.Value.(*protocol.ResumeSessionPayload); ok && c.machine.Connection == protocol.ConnectionReady {
-		c.machine.SetSession(protocol.SessionDetached)
-	}
 	return c.machine.Apply(protocol.ClientToAgent, frame)
 }
 
@@ -614,6 +611,9 @@ func (c *connection) fail(err error) {
 		if !ok {
 			code, closeCode = protocol.InvalidState, 1011
 		}
+		if code != protocol.AuthorizationExpired && code != protocol.HeartbeatTimeout && code != protocol.SessionReopenRejected {
+			c.markSessionForDestruction()
+		}
 		connectionID := c.connectionID()
 		c.endpoint.cfg.Log(Event{Name: "connection_rejected", Code: code, ConnectionID: connectionID})
 		if connectionID != "" {
@@ -628,6 +628,7 @@ func (c *connection) authorizationLoop(deadline time.Time) {
 	for {
 		remaining := deadline.Sub(c.endpoint.cfg.Now())
 		if remaining <= 0 {
+			c.expireCredentialIfNeeded(c.endpoint.cfg.Now())
 			c.fail(protocol.NewError(protocol.AuthorizationExpired, 1008, nil))
 			return
 		}
@@ -646,9 +647,34 @@ func (c *connection) shutdown() {
 		c.finishAttempt(false)
 		close(c.done)
 		c.endpoint.unregister(c)
-		c.endpoint.sessions.disconnected(c)
+		c.endpoint.sessions.disconnected(c, c.sessionMustBeDestroyed())
 		_ = c.ws.Close()
 	})
+}
+
+func (c *connection) expireCredentialIfNeeded(now time.Time) {
+	credential := c.credentialSnapshot()
+	if credential.ID != "" && !now.Before(credential.ExpiresAt) {
+		_ = c.endpoint.sessions.expireCredential(credential.ID)
+	}
+}
+
+func (c *connection) markSessionForDestruction() {
+	c.disconnectMu.Lock()
+	c.destroySession = true
+	c.disconnectMu.Unlock()
+}
+
+func (c *connection) sessionMustBeDestroyed() bool {
+	c.disconnectMu.Lock()
+	defer c.disconnectMu.Unlock()
+	return c.destroySession
+}
+
+func (c *connection) setOutputOffset(offset uint64) {
+	c.protocolMu.Lock()
+	c.machine.SetOutputOffset(offset)
+	c.protocolMu.Unlock()
 }
 
 func (c *connection) beginAttempt(now time.Time) bool {

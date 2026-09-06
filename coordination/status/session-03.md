@@ -139,3 +139,95 @@
 - External blocker: no already-trusted server certificate/hostname, client-CA bundle, exact approved browser Origin, or independently approved Tailscale-private publication mapping is available. Therefore no endpoint was started and `coordination/requests/from-03-to-02-s02-002-real-wss-endpoint-ready.response.md` was intentionally not created. Producing it requires a separate Session 03 consumer-wiring task assigned by Session 01 plus explicit authorization for local execution using externally trusted certificate/client-CA inputs; publication/policy remains outside Session 03 authority.
 - Independent reviewer: `/root/s03_002_readonly_review` reviewed exact tip `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c` read-only and returned PASS with no severity findings; `git diff --check 29a8f7c..b52e3bb` passed.
 - Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S03-004 authorized endpoint-ready handoff (2026-08-30)
+
+- Current task: `S03-004` — Run the authorized private integration host with supplied trusted inputs.
+- State: owner/reviewer `done`; Session 01 owns the queue transition and Session 06 owns later `verified` evidence.
+- Queue authorization: `e9b6dd023178c18638e03b96cfd0543670c7d7f3`; dependencies S03-003 and S06-006 were owner-done before startup.
+- Exact implementation input: `e13c4c8d2659125476c7458b45720892ee49fc24`; exact S03-003 host dependency `b52e3bb4493745909ab0fc3f65aa95ebb62dc33c`; S06-006 Origin product `14ecdd5cbaf00b75dfeec6f7391038a66f391dd5`.
+- Product/evidence files: `apps/windows-agent/evidence/S03-004-endpoint-ready-20260830.md` and immutable endpoint-ready responses to Sessions 02 and 05 under `coordination/requests/`.
+- Runtime: non-elevated `sai\saira` on Microsoft Windows NT `10.0.26200.0`; host remains attached to the operator session with process PID 5384 and only `127.0.0.1:8443` listening at handoff time.
+- Endpoint: `wss://sai.tailf8dcea.ts.net/terminal`; exact allowed Origin `https://terminus-web.vercel.app`; subprotocol `terminus.v0_1`; TLS 1.3 and verified client certificate required; DPAPI CurrentUser protected-store path is explicit and remains out of the repository.
+- Certificate result: the existing server certificate/key pair passed load, hostname, ServerAuth, and current-user trust validation. The existing browser leaf is time-valid, verifies to the supplied client CA, and has explicit ClientAuth EKU `1.3.6.1.5.5.7.3.2`. No certificate was generated or installed.
+- Live evidence:
+  - Existing installed Terminus ClientAuth identity: `/healthz` returned `ok` and HTTP 200 over the tailnet-only raw-TCP path.
+  - No client certificate: curl failed closed with exit 56 and HTTP status 000.
+  - Supplementary direct-loopback lifecycle instance `127.0.0.1:56244`: mTLS `/healthz` returned HTTP 200; after Ctrl+C the port was closed and no credential-store file existed.
+  - Host output scan found only fixed listener/health metadata and generic loopback TLS EOFs; no terminal plaintext, command, pairing material, credential, proof, token, private key, PFX password, or reusable hash appeared.
+- Deterministic commands on Go `1.26.7` Windows AMD64:
+  - `go vet ./...`: PASS.
+  - `go test -short -count=1 ./...`: PASS.
+  - `go test -count=1 ./...`: PASS, including real Windows ConPTY cleanup.
+  - `go test -short -count=20 ./internal/endpoint`: PASS in 24.451 seconds.
+  - `gofmt -l .` listed 16 unchanged files due the existing CRLF materialization; no source was rewritten and the worktree was clean before evidence changes.
+  - A sandboxed live reset attempt failed closed with `integration host unavailable` and made no store change. Live deletion of the persistent store was not retried; deterministic DPAPI reset/delete/revocation tests passed.
+  - `git diff --check`, product `git show --check`, exact changed-path review, and credential/plaintext scans: PASS.
+- Independent reviewer/evidence: `/root/s03_004_host/s03_004_review` reviewed exact product `ce5ac98b8a79abd42fee6083345709c77aaf669c` and returned PASS. The reviewer reproduced author/committer identity, exact dependency/queue checks, clean owned scope and secret scan, `go vet`, the full Go suite, targeted integration-host 5/5 and endpoint 7/7 suites, loopback-only PID 5384, tailnet-only raw TCP forwarding with Funnel not public, and fail-closed no-client behavior. The reviewer did not independently reproduce the positive HTTP 200 and labels it owner/coordinator evidence.
+- Once-per-device acceptance: importing/selecting the client certificate and completing pairing is a one-time device setup. Authenticated reconnect/resume must reuse that client identity and stored credential without another certificate import or local pairing prompt. The server reuses stored credential state on authenticated reconnect; browser-level silent certificate reuse still requires Session 02/06 Chrome, Firefox, Android, and iPhone evidence and is not claimed here.
+- Scope: no Tailscale/DNS/firewall/grant/Funnel change, certificate generation/installation, LAN/public listener, deployment, merge, push, terminal input, or pairing-code output occurred. The primary host remains live for downstream owner and verifier checks.
+- Product/task commit: `ce5ac98b8a79abd42fee6083345709c77aaf669c`.
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S03-006 stalled-open isolation handoff (2026-08-30)
+
+- Current task: `S03-006` — Keep stalled terminal creation from blocking unrelated session lifecycle.
+- State: owner/reviewer `done`; Session 01 owns the queue transition and Session 06 owns later `verified` evidence.
+- Queue assignment: Session 01 commits `e9b6dd023178c18638e03b96cfd0543670c7d7f3` / `4dba7fe`; exact dependencies S03-005 product `e13c4c8d2659125476c7458b45720892ee49fc24` and S05-007 review product/status `cec6ea3467e1a8b3eb31920280b91eb30c60fa7a` / `d34243a93c30690f3a450924976046133c0aad13` were owner-done.
+- Finding remediated: `S05-007-AVAIL-001`. `Adapter.Open` no longer runs under the registry-wide mutex. Each open registers a cancellable pending admission, creates the terminal unlocked, then atomically revalidates permanent shutdown, owner connection state, and credential revocation before registration. An invalid late terminal is canceled and closed without becoming active.
+- Lifecycle behavior: unrelated input, resize, close, disconnect cleanup, credential revocation, and shutdown remain prompt while an adapter ignores cancellation. Disconnect and shutdown cancel matching pending contexts without waiting. Endpoint credential revocation records the revoked credential and closes active sessions, emits fatal generic `AUTHENTICATION_FAILED`, then connection shutdown/disconnect cancels the pending open; this prevents `SESSION_OPEN_FAILED` from winning `failOnce`. A late-returning broken adapter is still closed by final revalidation.
+- No-cap behavior: 24 simultaneous stalled admissions all reached the adapter and were admitted after release; no count predicate, capacity reservation, eighth/ninth boundary, or replacement fixed limit was added.
+- Files changed: `apps/windows-agent/internal/endpoint/session.go` and `apps/windows-agent/internal/endpoint/endpoint_test.go` only.
+- Independent test authors:
+  - `/root/s03_004_host/s03_004_review` owned only `endpoint_test.go` for the base remediation: deterministic channel-barrier coverage for stalled open versus input/resize/close/disconnect/revocation/shutdown, invalid late return, 24 concurrent admissions, and stored-credential reconnect.
+  - `/root/s05_005_independent` owned only the endpoint-level revocation/open ordering test: fatal `AUTHENTICATION_FAILED` (not `SESSION_OPEN_FAILED`), prompt cancellation through disconnect, late terminal closed, and active/pending counts zero.
+- Once-per-device acceptance: `TestStoredCredentialReconnectDoesNotRepeatLocalPairingApproval` pairs once, closes the first WSS connection, authenticates a new connection with the stored credential challenge/proof, and proves the local approval callback remains exactly one. Browser certificate import/selection/persistence is explicitly outside this server test and remains Session 02/06 physical-browser evidence.
+- Owner commands/evidence on non-elevated Microsoft Windows NT `10.0.26200.0` with Go `1.26.7` Windows AMD64:
+  - Four new stalled-open groups once and `-short -count=20`: PASS.
+  - Stored-credential reconnect test `-count=20`: PASS.
+  - Endpoint-level revocation/open ordering test `-count=20`: PASS.
+  - `go vet ./...`: PASS.
+  - `go test -count=1 ./...`: PASS across integration host, endpoint, protocol, and real Windows ConPTY/process-cleanup suites.
+  - `go test -short -count=20 ./internal/endpoint`: PASS in 26.462 seconds on the cumulative product.
+  - `gofmt -d` on both changed files, `git diff --check`, product `git show --check`, changed-path ownership review, fixed-cap scan, and credential/plaintext scan: PASS.
+  - `CGO_ENABLED=1 go test -race ...`: unavailable; the installed toolchain reported `runtime/race: package testmain: cannot find package`, default CGO is disabled, and `where.exe gcc` found no compiler. No compiler was installed. Deterministic barrier suites and repeated synchronized tests are the applicable local concurrency evidence.
+- Product history: immutable intermediate `b8bde676059d75b571deb3d8c0cbfe5d5f619ee1` introduced unlocked creation/revalidation and the base tests. A pre-review owner audit found the revocation failure-order race; cumulative follow-up `0446e685489d2e9d09715d6cc5ba011a5471a540` preserves authentication-failure ordering and adds the independent endpoint-level regression without rewriting the intermediate commit.
+- Independent reviewer/evidence: `/root/s03_006_independent` reviewed exact cumulative product `0446e685489d2e9d09715d6cc5ba011a5471a540` and returned PASS with no findings. The reviewer reproduced the focused seven-test suite `-count=20`, endpoint short suite `-count=20`, vet, full Go/real-Windows suite, formatting, diff/ownership, author, and secret checks; static race/deadlock review confirmed atomic registration, prompt lifecycle operations, permanent revocation/shutdown rejection, late cleanup, one-time approval reuse, and no fixed cap. Race-build unavailability was independently retained.
+- Live boundary: the existing S03-004 PID 5384 remained loopback-only and untouched while the source fix was made; it still runs the earlier compiled binary at this handoff. Replacement with the exact cumulative source and repeat mTLS allow/deny/listener checks must be coordinated after this status commit so downstream sessions are not interrupted mid-check.
+- Scope: no protocol/schema change, terminal plaintext, pairing-code output, certificate generation/installation, Tailscale/DNS/firewall/grant/Funnel change, LAN/public listener, deployment, merge, or push occurred.
+- Product/task commit: `0446e685489d2e9d09715d6cc5ba011a5471a540` (cumulative; includes `b8bde676059d75b571deb3d8c0cbfe5d5f619ee1`).
+- Handoff commit: resolve from branch HEAD after this status-only handoff commit.
+
+## S03-006 exact-host runtime follow-up (2026-08-30)
+
+- The earlier S03-004 process PID 5384 was stopped with Ctrl+C only after netstat showed no established client. The attached `go run` wrapper reported the expected interrupt exit, and a read-only netstat check proved the old 8443 listener was closed before replacement.
+- A new non-elevated host was started from clean branch HEAD `4ca86bbefe56ade1911bcc347d81d0e460e7fcfe`, whose `apps/windows-agent` source contains exact reviewed S03-006 product `0446e685489d2e9d09715d6cc5ba011a5471a540`. Inputs, Origin, hostname, port, protected-store path, and device label are unchanged; no pairing-code flag was used.
+- Current runtime: attached operator session, process `integration-host` PID 24048, listener exactly `127.0.0.1:8443`; no wildcard/LAN listener.
+- Existing installed Terminus ClientAuth identity over the tailnet-only raw-TCP path: `/healthz` returned `ok` and HTTP 200 with TLS 1.3.
+- No client certificate: curl failed closed with exit 56 and HTTP status 000.
+- New host output contains only the fixed listener/health metadata and generic loopback TLS handshake rejection/EOF events. No terminal plaintext, command, pairing material, credential, proof, token, private key, PFX password, or reusable hash appeared.
+- No certificate generation/installation, Tailscale/Serve/Funnel/DNS/firewall/grant mutation, public/LAN exposure, product-code change, merge, push, or deployment occurred in this runtime replacement.
+- Runtime follow-up commit: resolve from branch HEAD after this status-only commit.
+
+## S03-007 remembered-session handoff (2026-08-30)
+
+- Current task: `S03-007` — Implement credential-bound remembered sessions and bounded history replay.
+- State: owner/reviewer `done`; Session 01 owns the queue transition and Session 06 owns later `verified` evidence.
+- Authoritative inputs: queue/request commit `789397b`; exact protocol/security 0.2 cumulative product `f9a70299974734c3eeb920697d2dfa4717148a9a`; Session 01 handoff `14a613b`; exact S03-006 dependency `0446e685489d2e9d09715d6cc5ba011a5471a540`.
+- Product files: `apps/windows-agent/README.md`, `internal/protocol/{protocol.go,machine.go,fixtures_test.go}`, and `internal/endpoint/{endpoint.go,security.go,session.go,endpoint_test.go,endpoint_windows_test.go}`.
+- Protocol/lifecycle: the endpoint now exclusively negotiates `terminus.v0_2`; stored credentials remain reusable without another pairing approval. Sessions receive canonical random 60-bit Crockford-lowercase `xxxx-xxxx-xxxx` locators with at most eight collision retries before terminal creation. A locator is never authorization: reopen requires the same authenticated credential and non-empty resolved source-device identity, and exactly one connection claims ownership atomically. Unknown, wrong-owner/device, busy, closed, and concurrent-loser cases return only fatal `SESSION_REOPEN_REJECTED`.
+- History: only output bytes are retained in volatile agent memory, at most 262,144 bytes per running session and 16,777,216 bytes agent-wide. Global pressure evicts exact globally oldest bytes without closing a terminal or imposing a fixed session-count cap. Snapshot history is offset-contiguous and precedes later live output; replay backpressure closes the claimant and safely returns the shell to detached state. Input, terminal plaintext, and history are not persisted or logged.
+- Cleanup/races: graceful detach, transport loss, heartbeat timeout, and 12-hour connection authorization expiry preserve the running shell for reauthentication/reopen. Explicit close/New Session, credential expiry/revocation, process exit, containment/protocol/backpressure failure, offset exhaustion, and shutdown close exactly once and discard history. S03-006 unlocked/stalled terminal creation, permanent revocation/shutdown revalidation, late-terminal cleanup, and uncapped admission remain intact.
+- Cumulative race remediation: immutable initial product `62665a64638990ce2df6051416d54ffae0c365f7` was not rewritten. Initial reviewer `/root/s03_007_review` found one Medium on that exact commit: a captured replay could continue sending history while lifecycle/revocation cleanup blocked in `Terminal.Close`, and revocation could delay its fatal authentication result behind that cleanup. Follow-up `92a29e1673751893d3ef0b5ee9c937b91d0f93d0` revalidates the close fence before every snapshot/tail replay frame, fences all matching revocation sessions before emitting fatal `AUTHENTICATION_FAILED`, performs terminal cleanup afterward, and fences every shutdown session before the first potentially blocking close. Deterministic channel-barrier tests cover credential revoke, process exit, and shutdown while close is blocked, plus authentication-failure ordering.
+- Owner evidence on non-elevated Microsoft Windows NT `10.0.26200.0` as `sai\\saira`, Go `1.26.7` windows/amd64:
+  - Exact `f9a7029` contract `npm run verify`: PASS (`0.1`: 22 transcripts, 27 fixtures, 1 positive auth vector, 4 negative mutations; `0.2`: 23 transcripts, 32 fixtures, 1 positive auth vector, 4 negative mutations).
+  - Focused remembered-session ownership/replay/detach/stalled-open groups `-count=20`: PASS; history budget/truncation/expiry/ID groups `-count=5`: PASS.
+  - New replay-close fence test `-count=100`: PASS; cumulative blocked-close/revocation/shutdown group `-count=20`: PASS.
+  - `go test -short -count=20 ./internal/endpoint`: PASS in 43.351s.
+  - `go vet ./...`, `go test -short -count=1 ./...`, and `go test -count=1 ./...`: PASS; final full run included real Windows ConPTY replay/cleanup (`integration-host` 0.986s, `endpoint` 8.570s, `protocol` 0.823s, `terminal` 13.849s).
+  - Changed-file `gofmt -l`, `git diff --check`, both product `git show --check`, changed-path ownership, stale 0.1/resume/fixed-cap, and log/secret/plaintext scans: PASS.
+  - Race mode is unavailable because `CGO_ENABLED=0` and `where.exe gcc` found no compiler; `go test -race` reported that race mode requires cgo. No compiler was installed. Repeated deterministic barrier suites and fresh static review are the applicable concurrency evidence.
+- Independent reviewer: `/root/s03_004_host/s03_007_fresh_review` reviewed exact cumulative product `92a29e1673751893d3ef0b5ee9c937b91d0f93d0` read-only and returned PASS with no findings. The reviewer independently reproduced the focused follow-up tests `-count=20`, full endpoint short suite `-count=20` (43.942s), vet, protocol tests, full real-Windows suite (`endpoint` 8.888s, `terminal` 14.494s), explicit real ConPTY WSS replay/cleanup, formatting, diff/product/ownership, fixed-cap, and secret/plaintext audits. Static review confirmed the former Medium is closed and all S03-007 ownership, history, replay, expiry/revocation, one-time credential reuse, stalled-open, and no-cap requirements remain satisfied.
+- Scope: no live host was started, stopped, or replaced; no pairing code or terminal plaintext was printed; no certificate, Tailscale/Serve/Funnel/DNS/firewall/grant, listener, deployment, merge, push, or contract file was changed.
+- Product/task commit: `92a29e1673751893d3ef0b5ee9c937b91d0f93d0` (cumulative; includes immutable initial `62665a64638990ce2df6051416d54ffae0c365f7`).
+- Handoff commit: resolve from branch HEAD after this status-only commit.
