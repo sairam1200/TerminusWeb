@@ -22,7 +22,7 @@ import {
   type StoredCredential,
 } from "../protocol/credentialStore";
 import {
-  validatePrivateWssPolicy,
+  validateWssPolicy,
   type PrivateWssPolicy,
 } from "../protocol/endpointPolicy";
 import type { ProtocolErrorCode, ProtocolFrame } from "../protocol/types";
@@ -134,13 +134,13 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     this.now = config.now ?? Date.now;
     this.monotonicNow =
       config.monotonicNow ?? (() => globalThis.performance.now());
-    this.policy = validatePrivateWssPolicy(config, this.getCurrentOrigin());
+    this.policy = validateWssPolicy(config, this.getCurrentOrigin());
     this.credentialStore = config.credentialStore;
     this.webSocketFactory =
       config.webSocketFactory ??
       ((url, subprotocol) =>
         new WebSocket(url, subprotocol) as unknown as WebSocketPort);
-    this.label = `PRIVATE WSS · PROTOCOL 0.2 · ${new URL(this.policy.endpoint).host}`;
+    this.label = `${this.policy.mode === "local" ? "LOCAL" : "PRIVATE"} WSS · PROTOCOL 0.2 · ${new URL(this.policy.endpoint).host}`;
   }
 
   async connect(options: TerminalConnectOptions = {}): Promise<void> {

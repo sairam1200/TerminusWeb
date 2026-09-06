@@ -55,6 +55,7 @@ vi.mock("@xterm/xterm", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   xtermMock.data.listener = undefined;
   window.history.replaceState(null, "", "/");
 });
@@ -613,3 +614,80 @@ class ProtocolUiAdapter implements TerminalAdapter {
     this.listeners.forEach((listener) => listener(state));
   }
 }
+
+describe("merged connection profiles with renderer", () => {
+  const profiles = [
+    {
+      mode: "local" as const,
+      endpoint: "wss://127.0.0.1:4176/terminal",
+      expectedWebOrigin: "http://127.0.0.1:4176",
+    },
+    {
+      mode: "private" as const,
+      endpoint: "wss://agent.private.invalid/terminal",
+      expectedWebOrigin: "https://preview.example.invalid",
+    },
+  ];
+  it("switches detached profiles without sending the previous host session fragment", async () => {
+    const user = userEvent.setup();
+    const local = new ProtocolUiAdapter();
+    const remote = new ProtocolUiAdapter("detached");
+    const factory = vi.fn((profile) =>
+      profile?.mode === "local" ? local : remote,
+    );
+    render(
+      <TerminalShell
+        protocolProfiles={profiles}
+        defaultMode="private"
+        adapterFactory={factory}
+      />,
+    );
+    const selector = screen.getByRole("combobox", { name: "Connection mode" });
+    expect(selector).toHaveValue("private");
+    await user.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(selector).toBeDisabled();
+    window.history.replaceState(null, "", "#/s/k7m4-p2q9-wxyz");
+    await user.click(screen.getAllByRole("button", { name: "Detach" })[0]);
+    await waitFor(() => expect(selector).toBeEnabled());
+    await user.selectOptions(selector, "local");
+    expect(window.location.hash).toBe("");
+    expect(xtermMock.dispose).toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Connect locally" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Connect locally" }));
+    expect(local.connectOptions[0].sessionId).toBeUndefined();
+    expect(xtermMock.parser.registerOscHandler).toHaveBeenCalledWith(
+      52,
+      expect.any(Function),
+    );
+    expect(
+      JSON.parse(localStorage.getItem("terminus.connect.profiles.v1")!)
+        .selectedMode,
+    ).toBe("local");
+  });
+  it("restores a saved choice while configured endpoints remain authoritative", async () => {
+    localStorage.setItem(
+      "terminus.connect.profiles.v1",
+      JSON.stringify({
+        selectedMode: "private",
+        profiles: [
+          { ...profiles[1], endpoint: "wss://old.private.invalid/terminal" },
+        ],
+      }),
+    );
+    const factory = vi.fn(() => new ProtocolUiAdapter());
+    render(
+      <TerminalShell protocolProfiles={profiles} adapterFactory={factory} />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Connection mode" }),
+      ).toHaveValue("private"),
+    );
+    expect(factory).toHaveBeenLastCalledWith(profiles[1]);
+    expect(
+      screen.getByRole("button", { name: "Switch to Swedish" }),
+    ).toBeVisible();
+  });
+});
