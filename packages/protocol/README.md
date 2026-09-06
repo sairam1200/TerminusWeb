@@ -2,6 +2,10 @@
 
 Status: frozen contract candidate for `S01-001`. The immutable task commit, independent review, and Session 06 verification remain separate gates.
 
+Protocol 0.1 remains frozen for compatibility evidence. New remembered-session
+consumers use the breaking 0.2 contract in `README-0.2.md`; `npm run verify`
+checks both versions without allowing their frames or subprotocols to mix.
+
 ## Consumer entry points
 
 - `schema/protocol-0.1.schema.json` is the language-neutral JSON Schema 2020-12 wire envelope and payload contract.
@@ -55,6 +59,16 @@ Every frame has exactly these members:
 - `terminal_output.data`: at most 32,768 decoded bytes.
 - Columns and rows: integers from 1 through 1,000.
 - At most one terminal session is open or detached for a protocol connection. Version 0.1 does not multiplex sessions.
+- Version 0.1 defines no protocol or application-policy numeric maximum for
+  aggregate terminal sessions across the agent. The agent MUST NOT reject a
+  valid authenticated `open_session` solely because any number of other
+  sessions exists. It attempts terminal creation unless shutdown has begun.
+- A genuine adapter `Open`, ConPTY, or system resource failure uses the existing
+  `SESSION_OPEN_FAILED` error and cleans up any partially created resources.
+  Open, detached, and resuming sessions remain independently tracked until
+  deterministic cleanup completes; that accounting is not a capacity
+  reservation or a fixed admission limit. These semantics do not change the
+  version 0.1 frame schema, error enum, or state machine.
 - Implementations MUST apply bounded outbound queues. The agent closes the terminal session with `BACKPRESSURE_LIMIT` rather than buffering unbounded terminal output.
 - Terminal bytes are opaque. The protocol does not log, inspect, normalize, or persist their content.
 
