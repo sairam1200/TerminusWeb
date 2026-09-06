@@ -1,5 +1,44 @@
 # Session 01 Status
 
+## S01-006 repository recovery complete (2026-09-06)
+
+- Current task: S01-006; state: done for local recovery. S02-006, S03-008 and S06-008 are done from exact reviewed evidence. Original S01-002/S01-003 and private release gates remain blocked; no verified-release claim.
+- Authoritative repository/worktree: E:/terminus, local main. The root now has valid independent Git metadata and the combined product. Use this directory for subsequent work. Source branches are preserved locally; original main is recovery/original-main.
+- User authorization: requested merging all branches, best conflict resolutions and UI. This covered local recovery and owner repairs, not push or deployment.
+- Assembly product commit: c6b07e33e9cebc86b07f0f7dce9f0332945637b8. Independent source candidate a5f3227d7733b403eb26b68bc6ef4fc65bfe152c has identical web, agent, protocol and security product trees; later additions are coordinator records and independent evidence.
+- Web product: 9ddbd0bf213d3be9f218b33624c1386ebf783437; owner status handoff 2ea7d88fe96a40df64210ef3529595171c17c43b on recovery/web-integration.
+- Agent product: c4c8a828a432773f5da28d5fd84f69b9d172e106; owner status handoff 8c93edf54db5a7da2801245f2351dd6f3ad2cc72 on recovery/agent-integration.
+- Independent reviewer: /root/verification; PASS for local recovery, exact web and agent repairs. Evidence product 8ba74e039fae780e851081d933471973caf65c1a, status handoff d30400d080f9f58505773a1dd8ae13402da3e0d8 on recovery/verification. Report and desktop/mobile screenshots: tests/browser/evidence/S06-008/.
+- Coordinator queue commit: 3f6ba1499f0bb0195de66db509aec71a31fb825d. This final status is a separate status-only handoff commit; resolve it from main HEAD.
+
+### Result and preservation
+
+- All 20 saved source/recovery/current-origin refs pass git merge-base --is-ancestor against main. Fresh origin fetch included remote main 4bc74e88df8a3c5f30e894b373caca444ed37655. Nothing was pushed.
+- Kept protocol 0.2 remembered sessions, bounded-history interface, xterm renderer, English/Swedish settings, mobile shortcuts, New Session, browser-close and clock-skew handling. Combined local/private profiles without cross-host session-fragment reuse. Fixed incompatible-origin render crashes and restored shortcut typing focus.
+- Kept latest reviewed Windows session lifecycle and restored main-only five-minute credential-expiry headroom. Control-plane product and independent CI/harnesses remain intact. The prior uncommitted CI deletion was not adopted.
+- Source copies remain under merge-work/full-copy and merge-work/temp-work. Full-copy remains an intentionally preserved unfinished merge; its index hash still matches the original snapshot. Nine .worktrees links were repaired and remain associated with full-copy. Do not use those archived copies as the authoritative main workspace.
+- Backups: merge-work/recovery-20260906 contains original repository bundles, staged/unstaged patches, the original conflict index, root-files-before-recovery, root-files-at-publication, and final-assembly.bundle. No source copy, branch, or untracked file was deleted.
+- Root tracked files matched the recovered index and commit after publication and build. Four pre-existing untracked tmp_playwright_check scripts under tests/ and tests/browser/ remain unchanged. Governance and .agents files were byte-identical and not overwritten.
+
+### Commands and evidence
+
+- packages/protocol: npm run verify, exit 0; protocol 0.1: 22 transcripts/27 fixtures; 0.2: 23 transcripts/32 fixtures; each one auth vector and four negative mutations.
+- services/control-plane: npm test, exit 0, 37/37; npm run lint, npm run typecheck and npm run format:check, exit 0. These are local contract tests; database containers were not rerun.
+- tests/contract: npm test, exit 0, 17/17 labelled-double cases. tests/integration: npm test, exit 0, 4/4 configuration cases.
+- Session 06: tests/browser npm test, exit 0, 24/24 labelled-double desktop/mobile cases; lint exit 0. Actual production UI smoke at 1440x1000 and 390x844 used local simulation, passed settings/language/start/shortcut focus/rotation/disconnect/restart with zero page/console errors and off-loopback requests. Temporary server stopped; port 4188 had zero listeners.
+- Session 02: 74/74 web tests, typecheck, lint and production build pass. Session 06 independently reran all 74 tests against the exact final product. Configured synthetic-endpoint build also passed; no connection was made to the configured endpoints.
+- Session 03: go vet ./... and full go test -count=1 ./... pass, including local Windows lifecycle tests; expiry regression repeated 20 times passes. Independent focused expiry regression passes. See exact owner handoff for per-package timings and writable GOCACHE environment.
+- Root: Restore-Root.ps1 -ExpectedSha c6b07e33e9cebc86b07f0f7dce9f0332945637b8, exit 0. Independently reviewed script backs up existing paths and bundles history before restoring 247 tracked candidate paths.
+- Root apps/web: npm ci --ignore-scripts --offline failed because xterm 6.0.0 was absent from cache. npm ci --ignore-scripts fetched the exact lockfile dependencies, exit 0 (443 packages, audit reported zero vulnerabilities); npm run build exit 0, compiled/typechecked and generated /, /_not-found and /manifest.webmanifest. No dependency versions or lockfile changed.
+- Root: git fsck --full --no-reflogs, git diff --exit-code, git diff --cached --exit-code and git diff --check, all exit 0. All saved/current remote refs are ancestors; no unresolved index entries or conflict markers remain in main.
+- Initial Node test workers and Git local clone hit Windows sandbox spawn denial. Unchanged test commands passed with approved execution; repository cloning used local Git bundles. These environment failures were not test passes.
+
+### Remaining limits
+
+S05-008-RESOURCE-001 remains an existing release-blocking Medium memory-accounting issue in simultaneous history-replay copies. Physical iPhone/Safari, live private WSS/mTLS, certificate reuse, allowed/denied peer paths, and the integrated real terminal remain separate gates. No deployment, remote push, live host, certificate, Tailscale, DNS, billing or public-exposure change occurred.
+
+## Historical Session 01 handoffs
+
 ## S01-005 remembered-session protocol 0.2 handoff (2026-08-30)
 
 - Current task: `S01-005` — Freeze remembered-session and bounded-history
