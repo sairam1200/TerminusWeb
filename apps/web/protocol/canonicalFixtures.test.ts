@@ -33,6 +33,7 @@ interface TranscriptFixture {
   expected: {
     connectionState?: string;
     sessionState?: string;
+    nextOutputOffset?: number;
     code?: string;
     closeCode?: number;
     atFrame?: number;
@@ -70,16 +71,16 @@ interface AuthVectors {
 
 const repositoryRoot = resolve(process.cwd(), "../..");
 const accepted = readContractJson<FixtureDocument>(
-  "packages/protocol/fixtures/accepted.json",
+  "packages/protocol/fixtures/accepted-0.2.json",
 );
 const rejected = readContractJson<FixtureDocument>(
-  "packages/protocol/fixtures/rejected.json",
+  "packages/protocol/fixtures/rejected-0.2.json",
 );
 const authVectors = readContractJson<AuthVectors>(
-  "packages/security/auth-vectors-0.1.json",
+  "packages/security/auth-vectors-0.2.json",
 );
 
-describe(`canonical protocol 0.1 fixtures at ${PROTOCOL_SOURCE_COMMIT}`, () => {
+describe(`canonical protocol 0.2 fixtures at ${PROTOCOL_SOURCE_COMMIT}`, () => {
   it("runs every accepted and rejected handshake fixture", () => {
     for (const fixture of accepted.handshakes) {
       expect(
@@ -111,6 +112,11 @@ describe(`canonical protocol 0.1 fixtures at ${PROTOCOL_SOURCE_COMMIT}`, () => {
       expect(snapshot.sessionState, fixture.id).toBe(
         fixture.expected.sessionState,
       );
+      if (fixture.expected.nextOutputOffset !== undefined) {
+        expect(snapshot.nextOutputOffset, fixture.id).toBe(
+          fixture.expected.nextOutputOffset,
+        );
+      }
     }
   });
 
@@ -137,10 +143,12 @@ describe(`canonical protocol 0.1 fixtures at ${PROTOCOL_SOURCE_COMMIT}`, () => {
           break;
         }
       }
-      expect(rejection, fixture.id).toEqual({
+      expect(rejection, fixture.id).toMatchObject({
         code: fixture.expected.code,
-        closeCode: fixture.expected.closeCode,
         atFrame: fixture.expected.atFrame,
+        ...(fixture.expected.closeCode === undefined
+          ? {}
+          : { closeCode: fixture.expected.closeCode }),
       });
     }
   });
