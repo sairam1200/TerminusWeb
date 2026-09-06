@@ -907,3 +907,37 @@ class MockWebSocket implements WebSocketPort {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
+
+it("uses local endpoint validation while retaining protocol 0.2 and browser-safe errors", async () => {
+  const sockets: MockWebSocket[] = [];
+  const adapter = new ProtocolTerminalAdapter({
+    mode: "local",
+    endpoint: "wss://127.0.0.1:4176/terminal",
+    expectedWebOrigin: "http://127.0.0.1:4176",
+    getCurrentOrigin: () => "http://127.0.0.1:4176",
+    cryptoProvider,
+    credentialStore: new MemoryCredentialStore(cryptoProvider, () => now),
+    webSocketFactory: (url, subprotocol) => {
+      const socket = new MockWebSocket(url, subprotocol);
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  expect(adapter.label).toContain("LOCAL WSS \u00b7 PROTOCOL 0.2");
+  const connecting = adapter.connect();
+  await waitFor(() => expect(sockets).toHaveLength(1));
+  expect(sockets[0].requestedSubprotocol).toBe("terminus.v0_2");
+  sockets[0].open();
+  await connecting;
+  await adapter.disconnect();
+  expect(adapter.getState()).toBe("disconnected");
+  expect(
+    () =>
+      new ProtocolTerminalAdapter({
+        mode: "local",
+        endpoint,
+        expectedWebOrigin: webOrigin,
+        getCurrentOrigin: () => webOrigin,
+      }),
+  ).toThrow(ProtocolViolation);
+});

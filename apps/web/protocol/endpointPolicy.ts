@@ -74,6 +74,8 @@ export function validatePrivateWssPolicy(
   }
 
   if (
+    expectedOrigin.protocol !== "https:" ||
+    policy.expectedWebOrigin !== expectedOrigin.origin ||
     expectedOrigin.origin !== actualOrigin.origin ||
     endpoint.hostname === "" ||
     expectedOrigin.hostname === "" ||

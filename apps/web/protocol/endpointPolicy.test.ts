@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { validateLocalWssPolicy, validatePrivateWssPolicy, validateWssPolicy } from "./endpointPolicy";
+import {
+  validateLocalWssPolicy,
+  validatePrivateWssPolicy,
+  validateWssPolicy,
+} from "./endpointPolicy";
 import { ProtocolViolation } from "./types";
 
 describe("private WSS endpoint policy", () => {
@@ -34,7 +38,7 @@ describe("private WSS endpoint policy", () => {
       endpoint: "wss://127.0.0.1:4176/terminal",
       expectedWebOrigin: "http://127.0.0.1:4176",
       cspSource: "wss://127.0.0.1:4176",
-      subprotocol: "terminus.v0_1",
+      subprotocol: "terminus.v0_2",
     });
   });
 
@@ -106,4 +110,20 @@ describe("private WSS endpoint policy", () => {
       ),
     ).toThrow(ProtocolViolation);
   });
+});
+
+it.each([
+  "http://preview.example.invalid",
+  "https://preview.example.invalid/",
+  "https://PREVIEW.example.invalid",
+])("rejects insecure or noncanonical private origin %s", (origin) => {
+  expect(() =>
+    validatePrivateWssPolicy(
+      {
+        endpoint: "wss://agent.private.invalid/terminal",
+        expectedWebOrigin: origin,
+      },
+      origin,
+    ),
+  ).toThrow(ProtocolViolation);
 });

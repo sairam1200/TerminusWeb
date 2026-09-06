@@ -4,11 +4,12 @@ import { privateWssCspSource } from "./protocol/endpointPolicy";
 export function buildContentSecurityPolicy(
   privateEndpoints?: string | string[],
 ): string {
-  const endpoints = privateEndpoints === undefined
-    ? []
-    : Array.isArray(privateEndpoints)
-      ? privateEndpoints
-      : [privateEndpoints];
+  const endpoints =
+    privateEndpoints === undefined
+      ? []
+      : Array.isArray(privateEndpoints)
+        ? privateEndpoints
+        : [privateEndpoints];
   const wssSources = Array.from(
     new Set(
       endpoints

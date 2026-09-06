@@ -9,6 +9,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -26,6 +27,17 @@ import {
   parseSessionFragment,
   sessionFragment,
 } from "../protocol/sessionFragment";
+
+import {
+  type ConnectProfile,
+  type ConnectionMode,
+  persistConnectState,
+  readPersistedConnectState,
+  resolveProfiles,
+  selectInitialProfile,
+} from "../protocol/connectConfig";
+
+const NO_PROFILES: ConnectProfile[] = [];
 
 type Language = "en" | "sv";
 type AccentKey = "violet" | "cyan" | "rose" | "emerald";
@@ -351,17 +363,83 @@ function MonitorIcon() {
 }
 
 export interface TerminalShellProps {
-  adapterFactory?: () => TerminalAdapter;
+  adapterFactory?: (profile?: ConnectProfile) => TerminalAdapter;
+  protocolProfiles?: ConnectProfile[];
+  defaultMode?: ConnectionMode;
   protocolConfig?: Pick<
     ProtocolTerminalAdapterConfig,
-    "endpoint" | "expectedWebOrigin"
+    "endpoint" | "expectedWebOrigin" | "mode"
   >;
 }
 
 export function TerminalShell({
   adapterFactory,
   protocolConfig,
+  protocolProfiles = NO_PROFILES,
+  defaultMode,
 }: TerminalShellProps) {
+  const [saved, setSaved] =
+    useState<ReturnType<typeof readPersistedConnectState>>();
+  const [selectedMode, setSelectedMode] = useState<ConnectionMode>();
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setSaved(readPersistedConnectState()),
+      0,
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
+  const profiles = useMemo(
+    () => resolveProfiles(protocolProfiles, saved),
+    [protocolProfiles, saved],
+  );
+  const profile =
+    protocolConfig !== undefined
+      ? {
+          ...protocolConfig,
+          mode:
+            protocolConfig.mode ?? defaultMode ?? ("private" as ConnectionMode),
+        }
+      : selectInitialProfile(
+          profiles,
+          selectedMode ?? saved?.selectedMode,
+          defaultMode,
+        );
+  const selectProfile = (mode: ConnectionMode) => {
+    if (mode === profile?.mode) return;
+    // A fragment belongs to the previous endpoint. Never submit it to another host.
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + window.location.search,
+    );
+    setSelectedMode(mode);
+    persistConnectState({ selectedMode: mode, profiles });
+  };
+  return (
+    <TerminalWorkspace
+      key={profile === undefined ? "simulation" : JSON.stringify(profile)}
+      adapterFactory={
+        adapterFactory === undefined ? undefined : () => adapterFactory(profile)
+      }
+      protocolConfig={profile}
+      profiles={protocolConfig === undefined ? profiles : NO_PROFILES}
+      selectedMode={profile?.mode}
+      onSelectProfile={selectProfile}
+    />
+  );
+}
+
+function TerminalWorkspace({
+  adapterFactory,
+  protocolConfig,
+  profiles,
+  selectedMode,
+  onSelectProfile,
+}: TerminalShellProps & {
+  profiles: ConnectProfile[];
+  selectedMode?: ConnectionMode;
+  onSelectProfile: (mode: ConnectionMode) => void;
+}) {
   const [adapter] = useState<TerminalAdapter>(() =>
     adapterFactory !== undefined
       ? adapterFactory()
@@ -397,7 +475,23 @@ export function TerminalShell({
   const xtermRef = useRef<Terminal | null>(null);
   const pendingOutputRef = useRef<string[]>([]);
   const connectedRef = useRef(connectionState === "connected");
-  const t = TRANSLATIONS[language];
+  const t = {
+    ...TRANSLATIONS[language],
+    ...(selectedMode === "local"
+      ? {
+          connectPrivate:
+            language === "en" ? "Connect locally" : "Anslut lokalt",
+          retryPrivate:
+            language === "en"
+              ? "Retry local connection"
+              : "Försök ansluta lokalt igen",
+          privateTraffic:
+            language === "en"
+              ? "Terminal traffic connects directly to this machine's loopback endpoint."
+              : "Terminaltrafiken ansluter direkt till datorns lokala ändpunkt.",
+        }
+      : {}),
+  };
   const scheme = ACCENTS[accent];
   const connected = connectionState === "connected";
   const busy = [
@@ -751,6 +845,40 @@ export function TerminalShell({
       <div className="ambientGlow" aria-hidden="true" />
       <div className="ambientGrid" aria-hidden="true" />
 
+      {profiles.length > 1 && (
+        <label className="connectionMode">
+          {language === "en" ? "Connection mode" : "Anslutningsläge"}
+          <select
+            aria-label={
+              language === "en" ? "Connection mode" : "Anslutningsläge"
+            }
+            value={selectedMode}
+            disabled={busy || connected || connectionState === "pairing"}
+            onChange={(event) =>
+              onSelectProfile(event.currentTarget.value as ConnectionMode)
+            }
+          >
+            {profiles.map((profile) => (
+              <option key={profile.mode} value={profile.mode}>
+                {profile.mode === "local"
+                  ? language === "en"
+                    ? "Local (same machine)"
+                    : "Lokalt (samma dator)"
+                  : language === "en"
+                    ? "Private (Tailscale)"
+                    : "Privat (Tailscale)"}
+              </option>
+            ))}
+          </select>
+          {connected && (
+            <span>
+              {language === "en"
+                ? "Detach before changing connection mode."
+                : "Lämna sessionen innan du byter anslutningsläge."}
+            </span>
+          )}
+        </label>
+      )}
       <header className="neuralHeader">
         <div className="brandLockup">
           <span className="brandIcon">
