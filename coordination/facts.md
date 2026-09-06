@@ -92,3 +92,10 @@ Session 01 owns this file. Other sessions submit proposed corrections through `c
   no-fixed-count-cap decision. It replaces version 0.1's 120-second one-time
   resume grant with authenticated same-credential reopen and therefore is a
   breaking, coordinated consumer update.
+
+## Repository recovery on 2026-09-06
+
+- The user explicitly authorized local consolidation of all branches and resolution of implementation/UI conflicts. S01-006 records this recovery scope; the original S01-002/S01-003 verified-release gates are not bypassed or marked complete.
+- All preserved local branch tips and freshly fetched origin tips are ancestors of the recovery assembly. Newer protocol 0.2, remembered-session agent and xterm UI implementations supersede the older temporary merge resolutions.
+- The recovery uses the Session 02 and Session 03 owners for implementation repairs and Session 06 for independent local review/browser verification. Local simulation and deterministic checks do not establish live private-device or physical-mobile compatibility.
+- Existing S05-008-RESOURCE-001 replay-copy memory accounting remains release-blocking. No remote push, deployment or live network/agent change was performed in this recovery.
