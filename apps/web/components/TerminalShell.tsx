@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { IntelligencePanel } from "./IntelligencePanel";
 import { Terminal } from "@xterm/xterm";
 import {
   type ClipboardEvent,
@@ -149,6 +150,8 @@ const TRANSLATIONS = {
     sendKey: (key: string) => `Send ${key}`,
     sessionOpenFailure:
       "PowerShell could not open. Check the Windows agent and available system resources, then retry.",
+    transportFailure:
+      "The secure terminal connection failed or closed unexpectedly. Check that the configured agent is running and reachable, and that this browser trusts its certificates. Then retry.",
     sessionId: "Session",
     newSession: "New Session",
     historyTruncated: "Earlier output is not available.",
@@ -241,6 +244,8 @@ const TRANSLATIONS = {
     sendKey: (key: string) => `Skicka ${key}`,
     sessionOpenFailure:
       "PowerShell kunde inte öppnas. Kontrollera Windows-agenten och tillgängliga systemresurser och försök sedan igen.",
+    transportFailure:
+      "Den säkra terminalanslutningen misslyckades eller stängdes oväntat. Kontrollera att agenten körs och kan nås och att webbläsaren litar på dess certifikat. Försök sedan igen.",
     sessionId: "Session",
     newSession: "Ny session",
     historyTruncated: "Tidigare utdata är inte tillgängliga.",
@@ -451,6 +456,20 @@ export function TerminalShell({
           No connection profile matches the current page origin. Open Terminus
           at the configured web address for local or private access.
         </p>
+        <nav aria-label="Configured terminal pages">
+          {resolveProfiles(
+            protocolConfig
+              ? [{ ...protocolConfig, mode: protocolConfig.mode ?? "private" }]
+              : profiles,
+            undefined,
+          ).map((target) => (
+            <p key={target.mode}>
+              <a href={target.expectedWebOrigin}>
+                Open {target.mode === "private" ? "private" : "local"} Terminus
+              </a>
+            </p>
+          ))}
+        </nav>
       </main>
     );
   }
@@ -561,6 +580,7 @@ function TerminalWorkspace({
     "closing",
   ].includes(connectionState);
   const errorCode = adapter.getErrorCode?.();
+  const transportFailed = adapter.getFailureCause?.() === "transport";
   const themeStyle = {
     "--accent": scheme.primary,
     "--accent-secondary": scheme.secondary,
@@ -1163,11 +1183,19 @@ function TerminalWorkspace({
         </p>
       )}
 
-      {connectionState === "error" && errorCode === "SESSION_OPEN_FAILED" && (
+      {connectionState === "error" && transportFailed && (
         <p className="sessionOpenGuidance" role="alert">
-          {t.sessionOpenFailure}
+          {t.transportFailure}
         </p>
       )}
+
+      {connectionState === "error" &&
+        !transportFailed &&
+        errorCode === "SESSION_OPEN_FAILED" && (
+          <p className="sessionOpenGuidance" role="alert">
+            {t.sessionOpenFailure}
+          </p>
+        )}
 
       <section className="terminalLayout">
         <div className="terminalRegion">
@@ -1379,6 +1407,14 @@ function TerminalWorkspace({
           </form>
         </aside>
       </section>
+
+      {protocolClient && protocolConfig && (
+        <IntelligencePanel
+          policy={protocolConfig}
+          connectionState={connectionState}
+          onSubmit={(command) => adapter.sendInput(command)}
+        />
+      )}
 
       <footer className="privacyFooter">
         {protocolClient ? t.privateTraffic : t.simulatedTraffic}

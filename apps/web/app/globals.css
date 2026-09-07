@@ -14,6 +14,154 @@
   --success: #22c55e;
 }
 
+.intelligenceNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 0;
+}
+.intelligenceNav a,
+.intelligencePanel a,
+.intelligencePage a {
+  color: #c4b5fd;
+  text-underline-offset: 3px;
+}
+.intelligencePanel {
+  flex: 0 0 auto;
+  max-height: 42dvh;
+  overflow: auto;
+  border-top: 1px solid #333047;
+  padding: 8px 20px;
+  font-size: 12px;
+  background: #0d0d16;
+}
+.intelligencePanel summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 700;
+}
+.intelligencePanel p,
+.intelligencePage p {
+  line-height: 1.6;
+  color: #b7becb;
+}
+.intelligencePage {
+  height: 100dvh;
+  overflow: auto;
+  padding: 24px max(20px, calc((100vw - 1000px) / 2));
+  color: #f8fafc;
+}
+.intelligencePage h1 {
+  margin: 28px 0 12px;
+}
+.intelligenceCard {
+  padding: 24px;
+  margin: 20px 0;
+  background: #101019;
+  border: 1px solid #333047;
+  border-radius: 10px;
+}
+.intelligencePanel label,
+.intelligenceCard label {
+  display: block;
+  margin: 12px 0 6px;
+}
+.intelligencePanel input,
+.intelligenceCard input {
+  background: #06060a;
+  color: #f8fafc;
+  padding: 12px;
+  border: 1px solid #555064;
+  border-radius: 5px;
+  width: 100%;
+  min-width: 0;
+}
+.intelligencePanel button,
+.intelligenceCard button {
+  background: #3e2858;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 5px;
+  margin: 6px 0;
+}
+.intelligenceRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.intelligenceRow input {
+  flex: 1;
+}
+.recommendationGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.recommendationGrid article {
+  border: 1px solid #333047;
+  padding: 16px;
+  border-radius: 6px;
+}
+.recommendationGrid code,
+.historyList code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+}
+.recommendationGrid button {
+  display: block;
+}
+.historyList {
+  list-style: none;
+  padding: 0;
+}
+.historyList li {
+  border-bottom: 1px solid #333047;
+  padding: 14px 0;
+}
+.privacyChoice {
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+}
+.privacyChoice input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+.privacyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+.usageGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 20px;
+}
+.usageGrid dt {
+  color: #b7becb;
+  font-size: 13px;
+}
+.usageGrid dd {
+  margin: 8px 0;
+  font-size: 24px;
+}
+@media (max-width: 600px) {
+  .intelligencePanel {
+    padding: 4px 12px;
+  }
+  .intelligenceRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .intelligenceCard {
+    padding: 16px;
+  }
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -875,6 +1023,14 @@ button:disabled {
 }
 
 @media (orientation: portrait) and (max-width: 639px) {
+  .terminusApp:has(.intelligencePanel details[open]) .terminalLayout {
+    overflow-y: auto;
+  }
+
+  .terminusApp:has(.intelligencePanel details[open]) .terminalRegion {
+    flex-shrink: 0;
+  }
+
   .neuralHeader {
     align-items: flex-start;
     padding-right: 0.75rem;

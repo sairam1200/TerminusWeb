@@ -60,6 +60,7 @@ type Endpoint struct {
 	connectionIDs      map[string]struct{}
 	revokedCredentials map[string]struct{}
 	closed             bool
+	intelligenceActive int64
 }
 
 func New(config Config) (*Endpoint, error) {
@@ -386,6 +387,7 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 			c.finishAttempt(false)
 			return err
 		}
+		credential.DeviceIdentity = c.device
 		if err := c.endpoint.cfg.Credentials.Put(context.Background(), credential); err != nil {
 			c.finishAttempt(false)
 			return protocol.NewError(protocol.PairingFailed, 1011, err)
@@ -419,6 +421,14 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 			return protocol.NewError(protocol.AuthenticationFailed, 1008, nil)
 		}
 		deadline := minTime(now.Add(authorizationLifetime), credential.ExpiresAt)
+		if binder, ok := c.endpoint.cfg.Credentials.(CredentialDeviceBinder); ok {
+			bound, err := binder.BindDevice(context.Background(), credential.ID, c.device)
+			if err != nil || bound.DeviceIdentity != c.device {
+				c.finishAttempt(false)
+				return protocol.NewError(protocol.AuthenticationFailed, 1008, nil)
+			}
+			c.setCredential(bound)
+		}
 		if !c.endpoint.authorizeCredential(c, credential.ID, deadline) {
 			c.finishAttempt(false)
 			return protocol.NewError(protocol.AuthenticationFailed, 1008, nil)

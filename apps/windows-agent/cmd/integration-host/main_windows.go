@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/sys/windows"
 	"terminus/windows-agent/internal/endpoint"
+	"terminus/windows-agent/internal/intelligence"
 	"terminus/windows-agent/internal/protocol"
 	"terminus/windows-agent/internal/terminal"
 )
@@ -49,6 +50,7 @@ func run() error {
 	deviceID := flag.String("device-id", "", "non-secret local integration device identity")
 	revokeID := flag.String("revoke-id", "", "non-secret credential ID for revoke mode")
 	printPairing := flag.Bool("print-pairing-code", false, "print one pairing code to the attached operator console only")
+	webUpstream := flag.String("web-upstream", "", "optional explicit loopback HTTP web origin for local staging")
 	flag.Parse()
 
 	store, err := newDPAPIStore(*storePath)
@@ -78,13 +80,13 @@ func run() error {
 				storeWasExplicit = true
 			}
 		})
-		return serve(*listen, *origin, *serverName, *certPath, *keyPath, *clientCAPath, *deviceID, *printPairing, store, !storeWasExplicit)
+		return serve(*listen, *origin, *serverName, *certPath, *keyPath, *clientCAPath, *deviceID, *printPairing, store, !storeWasExplicit, *webUpstream)
 	default:
 		return fmt.Errorf("unknown mode %q", *mode)
 	}
 }
 
-func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID string, printPairing bool, store *dpapiStore, ephemeralStore bool) error {
+func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID string, printPairing bool, store *dpapiStore, ephemeralStore bool, webUpstreams ...string) error {
 	if origin == "" || serverName == "" || certPath == "" || keyPath == "" || clientCAPath == "" || deviceID == "" {
 		return errors.New("serve requires -origin, -server-name, -cert, -key, -client-ca, and -device-id")
 	}
@@ -115,6 +117,32 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	if err != nil {
 		return fmt.Errorf("create endpoint: %w", err)
 	}
+	var intelligenceHandler http.Handler = endpointInstance.IntelligenceHandler(nil)
+	if os.Getenv("TERMINUS_INTELLIGENCE_DATABASE_URL") != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		service, openErr := intelligence.Open(ctx, os.Getenv("TERMINUS_INTELLIGENCE_DATABASE_URL"), os.Getenv("TERMINUS_INTELLIGENCE_ADMIN_CREDENTIAL_IDS"), os.Getenv("TERMINUS_INTELLIGENCE_OLLAMA_URL"), os.Getenv("TERMINUS_INTELLIGENCE_MODEL"))
+		cancel()
+		if openErr == nil {
+			defer service.Close()
+			service.SetActiveConnections(endpointInstance.IntelligenceActiveConnections)
+			intelligenceHandler = endpointInstance.IntelligenceHandler(service)
+		} else {
+			fmt.Fprintln(os.Stderr, "intelligence=unavailable")
+		}
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/terminal", endpointInstance)
+	mux.Handle("/intelligence", intelligenceHandler)
+	mux.Handle("/healthz", healthAndEndpoint(endpointInstance))
+	fallback := healthAndEndpoint(endpointInstance)
+	if len(webUpstreams) > 0 && webUpstreams[0] != "" {
+		var proxyErr error
+		fallback, proxyErr = stagingWebProxy(webUpstreams[0])
+		if proxyErr != nil {
+			return proxyErr
+		}
+	}
+	mux.Handle("/", fallback)
 	resolved, err := validateLoopbackAddress(listen)
 	if err != nil {
 		return err
@@ -132,7 +160,7 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 	tlsConfig.ClientCAs = clientRoots
 	serveDone := make(chan error, 1)
-	go func() { serveDone <- endpoint.ServeTLS(listener, tlsConfig, healthAndEndpoint(endpointInstance)) }()
+	go func() { serveDone <- endpoint.ServeTLS(listener, tlsConfig, mux) }()
 	revocationCtx, cancelRevocation := context.WithCancel(context.Background())
 	revocationDone := make(chan struct{})
 	go func() { defer close(revocationDone); revocationLoop(revocationCtx, endpointInstance, store) }()

@@ -5,6 +5,64 @@ state_semantics:
   verified: Session 06 independently reproduced applicable checks against exact commits; required by the integration chain.
 
 tasks:
+  - id: S01-010
+    owner: session_01
+    state: in_progress
+    title: Publish user-authorized session intelligence prototype to main
+    depends_on: [S01-008, S01-009, S02-007, S02-008, S03-009, S04-003]
+    requires_user_authorization: true
+    evidence: User explicitly requested commit and push to main for deployment on 2026-09-07. Exact product manifest is from-01-to-06-S01-010-prototype-publication-20260907.request.md. Session 06 independently checks assembled candidate before protected PR merge. Source and personal prototype publication only; existing full-release resource and live-flow gates remain unchanged.
+
+  - id: S02-008
+    owner: session_02
+    state: done
+    title: Correct unavailable local staging connection guidance
+    depends_on: [S02-007]
+    evidence: Product 88108ff and status 1fb5557 reviewed PASS by root. Local-only transport diagnosis preserves wire contract and actual server session-open errors; safe configured-origin links added. Owner 123 tests, lint, typecheck and private-only build PASS; root independently reproduced 10 regressions and verified both local Chrome URLs offer the private link with no 4176 button. Existing saved profiles preserved. Authenticated terminal pairing remains the separate S06-009 gate.
+
+  - id: S01-009
+    owner: session_01
+    state: done
+    title: Record user-supplied Terminus Web agent instructions
+    depends_on: []
+    requires_user_authorization: true
+    evidence: Product 0880d48 records all eighteen user-supplied sections, preserving existing governance. Session 06 reviewed exact AGENTS blob 2bff31b2b2db9da0c71c12fda049e674bcf0b584 PASS in committed handoff 8436ae1. Root requested working-tree file remains written; no main commit or push.
+
+  - id: S01-008
+    owner: session_01
+    state: done
+    title: Freeze approved private session intelligence capability
+    depends_on: []
+    evidence: Cumulative contract product 3efefd6, reviewed by intelligence_database and independently reproduced by Session 06 evidence e722e0e and handoff 8436ae1. Shared HMAC and RPC consumer parity pass; terminal 0.2 unchanged. Full browser and release verification remain separate.
+
+  - id: S03-009
+    owner: session_03
+    state: done
+    title: Implement private intelligence host and database-backed RPC
+    depends_on: []
+    evidence: Runtime product a6adf52 and status 2b8eb02 passed independent review and component checks. README-only follow-up 4f1de89 with status 9797da5 corrects local approval metadata and preserves console-only code handling, root review PASS. Session 06 combined evidence 5336d62 now joins actual HMAC endpoint, real service and PostgreSQL. Authenticated Chrome and live model remain unclaimed; race unavailable without cgo.
+
+  - id: S04-003
+    owner: session_04
+    state: done
+    title: Implement private intelligence PostgreSQL schema and invariants
+    depends_on: []
+    evidence: Product 33cc638 and status 455790c, root independent source review and actual PostgreSQL harness PASS. Session 06 e722e0e independently reproduces both SQL harnesses, quota race and isolated rollback preserving metadata schema. No production migration.
+
+  - id: S02-007
+    owner: session_02
+    state: done
+    title: Implement intelligence client and user dashboards
+    depends_on: []
+    evidence: Product cd6a1ef and status d945c5b passed root review and independent component verification. Follow-up 88108ff passed 123 tests and build; root now verifies ordinary paired Chrome guest privacy/usage/account data, Connected terminal status and six source-attributed catalog suggestions on the private host. Session 06 desktop/mobile unpaired evidence remains valid; final exact paired-flow release verification is separate.
+
+  - id: S06-009
+    owner: session_06
+    state: in_progress
+    title: Independently verify private intelligence candidate
+    depends_on: [S01-008, S03-009, S04-003, S02-007]
+    evidence: Component e722e0e, unpaired Chrome 2bf6fb8 and combined WSS-service-PostgreSQL 5336d62 pass. The user completed ordinary console pairing; root verified actual Chrome private guest data, Connected terminal status and six catalog recommendations without logging terminal output. Session 06 now independently checks the narrowed live UI gate against web88108ff and hosta6adf52. Google/Vercel consent remains separately blocked; no integrated release or deployment claim.
+
   - id: S01-001
     owner: session_01
     state: done
