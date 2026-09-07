@@ -66,7 +66,10 @@ The host encrypts its temporary credential map with DPAPI `CurrentUser`, so
 records are bound to the non-elevated integration identity. The default store
 is removed after clean shutdown. Use an explicit path only when its lifecycle
 is managed by the operator. The pairing approval prompt is bounded by the
-endpoint's 60-second limit and prints no client or credential data.
+endpoint's 60-second limit and displays the Origin, client-instance ID and
+resolved device identity locally. It prints no credential secret, proof or
+password. The pairing code remains explicit operator-console output only and
+must never be redirected or logged.
 
 Safe commands (run from this directory, with an externally supplied already
 trusted certificate) are:
@@ -106,7 +109,83 @@ available, run repeated endpoint concurrency tests with `go test -count=20
 ./internal/endpoint` and record the unavailable race precondition rather than
 installing a compiler.
 
-## Verified API sources
+## Private session intelligence 1.0 (S03-009)
+
+The optional `/intelligence` WebSocket uses `terminus.intelligence.v1`, the
+existing exact HTTPS Origin and private client-certificate resolver, and a
+separate HMAC domain over a ten-second single-use challenge. It never opens a
+terminal or changes `/terminal` protocol 0.2. New pairing credentials carry a
+DPAPI-protected device binding. A legacy credential is pinned atomically only
+after successful terminal HMAC authentication; intelligence rejects an unbound
+or differently bound credential. Revocation and expiry close intelligence too.
+
+The agent reads these server-only environment variable names:
+
+- `TERMINUS_INTELLIGENCE_DATABASE_URL`: private PostgreSQL connection configuration
+  for the least-privileged `terminus_intelligence_app` role.
+- `TERMINUS_INTELLIGENCE_ADMIN_CREDENTIAL_IDS`: comma-separated credential UUID
+  allowlist for aggregate-only administration.
+- `TERMINUS_INTELLIGENCE_OLLAMA_URL`: optional explicit loopback HTTP origin.
+- `TERMINUS_INTELLIGENCE_MODEL`: installed local model identifier.
+
+Run the Session 04 database migrations and grants explicitly before startup.
+The host checks schema availability but never migrates a production database.
+Unset or unavailable database configuration leaves terminal operation intact;
+intelligence returns unavailable. No configuration values are logged.
+
+The service implements the contract's session/privacy, command/history,
+recommendation, account, usage/export/delete, billing and aggregate-admin RPCs.
+Collection defaults off. Only explicit composer submissions may be recorded;
+all arguments are discarded into reviewed command templates or `[redacted
+command]`. Output and keyboard streams are never captured. Status is always
+`submitted`; exit status and execution duration remain unknown. Disabling history
+stops collection; deletion clears persisted history. Queries exclude expired
+rows immediately and bounded maintenance removes expired records. Guest deletion
+clears guest content and rotates the security session. Login associates only the
+caller's eligible guest history, and logout rotates to a separate guest owner.
+Export returns at most 50 rows per page with an owner-checked UUID cursor and
+`nextCursor`; clients combine pages only while the security session ID is stable.
+RPC response envelopes have a 60 KiB hard bound; no successful export silently
+truncates history.
+
+Local account passwords use algorithm v1: domain-separated SHA-256 prehash,
+unpadded standard base64, then bcrypt cost 12. This preserves the whole permitted
+1024-byte password without bcrypt's 72-byte limit. Account email is an identifier,
+not a verified email claim. No email sending or commercial onboarding exists.
+
+RAG retrieves reviewed source-attributed catalog templates locally and uses only
+consented current-owner history for local ranking. Optional Ollama receives only
+catalog documents, never user query/history. Model text can change an explanation,
+never the authoritative command or source URL. Catalog fallback is explicitly
+reported. Monthly token accounting uses provider counts and transactional capacity
+reservations; stable paired-device quota ownership survives guest deletion,
+login and logout. Sessions counts represent current unexpired associations;
+terminal time is bounded client-observed connection time, not shell duration.
+Commercial billing is disabled. Admin responses contain aggregate numbers only.
+
+For local Chrome verification only, `-web-upstream http://127.0.0.1:<port>` serves
+Next assets through the existing trusted mTLS listener. It validates an explicit
+loopback HTTP origin; `/terminal`, `/intelligence` and `/healthz` retain direct
+handlers. The default has no proxy. Existing `-listen`, `-origin`, `-server-name`,
+`-cert`, `-key`, `-client-ca`, `-device-id` and explicit protected `-store` inputs
+remain required. This helper does not deploy Vercel assets or alter Tailscale.
+
+Real database tests require `TERMINUS_INTELLIGENCE_TEST_DATABASE_URL` pointed at
+an isolated disposable database with Session 04 migrations and grants. Then run
+`go test -count=1 ./...` and `go vet ./...`. Model response tests use an explicitly
+labelled local HTTP double with real PostgreSQL accounting. These tests alone
+are not production Chrome, actual Ollama generation, or deployment evidence.
+
+Additional API sources inspected for this task:
+
+- Installed `github.com/jackc/pgx/v5@v5.7.6/stdlib/sql.go` documents `sql.Open("pgx", ...)`
+  and positional parameters; [pgx stdlib](https://pkg.go.dev/github.com/jackc/pgx/v5@v5.7.6/stdlib).
+- Installed `golang.org/x/crypto@v0.49.0/bcrypt/bcrypt.go` documents hashing,
+  comparison and the 72-byte bound; [bcrypt](https://pkg.go.dev/golang.org/x/crypto@v0.49.0/bcrypt).
+- [Ollama generate API](https://docs.ollama.com/api/generate) documents non-streaming
+  generation, `done`, `prompt_eval_count` and `eval_count`.
+
+## Terminal API sources
 
 - Microsoft, Creating a Pseudoconsole session:
   <https://learn.microsoft.com/windows/console/creating-a-pseudoconsole-session>

@@ -40,6 +40,8 @@ export interface TerminalAdapter {
   detach?(): Promise<void>;
   disconnect(): Promise<void>;
   getErrorCode?(): string | undefined;
+  /** Local UI diagnosis only; never serialized into the terminal protocol. */
+  getFailureCause?(): "transport" | undefined;
   getSessionId?(): string | undefined;
   getState(): TerminalConnectionState;
   newSession?(): Promise<void>;

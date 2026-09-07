@@ -110,6 +110,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   >();
   private state: TerminalConnectionState = "disconnected";
   private errorCode?: ProtocolErrorCode;
+  private failureCause?: "transport";
   private viewport: TerminalViewport = { columns: 80, rows: 24 };
   private socket?: WebSocketPort;
   private machine = new ProtocolContractMachine();
@@ -158,6 +159,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     if (!["disconnected", "detached", "error"].includes(this.state)) return;
 
     this.errorCode = undefined;
+    this.failureCause = undefined;
     const requestedSessionId =
       options.sessionId ??
       (this.state === "detached" ? this.sessionId : undefined);
@@ -191,10 +193,19 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     });
 
     await new Promise<void>((resolve, reject) => {
-      const socket = this.webSocketFactory(
-        this.policy.endpoint,
-        PROTOCOL_SUBPROTOCOL,
-      );
+      let socket: WebSocketPort;
+      try {
+        socket = this.webSocketFactory(
+          this.policy.endpoint,
+          PROTOCOL_SUBPROTOCOL,
+        );
+      } catch {
+        this.failureCause = "transport";
+        const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
+        this.fail(failure);
+        reject(failure);
+        return;
+      }
       this.socket = socket;
       socket.binaryType = "arraybuffer";
       socket.onopen = () => {
@@ -219,6 +230,8 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           });
       };
       socket.onerror = () => {
+        if (this.socket !== socket || this.state === "error") return;
+        this.failureCause = "transport";
         const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
         this.fail(failure);
         reject(failure);
@@ -229,7 +242,10 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           .catch((error: unknown) => this.fail(asProtocolViolation(error)));
       };
       socket.onclose = () => {
-        if (this.socket === socket) this.handleTransportClose();
+        if (this.socket === socket) {
+          this.handleTransportClose();
+          reject(new Error("Terminal transport closed."));
+        }
       };
     });
   }
@@ -305,6 +321,9 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
 
   getErrorCode(): string | undefined {
     return this.errorCode;
+  }
+  getFailureCause(): "transport" | undefined {
+    return this.failureCause;
   }
 
   getSessionId(): string | undefined {
@@ -652,6 +671,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     this.stopHeartbeat();
     this.clearAuthorizationTimer();
     if (["disconnected", "detached", "error"].includes(this.state)) return;
+    this.failureCause = "transport";
     if (this.newSessionOperation !== undefined) {
       const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
       this.errorCode = failure.code;

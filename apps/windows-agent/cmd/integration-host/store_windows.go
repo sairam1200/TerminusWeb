@@ -38,9 +38,10 @@ type processStoreLock struct {
 const processStoreLockMaximum = 5 * time.Second
 
 type storedCredential struct {
-	ID        string    `json:"id"`
-	Secret    []byte    `json:"secret"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	ID             string    `json:"id"`
+	Secret         []byte    `json:"secret"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	DeviceIdentity string    `json:"deviceIdentity,omitempty"`
 }
 
 var (
@@ -86,7 +87,7 @@ func (s *dpapiStore) Put(ctx context.Context, credential endpoint.Credential) er
 	}
 	secret := make([]byte, len(credential.Secret))
 	copy(secret, credential.Secret[:])
-	records[credential.ID] = storedCredential{ID: credential.ID, Secret: secret, ExpiresAt: credential.ExpiresAt.UTC()}
+	records[credential.ID] = storedCredential{ID: credential.ID, Secret: secret, ExpiresAt: credential.ExpiresAt.UTC(), DeviceIdentity: credential.DeviceIdentity}
 	return s.writeLocked(records)
 }
 
@@ -111,7 +112,38 @@ func (s *dpapiStore) Get(ctx context.Context, id string) (endpoint.Credential, e
 	}
 	var secret [32]byte
 	copy(secret[:], record.Secret)
-	return endpoint.Credential{ID: record.ID, Secret: secret, ExpiresAt: record.ExpiresAt}, nil
+	return endpoint.Credential{ID: record.ID, Secret: secret, ExpiresAt: record.ExpiresAt, DeviceIdentity: record.DeviceIdentity}, nil
+}
+
+func (s *dpapiStore) BindDevice(ctx context.Context, id, device string) (endpoint.Credential, error) {
+	if device == "" {
+		return endpoint.Credential{}, errors.New("device required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockProcess(ctx)
+	if err != nil {
+		return endpoint.Credential{}, err
+	}
+	defer lock.Unlock()
+	records, err := s.readLocked()
+	if err != nil {
+		return endpoint.Credential{}, err
+	}
+	record, ok := records[id]
+	if !ok || len(record.Secret) != 32 || !time.Now().Before(record.ExpiresAt) || (record.DeviceIdentity != "" && record.DeviceIdentity != device) {
+		return endpoint.Credential{}, errors.New("binding rejected")
+	}
+	if record.DeviceIdentity == "" {
+		record.DeviceIdentity = device
+		records[id] = record
+		if err := s.writeLocked(records); err != nil {
+			return endpoint.Credential{}, err
+		}
+	}
+	var secret [32]byte
+	copy(secret[:], record.Secret)
+	return endpoint.Credential{ID: id, Secret: secret, ExpiresAt: record.ExpiresAt, DeviceIdentity: device}, nil
 }
 
 func (s *dpapiStore) Delete(ctx context.Context, id string) error {

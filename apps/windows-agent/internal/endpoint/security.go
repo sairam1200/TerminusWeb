@@ -24,9 +24,16 @@ const (
 )
 
 type Credential struct {
-	ID        string
-	Secret    [32]byte
-	ExpiresAt time.Time
+	ID             string
+	Secret         [32]byte
+	ExpiresAt      time.Time
+	DeviceIdentity string
+}
+
+// CredentialDeviceBinder pins legacy credentials only after terminal HMAC
+// authentication. Implementations must compare and persist under one lock.
+type CredentialDeviceBinder interface {
+	BindDevice(context.Context, string, string) (Credential, error)
 }
 
 // CredentialStore is supplied by the consumer that owns the agent service

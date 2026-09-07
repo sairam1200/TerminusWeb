@@ -84,3 +84,23 @@ revocation, process exit, unrecoverable failure, and agent shutdown remove that
 session and its retained history.
 
 Subscriptions, advertising, owners, multi-tenancy, and super-administration are outside this first vertical slice.
+
+## Approved private session intelligence
+
+The user approved an optional private intelligence capability on 2026-09-07.
+`packages/protocol/INTELLIGENCE-1.0.md` and its addenda define a separate,
+credential-authenticated `/intelligence` WebSocket on the same private agent.
+Terminal protocol 0.2 remains unchanged. Vercel and the metadata control plane
+remain outside both terminal and private command-history data paths.
+
+Only explicit command-composer submissions reduced to reviewed safe templates
+may be retained in private PostgreSQL after opt-in. Raw xterm input/output,
+arbitrary arguments, clipboard and shell environment remain excluded. The
+privacy exception is defined in `packages/security/INTELLIGENCE-PRIVACY-1.0.md`.
+Guest/account history ownership is separate from the persistent paired-device
+AI quota principal, so logout or guest deletion cannot reset the allowance.
+Curated local retrieval works without a model; optional local model explanations
+must report actual provider usage and cannot choose executable commands.
+
+This extends the personal prototype with passive billing/accounting foundations;
+it does not activate paid subscriptions, public onboarding or advertisements.
