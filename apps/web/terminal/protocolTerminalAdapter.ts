@@ -76,6 +76,24 @@ interface NewSessionOperation {
   reject: (error: ProtocolViolation) => void;
 }
 
+interface ConnectionWork {
+  tail: Promise<void>;
+  outboundBytes: number;
+}
+
+// Pairing keys use one protected store per page origin. Order terminal adapter
+// loads/saves across replacements so a late old save cannot overwrite a newer
+// pairing. Queued work checks ownership again before starting a store mutation.
+let credentialOperations = Promise.resolve();
+function withCredentialStore<T>(operation: () => Promise<T>): Promise<T> {
+  const result = credentialOperations.then(operation);
+  credentialOperations = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 function browserCloseCode(protocolCloseCode: number): number {
   if (protocolCloseCode === 1000) return protocolCloseCode;
   // The browser API reserves 1001-2999 for protocol/extension use and throws
@@ -123,6 +141,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private authorizationTimer?: ReturnType<typeof setTimeout>;
   private inboundQueue = Promise.resolve();
+  private work: ConnectionWork = { tail: Promise.resolve(), outboundBytes: 0 };
 
   constructor(config: ProtocolTerminalAdapterConfig) {
     this.cryptoProvider = config.cryptoProvider ?? globalThis.crypto;
@@ -158,6 +177,10 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     }
     if (!["disconnected", "detached", "error"].includes(this.state)) return;
 
+    const work: ConnectionWork = { tail: Promise.resolve(), outboundBytes: 0 };
+    this.work = work;
+    this.inboundQueue = Promise.resolve();
+
     this.errorCode = undefined;
     this.failureCause = undefined;
     const requestedSessionId =
@@ -176,10 +199,18 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
 
     let clientInstanceId: string;
     try {
-      const credentialStore = this.getCredentialStore();
-      this.credential = await credentialStore.loadCredential();
-      clientInstanceId = await credentialStore.getClientInstanceId();
+      const stored = await withCredentialStore(async () => {
+        if (this.work !== work) return;
+        const credentialStore = this.getCredentialStore();
+        const credential = await credentialStore.loadCredential();
+        const clientInstanceId = await credentialStore.getClientInstanceId();
+        return { credential, clientInstanceId };
+      });
+      if (!stored || this.work !== work) return;
+      this.credential = stored.credential;
+      clientInstanceId = stored.clientInstanceId;
     } catch (error) {
+      if (this.work !== work) return;
       const violation = asProtocolViolation(error, "AUTHENTICATION_FAILED");
       this.errorCode = violation.code;
       this.setState("error");
@@ -209,6 +240,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       this.socket = socket;
       socket.binaryType = "arraybuffer";
       socket.onopen = () => {
+        if (this.socket !== socket || this.work !== work) return;
         if (socket.protocol !== PROTOCOL_SUBPROTOCOL) {
           const violation = new ProtocolViolation("UNSUPPORTED_VERSION", 1002);
           this.fail(violation);
@@ -224,25 +256,35 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         })
           .then(resolve)
           .catch((error: unknown) => {
+            if (this.socket !== socket || this.work !== work) return;
             const violation = asProtocolViolation(error);
             this.fail(violation);
             reject(violation);
           });
       };
       socket.onerror = () => {
-        if (this.socket !== socket || this.state === "error") return;
+        if (
+          this.socket !== socket ||
+          this.work !== work ||
+          this.state === "error"
+        )
+          return;
         this.failureCause = "transport";
         const failure = new ProtocolViolation("SESSION_OPEN_FAILED", 1008);
         this.fail(failure);
         reject(failure);
       };
       socket.onmessage = (event) => {
+        if (this.socket !== socket || this.work !== work) return;
         this.inboundQueue = this.inboundQueue
-          .then(() => this.receive(event.data))
-          .catch((error: unknown) => this.fail(asProtocolViolation(error)));
+          .then(() => this.receive(event.data, socket, work))
+          .catch((error: unknown) => {
+            if (this.socket === socket && this.work === work)
+              this.fail(asProtocolViolation(error));
+          });
       };
       socket.onclose = () => {
-        if (this.socket === socket) {
+        if (this.socket === socket && this.work === work) {
           this.handleTransportClose();
           reject(new Error("Terminal transport closed."));
         }
@@ -254,9 +296,10 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     if (this.state !== "pairing") {
       throw new ProtocolViolation("INVALID_STATE", 1008);
     }
+    const work = this.work;
     try {
       await this.sendFrame("pairing_request", { pairingCode });
-      this.setState("authenticating");
+      if (this.work === work) this.setState("authenticating");
     } finally {
       pairingCode = "";
     }
@@ -285,11 +328,38 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     }
     this.sessionId = undefined;
     this.requestedSessionId = undefined;
-    this.socket?.close(1000, "user_request");
+    this.rejectNewSession(new ProtocolViolation("INVALID_STATE", 1008));
+    const socket = this.socket;
+    this.socket = undefined;
+    this.work = { tail: Promise.resolve(), outboundBytes: 0 };
+    socket?.close(1000, "user_request");
     this.setState("disconnected");
   }
 
   async newSession(): Promise<void> {
+    if (
+      this.state === "error" &&
+      this.errorCode === "SESSION_REOPEN_REJECTED" &&
+      this.newSessionOperation === undefined
+    ) {
+      // Explicit recovery opens a separate shell. Do not send close for a
+      // rejected locator, and leave its browser fragment until session-opened.
+      const completion = new Promise<void>((resolve, reject) => {
+        this.newSessionOperation = { phase: "opening", resolve, reject };
+      });
+      this.sessionId = undefined;
+      this.requestedSessionId = undefined;
+      const oldSocket = this.socket;
+      this.socket = undefined;
+      oldSocket?.close(1000, "new_session");
+      this.setState("disconnected");
+      const operation = this.newSessionOperation;
+      void this.connect().catch((error: unknown) => {
+        if (this.newSessionOperation === operation)
+          this.rejectNewSession(asProtocolViolation(error));
+      });
+      return completion;
+    }
     if (
       this.state !== "connected" ||
       this.sessionId === undefined ||
@@ -305,12 +375,16 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       };
     });
     this.setState("closing");
+    const work = this.work;
+    const operation = this.newSessionOperation;
     try {
       await this.sendFrame("close_session", {
         sessionId: this.sessionId,
         reason: "new_session",
       });
     } catch (error) {
+      if (this.work !== work || this.newSessionOperation !== operation)
+        return completion;
       this.rejectNewSession(asProtocolViolation(error));
       // The close frame was not queued, so the existing session is still the
       // attached retry target and its fragment remains valid.
@@ -349,10 +423,13 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     }
     this.viewport = viewport;
     if (this.state === "connected" && this.sessionId !== undefined) {
+      const work = this.work;
       void this.sendFrame("resize", {
         sessionId: this.sessionId,
         dimensions: viewport,
-      }).catch((error: unknown) => this.fail(asProtocolViolation(error)));
+      }).catch((error: unknown) => {
+        if (this.work === work) this.fail(asProtocolViolation(error));
+      });
     }
   }
 
@@ -365,10 +442,13 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       throw new ProtocolViolation("PAYLOAD_TOO_LARGE", 1009);
     }
     if (bytes.length === 0) return;
+    const work = this.work;
     void this.sendFrame("terminal_input", {
       sessionId: this.sessionId,
       data: encodeBase64Url(bytes),
-    }).catch((error: unknown) => this.fail(asProtocolViolation(error)));
+    }).catch((error: unknown) => {
+      if (this.work === work) this.fail(asProtocolViolation(error));
+    });
   }
 
   subscribe(listener: (state: TerminalConnectionState) => void): () => void {
@@ -388,11 +468,26 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     return () => this.sessionListeners.delete(listener);
   }
 
-  private async receive(data: string | ArrayBuffer | Blob): Promise<void> {
+  private async receive(
+    data: string | ArrayBuffer | Blob,
+    socket: WebSocketPort,
+    work: ConnectionWork,
+  ): Promise<void> {
+    if (this.socket !== socket || this.work !== work || this.state === "error")
+      return;
     if (typeof data !== "string") {
       throw new ProtocolViolation("SCHEMA_INVALID", 1002);
     }
-    const frame = await this.machine.apply("agent_to_client", data);
+    const frame = await this.withMachine(work, async () => {
+      if (
+        this.socket !== socket ||
+        this.work !== work ||
+        this.state === "error"
+      )
+        return;
+      return this.machine.apply("agent_to_client", data);
+    });
+    if (!frame || this.socket !== socket || this.work !== work) return;
     this.lastInboundAt = this.monotonicNow();
 
     switch (frame.type) {
@@ -406,12 +501,18 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       case "pairing_result": {
         const rawSecret = String(frame.payload.credentialSecret);
         try {
-          this.credential = await this.getCredentialStore().saveCredential(
-            String(frame.payload.credentialId),
-            rawSecret,
-            String(frame.payload.credentialExpiresAt),
-          );
+          const credential = await withCredentialStore(async () => {
+            if (this.socket !== socket || this.work !== work) return;
+            return this.getCredentialStore().saveCredential(
+              String(frame.payload.credentialId),
+              rawSecret,
+              String(frame.payload.credentialExpiresAt),
+            );
+          });
           frame.payload.credentialSecret = "";
+          if (!credential || this.socket !== socket || this.work !== work)
+            return;
+          this.credential = credential;
           this.setState("authenticating");
         } catch {
           throw new ProtocolViolation("AUTHENTICATION_FAILED", 1008);
@@ -419,7 +520,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         break;
       }
       case "auth_challenge":
-        await this.answerChallenge(frame);
+        await this.answerChallenge(frame, socket, work);
         break;
       case "auth_result":
         if (
@@ -518,12 +619,16 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           this.sessionId = undefined;
           this.requestedSessionId = undefined;
           this.newSessionOperation.phase = "opening";
+          const operation = this.newSessionOperation;
           this.setState("disconnected");
           oldSocket?.close(1000, "new_session");
           queueMicrotask(() => {
-            void this.connect().catch((error: unknown) =>
-              this.rejectNewSession(asProtocolViolation(error)),
-            );
+            if (this.work !== work || this.newSessionOperation !== operation)
+              return;
+            void this.connect().catch((error: unknown) => {
+              if (this.newSessionOperation === operation)
+                this.rejectNewSession(asProtocolViolation(error));
+            });
           });
           break;
         }
@@ -544,7 +649,11 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     }
   }
 
-  private async answerChallenge(frame: ProtocolFrame): Promise<void> {
+  private async answerChallenge(
+    frame: ProtocolFrame,
+    socket: WebSocketPort,
+    work: ConnectionWork,
+  ): Promise<void> {
     if (this.credential === undefined) {
       throw new ProtocolViolation("AUTHENTICATION_FAILED", 1008);
     }
@@ -559,6 +668,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       String(frame.payload.challenge),
       this.cryptoProvider,
     );
+    if (this.socket !== socket || this.work !== work) return;
     if (this.monotonicNow() >= monotonicDeadline) {
       throw new ProtocolViolation("AUTHENTICATION_FAILED", 1008);
     }
@@ -567,6 +677,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       credentialId: this.credential.credentialId,
       proof,
     });
+    if (this.socket !== socket || this.work !== work) return;
     this.setState("authenticating");
   }
 
@@ -585,6 +696,18 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     });
   }
 
+  private withMachine<T>(
+    work: ConnectionWork,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const result = work.tail.then(operation);
+    work.tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   private async sendFrame(
     type: ProtocolFrame["type"],
     payload: Record<string, unknown>,
@@ -596,37 +719,82 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     ) {
       throw new ProtocolViolation("INVALID_STATE", 1008);
     }
-    const frame: ProtocolFrame = {
-      version: PROTOCOL_VERSION,
-      type,
-      connectionId: this.connectionId,
-      sequence: this.machine.getSnapshot().nextSequence.client_to_agent,
-      payload,
-    };
-    const serialized = JSON.stringify(frame);
-    const frameBytes = new TextEncoder().encode(serialized).length;
-    if (frameBytes > MAX_FRAME_BYTES) {
+    const socket = this.socket;
+    const work = this.work;
+    // Own the queued payload so later caller mutations cannot bypass the byte
+    // reservation or change an already accepted resize/input operation.
+    payload = structuredClone(payload);
+    // Reserve a conservative encoded size before queueing. A largest-safe
+    // sequence placeholder bounds the eventual frame without allocating it yet.
+    const reservation = new TextEncoder().encode(
+      JSON.stringify({
+        version: PROTOCOL_VERSION,
+        type,
+        connectionId: this.connectionId,
+        sequence: Number.MAX_SAFE_INTEGER,
+        payload,
+      }),
+    ).length;
+    if (reservation > MAX_FRAME_BYTES) {
       throw new ProtocolViolation("FRAME_TOO_LARGE", 1009);
     }
-    if (this.socket.bufferedAmount + frameBytes > MAX_OUTBOUND_BUFFERED_BYTES) {
+    if (
+      socket.bufferedAmount + work.outboundBytes + reservation >
+      MAX_OUTBOUND_BUFFERED_BYTES
+    ) {
       throw new ProtocolViolation("BACKPRESSURE_LIMIT", 1008);
     }
-    const previousMachine = this.machine.getSnapshot();
-    await this.machine.apply("client_to_agent", frame);
+    work.outboundBytes += reservation;
     try {
-      this.socket.send(serialized);
+      await this.withMachine(work, async () => {
+        if (
+          this.socket !== socket ||
+          this.work !== work ||
+          (this.state === "error" && type !== "error")
+        )
+          return;
+        if (socket.readyState !== SOCKET_OPEN)
+          throw new ProtocolViolation("INVALID_STATE", 1008);
+        const machine = this.machine;
+        const previousMachine = machine.getSnapshot();
+        const frame: ProtocolFrame = {
+          version: PROTOCOL_VERSION,
+          type,
+          connectionId: this.connectionId!,
+          sequence: previousMachine.nextSequence.client_to_agent,
+          payload,
+        };
+        const serialized = JSON.stringify(frame);
+        if (
+          socket.bufferedAmount + new TextEncoder().encode(serialized).length >
+          MAX_OUTBOUND_BUFFERED_BYTES
+        )
+          throw new ProtocolViolation("BACKPRESSURE_LIMIT", 1008);
+        await machine.apply("client_to_agent", frame);
+        if (this.socket !== socket || this.work !== work) return;
+        try {
+          socket.send(serialized);
+        } catch (error) {
+          // Both-direction machine transitions share this lock, so rollback
+          // cannot erase an incoming frame committed during an await.
+          if (this.socket === socket && this.work === work)
+            this.machine = new ProtocolContractMachine(previousMachine);
+          throw error;
+        }
+      });
     } catch (error) {
-      // A throwing WebSocket.send did not queue this frame. Restore sequence
-      // and lifecycle state so the same operation can be retried safely.
-      this.machine = new ProtocolContractMachine(previousMachine);
-      throw error;
+      if (this.socket === socket && this.work === work) throw error;
+    } finally {
+      work.outboundBytes -= reservation;
     }
   }
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.lastInboundAt = this.monotonicNow();
+    const work = this.work;
     this.heartbeatTimer = setInterval(() => {
+      if (this.work !== work) return;
       if (this.monotonicNow() - this.lastInboundAt >= HEARTBEAT_LIVENESS_MS) {
         this.fail(new ProtocolViolation("HEARTBEAT_TIMEOUT", 1008));
         return;
@@ -636,7 +804,9 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
       void this.sendFrame("heartbeat", {
         kind: "ping",
         nonce: encodeBase64Url(nonce),
-      }).catch((error: unknown) => this.fail(asProtocolViolation(error)));
+      }).catch((error: unknown) => {
+        if (this.work === work) this.fail(asProtocolViolation(error));
+      });
     }, HEARTBEAT_INTERVAL_MS);
   }
 

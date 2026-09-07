@@ -9,6 +9,7 @@ import {
 } from "../protocol/credentialStore";
 import type { ProtocolFrame } from "../protocol/types";
 import { ProtocolViolation } from "../protocol/types";
+import { ProtocolContractMachine } from "../protocol/contractMachine";
 import {
   ProtocolTerminalAdapter,
   type WebSocketPort,
@@ -25,6 +26,388 @@ const challenge = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8";
 const sessionId = "k7m4-p2q9-wxyz";
 
 describe("ProtocolTerminalAdapter", () => {
+  it("orders a pending old pairing save before a replacement adapter loads credentials", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+    const first = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const old = sockets[0]!;
+    old.open();
+    await first;
+    const id = old.sentFrame(0).connectionId;
+    await old.receive(
+      agentFrame(id, 0, "hello_ack", {
+        selectedVersion: "0.2",
+        agentId: "50000000-0000-4000-8000-000000000001",
+      }),
+    );
+    await waitFor(() => expect(adapter.getState()).toBe("pairing"));
+    await adapter.pair("AAAAAAAAAAAAAAAAAAAAAA");
+    const save = store.saveCredential.bind(store);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const order: string[] = [];
+    const saveSpy = vi
+      .spyOn(store, "saveCredential")
+      .mockImplementationOnce(async (...args) => {
+        order.push("save-start");
+        await gate;
+        const result = await save(...args);
+        order.push("save-end");
+        return result;
+      });
+    old.onmessage?.({
+      data: JSON.stringify(
+        agentFrame(id, 1, "pairing_result", {
+          credentialId,
+          credentialSecret,
+          credentialExpiresAt: "2026-09-25T12:00:00.000Z",
+        }),
+      ),
+    });
+    await waitFor(() => expect(order).toEqual(["save-start"]));
+    await adapter.disconnect();
+    const load = store.loadCredential.bind(store);
+    const loadSpy = vi
+      .spyOn(store, "loadCredential")
+      .mockImplementation(async () => {
+        order.push("load");
+        return load();
+      });
+    const nextSockets: MockWebSocket[] = [];
+    const next = createAdapter(store, nextSockets);
+    const connecting = next.connect();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(nextSockets).toHaveLength(0);
+      release();
+      await waitFor(() => expect(nextSockets).toHaveLength(1));
+      nextSockets[0]!.open();
+      await connecting;
+      expect(order).toEqual(["save-start", "save-end", "load"]);
+      expect(nextSockets[0]!.sentFrame(0).payload.credentialId).toBe(
+        credentialId,
+      );
+      expect(adapter.getState()).toBe("disconnected");
+    } finally {
+      release();
+      saveSpy.mockRestore();
+      loadSpy.mockRestore();
+      await next.disconnect();
+    }
+  });
+  it("ignores old error and close while replacement credential load is pending", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+    const first = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const old = sockets[0]!;
+    old.open();
+    await first;
+    old.error();
+    await waitFor(() => expect(adapter.getState()).toBe("error"));
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const load = store.loadCredential.bind(store);
+    const spy = vi
+      .spyOn(store, "loadCredential")
+      .mockImplementationOnce(async () => {
+        await gate;
+        return load();
+      });
+    const next = adapter.connect();
+    old.onerror?.();
+    old.onclose?.({ code: 1006 });
+    expect(adapter.getState()).toBe("connecting");
+    expect(adapter.getErrorCode()).toBeUndefined();
+    release();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.open();
+    await next;
+    spy.mockRestore();
+    await adapter.disconnect();
+  });
+  it("does not let rejected queued sends or old New Session continuations fail a replacement", async () => {
+    const { adapter, socket, sockets } = await connectedFixture();
+    socket.bufferedAmount = 65536;
+    adapter.resize({ columns: 81, rows: 25 });
+    adapter.sendInput("synthetic");
+    const replacement = adapter.newSession();
+    const canceled = expect(replacement).rejects.toThrow();
+    await adapter.disconnect();
+    const next = adapter.connect();
+    await canceled;
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.open();
+    await next;
+    expect(adapter.getState()).toBe("connecting");
+    expect(adapter.getErrorCode()).toBeUndefined();
+    await adapter.disconnect();
+  });
+  it("preserves incoming progress when an overlapping outgoing send rolls back", async () => {
+    const { adapter, socket, connectionId } = await connectedFixture();
+    const output = vi.fn();
+    adapter.subscribeOutput(output);
+    const machine = (adapter as unknown as { machine: ProtocolContractMachine })
+      .machine;
+    const original = machine.apply.bind(machine);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false;
+    vi.spyOn(machine, "apply").mockImplementation(
+      async (direction, frame, context) => {
+        if (
+          direction === "client_to_agent" &&
+          (frame as ProtocolFrame).type === "close_session"
+        ) {
+          entered = true;
+          await gate;
+        }
+        return original(direction, frame, context);
+      },
+    );
+    const send = socket.send.bind(socket);
+    vi.spyOn(socket, "send")
+      .mockImplementationOnce(() => {
+        throw new Error("Synthetic send refusal");
+      })
+      .mockImplementation(send);
+    const replacement = adapter.newSession();
+    const rejected = expect(replacement).rejects.toThrow();
+    await waitFor(() => expect(entered).toBe(true));
+    socket.onmessage?.({
+      data: JSON.stringify(
+        agentFrame(connectionId, 4, "terminal_output", {
+          sessionId,
+          offset: 0,
+          data: "YQ",
+        }),
+      ),
+    });
+    release();
+    await rejected;
+    await waitFor(() => expect(output).toHaveBeenCalledTimes(1));
+    await socket.receive(
+      agentFrame(connectionId, 5, "terminal_output", {
+        sessionId,
+        offset: 1,
+        data: "Yg",
+      }),
+    );
+    await waitFor(() => expect(output).toHaveBeenCalledTimes(2));
+    expect(adapter.getState()).toBe("connected");
+    adapter.resize({ columns: 81, rows: 25 });
+    await waitFor(() => expect(socket.sentFrame(3).sequence).toBe(3));
+    await adapter.disconnect();
+  });
+  it("answers an incoming ping without deadlocking the shared machine lock", async () => {
+    const { adapter, socket, connectionId } = await connectedFixture();
+    adapter.resize({ columns: 81, rows: 25 });
+    await socket.receive(
+      agentFrame(connectionId, 4, "heartbeat", {
+        kind: "ping",
+        nonce: "AAECAwQFBgcICQoLDA0ODw",
+      }),
+    );
+    await waitFor(() => expect(socket.sent).toHaveLength(5));
+    expect(socket.sentFrame(4)).toMatchObject({
+      type: "heartbeat",
+      sequence: 4,
+      payload: { kind: "pong" },
+    });
+    await adapter.disconnect();
+  });
+  it("bounds queued outbound bytes and releases reservations on failure", async () => {
+    const { adapter, socket } = await connectedFixture();
+    const internals = adapter as unknown as {
+      machine: ProtocolContractMachine;
+      work: { outboundBytes: number };
+    };
+    const original = internals.machine.apply.bind(internals.machine);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false;
+    vi.spyOn(internals.machine, "apply").mockImplementation(
+      async (direction, frame, context) => {
+        if (direction === "client_to_agent" && !entered) {
+          entered = true;
+          await gate;
+        }
+        return original(direction, frame, context);
+      },
+    );
+    adapter.resize({ columns: 81, rows: 25 });
+    await waitFor(() => expect(entered).toBe(true));
+    adapter.sendInput("x".repeat(16384));
+    adapter.sendInput("x".repeat(16384));
+    adapter.sendInput("x".repeat(16384));
+    expect(
+      internals.work.outboundBytes + socket.bufferedAmount,
+    ).toBeLessThanOrEqual(65536);
+    await waitFor(() =>
+      expect(adapter.getErrorCode()).toBe("BACKPRESSURE_LIMIT"),
+    );
+    release();
+    await waitFor(() => expect(internals.work.outboundBytes).toBe(0));
+    expect(
+      socket.sent
+        .slice(3)
+        .filter(
+          (raw) => (JSON.parse(raw) as ProtocolFrame).type === "terminal_input",
+        ),
+    ).toHaveLength(0);
+    await adapter.disconnect();
+  });
+  it("ignores delayed old authentication and old socket callbacks after reconnect", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+    const first = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const old = sockets[0]!;
+    old.open();
+    await first;
+    const connectionId = old.sentFrame(0).connectionId;
+    await old.receive(
+      agentFrame(connectionId, 0, "hello_ack", {
+        selectedVersion: "0.2",
+        agentId: "50000000-0000-4000-8000-000000000001",
+      }),
+    );
+    const sign = cryptoProvider.subtle.sign.bind(cryptoProvider.subtle);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false;
+    const spy = vi
+      .spyOn(cryptoProvider.subtle, "sign")
+      .mockImplementation(async (...args) => {
+        entered = true;
+        await gate;
+        return sign(...args);
+      });
+    try {
+      old.onmessage?.({
+        data: JSON.stringify(
+          agentFrame(connectionId, 1, "auth_challenge", {
+            challengeId,
+            challenge,
+            expiresAt: "2026-08-26T12:00:10.000Z",
+          }),
+        ),
+      });
+      await waitFor(() => expect(entered).toBe(true));
+      await adapter.disconnect();
+      const next = adapter.connect();
+      await waitFor(() => expect(sockets).toHaveLength(2));
+      const current = sockets[1]!;
+      current.open();
+      await next;
+      old.onopen?.();
+      old.onmessage?.({ data: "invalid old frame" });
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(current.sent).toHaveLength(1);
+      expect(current.sentFrame(0).type).toBe("hello");
+      expect(adapter.getState()).toBe("connecting");
+      expect(adapter.getErrorCode()).toBeUndefined();
+    } finally {
+      release();
+      spy.mockRestore();
+      await adapter.disconnect();
+    }
+  });
+  it("opens a separate session only after explicit rejected-reopen recovery", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+    const first = adapter.connect({ sessionId });
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0]!.open();
+    await first;
+    const id = await authenticate(sockets[0]!, "reopen_session");
+    await sockets[0]!.receive(
+      agentFrame(id, 3, "error", {
+        code: "SESSION_REOPEN_REJECTED",
+        fatal: true,
+      }),
+    );
+    await waitFor(() =>
+      expect(adapter.getErrorCode()).toBe("SESSION_REOPEN_REJECTED"),
+    );
+    expect(sockets).toHaveLength(1);
+    const recovery = adapter.newSession();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.open();
+    await waitFor(() => expect(sockets[1]!.sent).toHaveLength(1));
+    const fresh = await authenticate(sockets[1]!, "open_session");
+    expect(
+      sockets[0]!.sent.map((raw) => (JSON.parse(raw) as ProtocolFrame).type),
+    ).not.toContain("close_session");
+    await sockets[1]!.receive(
+      agentFrame(fresh, 3, "session_opened", { sessionId: "2345-6789-abcd" }),
+    );
+    await recovery;
+    expect(adapter.getSessionId()).toBe("2345-6789-abcd");
+    await adapter.disconnect();
+  });
+  it("assigns distinct ordered sequences to same-turn resize and input", async () => {
+    const store = new MemoryCredentialStore(cryptoProvider, () => now);
+    await store.saveCredential(
+      credentialId,
+      credentialSecret,
+      "2026-09-25T12:00:00.000Z",
+    );
+    const sockets: MockWebSocket[] = [];
+    const adapter = createAdapter(store, sockets);
+    const connection = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = sockets[0] as MockWebSocket;
+    socket.open();
+    await connection;
+    const connectionId = await authenticate(socket, "open_session");
+    await socket.receive(
+      agentFrame(connectionId, 3, "session_opened", { sessionId }),
+    );
+    await waitFor(() => expect(adapter.getState()).toBe("connected"));
+    const dimensions = { columns: 81, rows: 25 };
+    adapter.resize(dimensions);
+    adapter.sendInput("synthetic");
+    adapter.resize({ columns: 82, rows: 26 });
+    dimensions.columns = 99;
+    await waitFor(() => expect(socket.sent).toHaveLength(6));
+    expect(
+      socket.sent
+        .slice(3)
+        .map((frame) => (JSON.parse(frame) as ProtocolFrame).sequence),
+    ).toEqual([3, 4, 5]);
+    expect(socket.sentFrame(3).payload.dimensions).toEqual({
+      columns: 81,
+      rows: 25,
+    });
+    await adapter.disconnect();
+  });
   it("authenticates, opens, exchanges IO/resize/heartbeat, detaches, reopens, replays, and closes", async () => {
     const store = new MemoryCredentialStore(cryptoProvider, () => now);
     await store.saveCredential(
@@ -770,6 +1153,28 @@ describe("ProtocolTerminalAdapter", () => {
     });
   });
 });
+
+async function connectedFixture() {
+  const store = new MemoryCredentialStore(cryptoProvider, () => now);
+  await store.saveCredential(
+    credentialId,
+    credentialSecret,
+    "2026-09-25T12:00:00.000Z",
+  );
+  const sockets: MockWebSocket[] = [];
+  const adapter = createAdapter(store, sockets);
+  const ready = adapter.connect();
+  await waitFor(() => expect(sockets).toHaveLength(1));
+  const socket = sockets[0]!;
+  socket.open();
+  await ready;
+  const connectionId = await authenticate(socket, "open_session");
+  await socket.receive(
+    agentFrame(connectionId, 3, "session_opened", { sessionId }),
+  );
+  await waitFor(() => expect(adapter.getState()).toBe("connected"));
+  return { adapter, sockets, socket, connectionId };
+}
 
 function createAdapter(
   store: CredentialStore,

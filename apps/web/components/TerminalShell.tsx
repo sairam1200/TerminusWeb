@@ -156,6 +156,8 @@ const TRANSLATIONS = {
     newSession: "New Session",
     historyTruncated: "Earlier output is not available.",
     invalidSession: "This session link is invalid or unavailable.",
+    reopenFailure:
+      "This session could not be reopened. It may have expired or no longer be available to this browser. Retry the same session, or choose New Session to open a separate shell. The link changes only after the new session opens.",
     newSessionFailure:
       "New Session could not complete. The session link was not changed. Retry from this page.",
     terminalOutput: "Private terminal output",
@@ -250,6 +252,8 @@ const TRANSLATIONS = {
     newSession: "Ny session",
     historyTruncated: "Tidigare utdata är inte tillgängliga.",
     invalidSession: "Sessionslänken är ogiltig eller otillgänglig.",
+    reopenFailure:
+      "Sessionen kunde inte öppnas igen. Den kan ha löpt ut eller vara otillgänglig för denna webbläsare. Försök igen eller välj Ny session för en separat terminal. Länken ändras först när den nya sessionen öppnas.",
     newSessionFailure:
       "Ny session kunde inte slutföras. Sessionslänken ändrades inte. Försök igen från den här sidan.",
     terminalOutput: "Privat terminalutdata",
@@ -712,6 +716,11 @@ function TerminalWorkspace({
       foregroundReconnectTimer = undefined;
     };
     const scheduleForegroundReconnect = () => {
+      if (adapter.getErrorCode?.() === "SESSION_REOPEN_REJECTED") {
+        foregroundReconnectPending = false;
+        cancelPendingReconnect();
+        return;
+      }
       if (
         !foregroundReconnectPending ||
         document.visibilityState !== "visible" ||
@@ -1176,6 +1185,22 @@ function TerminalWorkspace({
           {t.newSessionFailure}
         </p>
       )}
+
+      {connectionState === "error" &&
+        errorCode === "SESSION_REOPEN_REJECTED" && (
+          <section className="sessionOpenGuidance" aria-label={t.newSession}>
+            <p role="alert">{t.reopenFailure}</p>
+            {adapter.newSession && (
+              <button
+                type="button"
+                className="secondaryButton compactButton"
+                onClick={() => void newSession()}
+              >
+                {t.newSession}
+              </button>
+            )}
+          </section>
+        )}
 
       {historyTruncated && (
         <p className="historyNotice" role="status">

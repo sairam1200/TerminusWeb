@@ -60,6 +60,27 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+it("offers explicit rejected-reopen recovery without changing the link before success", async () => {
+  class RejectedAdapter extends ProtocolUiAdapter {
+    getErrorCode() {
+      return "SESSION_REOPEN_REJECTED";
+    }
+  }
+  const adapter = new RejectedAdapter("error");
+  window.history.replaceState(null, "", "/#/s/k7m4-p2q9-wxyz");
+  render(<TerminalShell adapterFactory={() => adapter} />);
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "This session could not be reopened.",
+  );
+  expect(adapter.newSessionCalls).toBe(0);
+  expect(adapter.connectCalls).toBe(0);
+  fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+  await waitFor(() => expect(adapter.newSessionCalls).toBe(1));
+  expect(window.location.hash).toBe("#/s/k7m4-p2q9-wxyz");
+  adapter.emitSession({ type: "session-opened", sessionId: "2345-6789-abcd" });
+  await waitFor(() => expect(window.location.hash).toBe("#/s/2345-6789-abcd"));
+});
+
 describe("TerminalShell", () => {
   it("labels the test double and keeps input disabled until connected", async () => {
     const user = userEvent.setup();
