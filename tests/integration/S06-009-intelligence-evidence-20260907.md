@@ -7,12 +7,12 @@ from these checks.
 
 ## Exact inputs and isolation
 
-| Component | Cumulative product |
-| --- | --- |
-| Shared intelligence contract | `3efefd6d83033743857ce6d4b88bd41b9bd55cfc` |
-| PostgreSQL migration and grants | `33cc6383ff6af9a049113206a6a57d8690936de2` |
+| Component                             | Cumulative product                         |
+| ------------------------------------- | ------------------------------------------ |
+| Shared intelligence contract          | `3efefd6d83033743857ce6d4b88bd41b9bd55cfc` |
+| PostgreSQL migration and grants       | `33cc6383ff6af9a049113206a6a57d8690936de2` |
 | Windows host and intelligence service | `a6adf52afeeb87ad9e6907c79baa9c9023c562a4` |
-| Web | `cd6a1ef32e40f41ebada2b5a36cdcbefb90346ea` |
+| Web                                   | `cd6a1ef32e40f41ebada2b5a36cdcbefb90346ea` |
 
 Read the required repository documents, Session 06 brief and skill, current
 Session 01 queue, contract/addenda, producer handoffs and exact artifacts.
@@ -26,19 +26,19 @@ Node v24.15.0; installed Next 16.3.3 and Vitest 4.1.11.
 
 ## Independently reproduced checks
 
-| Command and scope | Outcome |
-| --- | --- |
-| `node packages/protocol/scripts/verify-intelligence.mjs` in contract snapshot | Exit 0: canonical HMAC plus five domain/key/challenge binding mutations |
-| Compare parsed shared auth/RPC JSON with web vendored corpora | Both structurally identical |
-| `go test -count=1 -json ./...` in exact agent snapshot with `TERMINUS_INTELLIGENCE_TEST_DATABASE_URL` pointing to disposable local PostgreSQL | Exit 0; five packages; 129 passing test/subtest events; two expected skips described below |
-| `go vet ./...` | Exit 0 |
-| `powershell -NoProfile -ExecutionPolicy Bypass -File infrastructure/database/run-intelligence-tests.ps1` | Exit 0: migration/invariants, two-connection quota race, isolated rollback preserves metadata schema |
-| `powershell -NoProfile -ExecutionPolicy Bypass -File infrastructure/database/run-isolated-tests.ps1` | Exit 0: original metadata/RLS and concurrent final-owner invariants |
-| `npm test` in final web snapshot with public endpoint variables unset | Exit 0: 14 files, 113 tests, no skips |
-| `npm run lint` | Exit 0 |
-| `npm run typecheck` | Exit 0 |
-| `npm run build` with process-scoped public production endpoint/Origin | Exit 0: nine static routes including account/privacy, history, usage, billing and admin |
-| `git diff f3e5bd6 <product> --check` for Go, SQL and web products | Exit 0 for all three |
+| Command and scope                                                                                                                             | Outcome                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `node packages/protocol/scripts/verify-intelligence.mjs` in contract snapshot                                                                 | Exit 0: canonical HMAC plus five domain/key/challenge binding mutations                              |
+| Compare parsed shared auth/RPC JSON with web vendored corpora                                                                                 | Both structurally identical                                                                          |
+| `go test -count=1 -json ./...` in exact agent snapshot with `TERMINUS_INTELLIGENCE_TEST_DATABASE_URL` pointing to disposable local PostgreSQL | Exit 0; five packages; 129 passing test/subtest events; two expected skips described below           |
+| `go vet ./...`                                                                                                                                | Exit 0                                                                                               |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File infrastructure/database/run-intelligence-tests.ps1`                                      | Exit 0: migration/invariants, two-connection quota race, isolated rollback preserves metadata schema |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File infrastructure/database/run-isolated-tests.ps1`                                          | Exit 0: original metadata/RLS and concurrent final-owner invariants                                  |
+| `npm test` in final web snapshot with public endpoint variables unset                                                                         | Exit 0: 14 files, 113 tests, no skips                                                                |
+| `npm run lint`                                                                                                                                | Exit 0                                                                                               |
+| `npm run typecheck`                                                                                                                           | Exit 0                                                                                               |
+| `npm run build` with process-scoped public production endpoint/Origin                                                                         | Exit 0: nine static routes including account/privacy, history, usage, billing and admin              |
+| `git diff f3e5bd6 <product> --check` for Go, SQL and web products                                                                             | Exit 0 for all three                                                                                 |
 
 The two Go skips are `TestUnsupportedPlatformFailsClosed` (Windows exercises
 the real adapter) and `TestConPTYAgentFailureHelper` (only runs when launched
