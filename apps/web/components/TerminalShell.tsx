@@ -1,6 +1,8 @@
 ﻿"use client";
 
 import { IntelligencePanel } from "./IntelligencePanel";
+import { browserRecovery } from "../terminal/browserRecovery";
+import type { RecentSession } from "../protocol/recentSessions";
 import { Terminal } from "@xterm/xterm";
 import {
   type ClipboardEvent,
@@ -288,8 +290,6 @@ const QUICK_KEYS = [
 
 const MIN_COLUMNS = 20;
 const MIN_ROWS = 8;
-const BACKGROUND_DETACH_DELAY_MS = 0;
-const FOREGROUND_RECONNECT_DELAY_MS = 500;
 
 function measureViewport(element: HTMLElement): TerminalViewport {
   const rect = element.getBoundingClientRect();
@@ -531,6 +531,8 @@ function TerminalWorkspace({
   const protocolClient = adapter.kind === "protocol-client";
   const [connectionState, setConnectionState] = useState(adapter.getState());
   const [currentSessionId, setCurrentSessionId] = useState<string>();
+  const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+  const [endFailed, setEndFailed] = useState(false);
   const [fragmentInvalid, setFragmentInvalid] = useState(false);
   const [historyTruncated, setHistoryTruncated] = useState(false);
   const [newSessionFailed, setNewSessionFailed] = useState(false);
@@ -671,6 +673,15 @@ function TerminalWorkspace({
     });
     const unsubscribeSession =
       adapter.subscribeSession?.((event) => {
+        if (event.type === "session-ended") {
+          setCurrentSessionId(undefined);
+          window.history.replaceState(
+            null,
+            "",
+            window.location.pathname + window.location.search,
+          );
+          return;
+        }
         if (event.type === "history-begin") {
           pendingOutputRef.current = [];
           xtermRef.current?.reset();
@@ -698,115 +709,26 @@ function TerminalWorkspace({
     };
   }, [adapter, protocolClient]);
 
+  const recovery = useRef<ReturnType<typeof browserRecovery> | null>(null);
   useEffect(() => {
-    if (adapter.kind !== "protocol-client" || adapter.detach === undefined)
-      return;
-    const detach = adapter.detach.bind(adapter);
-    let detachTimer: ReturnType<typeof setTimeout> | undefined;
-    let foregroundReconnectTimer: ReturnType<typeof setTimeout> | undefined;
-    let foregroundReconnectPending = false;
-    let pageIsHiding = false;
-    const cancelPendingDetach = () => {
-      if (detachTimer !== undefined) clearTimeout(detachTimer);
-      detachTimer = undefined;
-    };
-    const cancelPendingReconnect = () => {
-      if (foregroundReconnectTimer !== undefined)
-        clearTimeout(foregroundReconnectTimer);
-      foregroundReconnectTimer = undefined;
-    };
-    const scheduleForegroundReconnect = () => {
-      if (adapter.getErrorCode?.() === "SESSION_REOPEN_REJECTED") {
-        foregroundReconnectPending = false;
-        cancelPendingReconnect();
-        return;
-      }
-      if (
-        !foregroundReconnectPending ||
-        document.visibilityState !== "visible" ||
-        foregroundReconnectTimer !== undefined
-      )
-        return;
-      const state = adapter.getState();
-      if (state === "connected") {
-        foregroundReconnectPending = false;
-        return;
-      }
-      if (state !== "detached" && state !== "error") return;
-      foregroundReconnectTimer = setTimeout(() => {
-        foregroundReconnectTimer = undefined;
-        if (
-          foregroundReconnectPending &&
-          document.visibilityState === "visible" &&
-          ["detached", "error"].includes(adapter.getState())
-        ) {
-          foregroundReconnectPending = false;
-          void adapter.connect();
-        }
-      }, FOREGROUND_RECONNECT_DELAY_MS);
-    };
-    const pageHiding = (event: PageTransitionEvent) => {
-      pageIsHiding = true;
-      foregroundReconnectPending = false;
-      cancelPendingDetach();
-      cancelPendingReconnect();
-      // Safari may freeze a background page before even a short timer runs.
-      // A persisted pagehide keeps this document alive, so detach now and
-      // retain the remembered session ID for pageshow. A real reload/close
-      // lets transport teardown detach the server session for fragment reopen.
-      if (event.persisted && adapter.getState() === "connected") void detach();
-    };
-    const pageShowing = (event: PageTransitionEvent) => {
-      pageIsHiding = false;
-      if (event.persisted) {
-        foregroundReconnectPending = true;
-        scheduleForegroundReconnect();
-      }
-    };
-    const visibilityChanged = () => {
-      if (
-        document.visibilityState === "hidden" &&
-        adapter.getState() === "connected"
-      ) {
-        foregroundReconnectPending = false;
-        cancelPendingReconnect();
-        cancelPendingDetach();
-        detachTimer = setTimeout(() => {
-          detachTimer = undefined;
-          if (
-            !pageIsHiding &&
-            document.visibilityState === "hidden" &&
-            adapter.getState() === "connected"
-          )
-            void detach();
-        }, BACKGROUND_DETACH_DELAY_MS);
-      } else if (document.visibilityState === "visible") {
-        pageIsHiding = false;
-        cancelPendingDetach();
-        foregroundReconnectPending = true;
-        scheduleForegroundReconnect();
-      }
-    };
-    const unsubscribeReconnectState = adapter.subscribe((state) => {
-      if (state === "connected") {
-        foregroundReconnectPending = false;
-        cancelPendingReconnect();
-        return;
-      }
-      scheduleForegroundReconnect();
-    });
-    document.addEventListener("visibilitychange", visibilityChanged);
-    window.addEventListener("pagehide", pageHiding);
-    window.addEventListener("pageshow", pageShowing);
+    if (!protocolClient) return;
+    const controller = browserRecovery(adapter);
+    recovery.current = controller;
     return () => {
-      cancelPendingDetach();
-      cancelPendingReconnect();
-      unsubscribeReconnectState();
-      document.removeEventListener("visibilitychange", visibilityChanged);
-      window.removeEventListener("pagehide", pageHiding);
-      window.removeEventListener("pageshow", pageShowing);
+      controller.dispose();
+      recovery.current = null;
     };
-  }, [adapter]);
+  }, [adapter, protocolClient]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void adapter.getRecentSessions?.().then((entries) => {
+      if (!cancelled) setRecentSessions(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, connectionState, currentSessionId]);
 
   useEffect(() => {
     connectedRef.current = connectionState === "connected";
@@ -860,10 +782,13 @@ function TerminalWorkspace({
     else inputRef.current?.focus();
   };
 
-  const connect = async () => {
+  const connect = async (selectedSessionId?: string) => {
+    setEndFailed(false);
+    recovery.current?.manual();
     setNewSessionFailed(false);
-    const fragment =
-      protocolClient && !newSessionNeedsFreshRetry
+    const fragment = selectedSessionId
+      ? { kind: "session" as const, sessionId: selectedSessionId }
+      : protocolClient && !newSessionNeedsFreshRetry
         ? parseSessionFragment(window.location.hash)
         : { kind: "root" as const };
     if (fragment.kind === "invalid") {
@@ -883,6 +808,7 @@ function TerminalWorkspace({
   };
 
   const newSession = async () => {
+    recovery.current?.manual();
     if (adapter.newSession === undefined) return;
     setNewSessionFailed(false);
     setNewSessionNeedsFreshRetry(false);
@@ -1051,7 +977,12 @@ function TerminalWorkspace({
             <button
               className="disconnectButton"
               type="button"
-              onClick={() => void adapter.disconnect()}
+              onClick={() => {
+                recovery.current?.stop();
+                if (adapter.release) adapter.release();
+                else if (adapter.detach) void adapter.detach();
+                else void adapter.disconnect();
+              }}
             >
               {t.disconnect}
             </button>
@@ -1206,6 +1137,66 @@ function TerminalWorkspace({
         <p className="historyNotice" role="status">
           {t.historyTruncated}
         </p>
+      )}
+
+      {connected && protocolClient && (
+        <section className="sessionOpenGuidance">
+          <p>
+            {language === "en"
+              ? "Disconnect keeps this terminal running. New Session ends this terminal and opens another."
+              : "Koppla från låter terminalen fortsätta köras. Ny session avslutar terminalen och öppnar en annan."}
+          </p>
+          <button
+            type="button"
+            className="secondaryButton compactButton"
+            onClick={() => {
+              recovery.current?.stop();
+              void adapter.disconnect().catch(() => setEndFailed(true));
+            }}
+          >
+            {language === "en" ? "End Terminal" : "Avsluta terminal"}
+          </button>
+        </section>
+      )}
+
+      {endFailed && (
+        <p className="sessionOpenGuidance" role="alert">
+          {language === "en"
+            ? "The terminal could not be ended. Reconnect to check its state and try again."
+            : "Terminalen kunde inte avslutas. Återanslut för att kontrollera dess tillstånd och försök igen."}
+        </p>
+      )}
+
+      {!connected && !busy && recentSessions.length > 0 && (
+        <section
+          className="sessionOpenGuidance"
+          aria-label={
+            language === "en" ? "Recent terminals" : "Senaste terminaler"
+          }
+        >
+          <p>
+            {language === "en"
+              ? "Choose a recent terminal to try reopening it. It may have ended on the host."
+              : "Välj en tidigare terminal för att försöka öppna den igen. Den kan ha avslutats på värddatorn."}
+          </p>
+          {recentSessions.map((entry) => (
+            <button
+              key={entry.sessionId}
+              type="button"
+              className="secondaryButton compactButton"
+              onClick={() => {
+                window.history.replaceState(
+                  null,
+                  "",
+                  sessionFragment(entry.sessionId),
+                );
+                void connect(entry.sessionId);
+              }}
+            >
+              {entry.sessionId}
+            </button>
+          ))}
+        </section>
       )}
 
       {connectionState === "error" && transportFailed && (
@@ -1390,7 +1381,14 @@ function TerminalWorkspace({
               <span>{t.activeSession}</span>
               <strong>{adapter.label}</strong>
               {adapter.detach !== undefined && (
-                <button type="button" onClick={() => void adapter.detach?.()}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    recovery.current?.stop();
+                    if (adapter.release) adapter.release();
+                    else void adapter.detach?.().catch(() => undefined);
+                  }}
+                >
                   {t.detach}
                 </button>
               )}

@@ -54,10 +54,67 @@ vi.mock("@xterm/xterm", () => ({
 }));
 
 beforeEach(() => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
   vi.clearAllMocks();
   localStorage.clear();
   xtermMock.data.listener = undefined;
   window.history.replaceState(null, "", "/");
+});
+
+it("offers recent terminals explicitly and honors the selected locator after a failed replacement", async () => {
+  const user = userEvent.setup();
+  const adapter = new ProtocolUiAdapter("connected");
+  Object.assign(adapter, {
+    getRecentSessions: async () => [
+      { sessionId: "a7m4-p2q9-wxyz", lastUsedAt: 1 },
+    ],
+  });
+  adapter.newSessionShouldFail = true;
+  adapter.newSessionFailureDropsSession = true;
+  render(<TerminalShell adapterFactory={() => adapter} />);
+  adapter.emitSession({ type: "session-opened", sessionId: "k7m4-p2q9-wxyz" });
+  await user.click(await screen.findByRole("button", { name: "New Session" }));
+  await user.click(
+    await screen.findByRole("button", { name: "a7m4-p2q9-wxyz" }),
+  );
+  expect(adapter.connectOptions.at(-1)).toEqual({
+    sessionId: "a7m4-p2q9-wxyz",
+  });
+});
+
+it("does not auto-open a recent terminal on a new root page", async () => {
+  const adapter = new ProtocolUiAdapter();
+  Object.assign(adapter, {
+    getRecentSessions: async () => [
+      { sessionId: "a7m4-p2q9-wxyz", lastUsedAt: 1 },
+    ],
+  });
+  render(<TerminalShell adapterFactory={() => adapter} />);
+  expect(
+    await screen.findByRole("button", { name: "a7m4-p2q9-wxyz" }),
+  ).toBeEnabled();
+  expect(adapter.connectCalls).toBe(0);
+  expect(window.location.hash).toBe("");
+});
+
+it("separates leaving a terminal running from explicitly ending it", async () => {
+  const user = userEvent.setup();
+  const adapter = new ProtocolUiAdapter("connected");
+  const end = vi.spyOn(adapter, "disconnect");
+  const { unmount } = render(<TerminalShell adapterFactory={() => adapter} />);
+  await user.click(screen.getByRole("button", { name: "Disconnect" }));
+  expect(adapter.detachCalls).toBe(1);
+  expect(end).not.toHaveBeenCalled();
+  unmount();
+  const another = new ProtocolUiAdapter("connected");
+  const explicitEnd = vi.spyOn(another, "disconnect");
+  render(<TerminalShell adapterFactory={() => another} />);
+  expect(screen.getByText(/New Session ends this terminal/)).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "End Terminal" }));
+  expect(explicitEnd).toHaveBeenCalledOnce();
 });
 
 it("offers explicit rejected-reopen recovery without changing the link before success", async () => {
@@ -287,7 +344,7 @@ describe("TerminalShell", () => {
     await waitFor(() => expect(adapter.connectCalls).toBe(1));
   });
 
-  it("does not detach during page teardown so refresh releases server resources", async () => {
+  it("releases the page connection during teardown without ending the host terminal", async () => {
     const adapter = new ProtocolUiAdapter("connected");
     render(<TerminalShell adapterFactory={() => adapter} />);
     Object.defineProperty(document, "visibilityState", {
@@ -299,7 +356,7 @@ describe("TerminalShell", () => {
     fireEvent(window, new PageTransitionEvent("pagehide"));
     await new Promise((resolve) => setTimeout(resolve, 150));
 
-    expect(adapter.detachCalls).toBe(0);
+    expect(adapter.detachCalls).toBe(1);
   });
 
   it("detaches a persisted Safari page before it is frozen", async () => {
