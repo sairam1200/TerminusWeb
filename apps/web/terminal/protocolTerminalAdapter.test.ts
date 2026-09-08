@@ -26,6 +26,26 @@ const challenge = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8";
 const sessionId = "k7m4-p2q9-wxyz";
 
 describe("ProtocolTerminalAdapter", () => {
+  it("keeps an explicitly selected recent target when recovery interrupts an older detached session", async () => {
+    const { adapter, sockets } = await connectedFixture();
+    adapter.release();
+    const selected = "a7m4-p2q9-wxyz";
+    const connection = adapter.connect({ sessionId: selected });
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.open();
+    await connection;
+    sockets[1]!.error();
+    expect(adapter.getSessionId()).toBe(selected);
+    const retry = adapter.connect({ sessionId: adapter.getSessionId() });
+    await waitFor(() => expect(sockets).toHaveLength(3));
+    sockets[2]!.open();
+    await retry;
+    await authenticate(sockets[2]!, "reopen_session");
+    expect(sockets[2]!.sentFrame(2).payload).toMatchObject({
+      sessionId: selected,
+    });
+    adapter.release();
+  });
   it("times out a never-opened transport and reopens its retained locator on retry", async () => {
     const { adapter, sockets } = await connectedFixture();
     adapter.release();

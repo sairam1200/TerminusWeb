@@ -479,7 +479,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   }
 
   getSessionId(): string | undefined {
-    return this.sessionId ?? this.requestedSessionId;
+    return this.requestedSessionId ?? this.sessionId;
   }
 
   getState(): TerminalConnectionState {

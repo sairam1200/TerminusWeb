@@ -39,7 +39,7 @@ known locator and opened a fresh shell. The test passes after the fix.
 
 From `apps/web`:
 
-- `npm test`: PASS, 18 files / 150 tests.
+- `npm test`: PASS, 18 files / 151 tests (including the cumulative explicit-target correction).
 - `npm run typecheck`: PASS.
 - `npm run lint`: PASS, no warnings after removing the temporary UI fixture.
 - `npm run build`: PASS, Next.js 16.3.3 / ten static pages. Process-only public
@@ -56,6 +56,13 @@ reconnect/late success, offline/authentication failure, optional metadata scope,
 end-send failure and acknowledged metadata removal, explicit recent selection
 after failed New Session, and no root auto-open. Existing malformed, replay,
 history-offset, backpressure and stale-generation checks remain passing.
+
+A final self-review correction makes an explicitly requested recent locator take
+precedence over the previously attached locator in `getSessionId()`. Its regression
+selects B while A is detached, interrupts transport, and confirms the recovery
+request still names B. Full tests, typecheck, lint and production build were rerun
+after this correction; integrate the cumulative follow-up product recorded in the
+status handoff, not initial `d465067` alone.
 
 ## Browser observation boundary
 
