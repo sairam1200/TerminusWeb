@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -49,7 +48,7 @@ func run() error {
 	storePath := flag.String("store", defaultStorePath(), "DPAPI CurrentUser credential-store path")
 	deviceID := flag.String("device-id", "", "non-secret local integration device identity")
 	revokeID := flag.String("revoke-id", "", "non-secret credential ID for revoke mode")
-	printPairing := flag.Bool("print-pairing-code", false, "print one pairing code to the attached operator console only")
+	printPairing := flag.Bool("print-pairing-code", false, "enable attached pairing console and print its first short-lived code")
 	webUpstream := flag.String("web-upstream", "", "optional explicit loopback HTTP web origin for local staging")
 	flag.Parse()
 
@@ -101,13 +100,22 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	if err != nil {
 		return err
 	}
+	var console *pairingConsole
+	if printPairing {
+		if err := requirePairingConsole(os.Stdin, os.Stdout, os.Stderr); err != nil {
+			return err
+		}
+		console = newPairingConsole()
+	}
 	endpointInstance, err := endpoint.New(endpoint.Config{
-		AllowedOrigin:  origin,
-		AgentID:        integrationAgentID,
-		Terminal:       terminal.LocalAdapter{},
-		Credentials:    store,
-		ApprovePairing: boundedLocalApproval,
-		ResolveDevice:  certificateDeviceResolver(deviceID),
+		AllowedOrigin: origin,
+		AgentID:       integrationAgentID,
+		Terminal:      terminal.LocalAdapter{},
+		Credentials:   store,
+		ApprovePairing: func(ctx context.Context, approval endpoint.PairingApproval) bool {
+			return console.approve(ctx, approval)
+		},
+		ResolveDevice: certificateDeviceResolver(deviceID),
 		Log: func(event endpoint.Event) {
 			// Only stable event metadata is emitted. Never log payloads, IDs from
 			// requests, credentials, proofs, or terminal bytes.
@@ -164,12 +172,22 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	revocationCtx, cancelRevocation := context.WithCancel(context.Background())
 	revocationDone := make(chan struct{})
 	go func() { defer close(revocationDone); revocationLoop(revocationCtx, endpointInstance, store) }()
+	var stopConsole context.CancelFunc
 	var cleanupOnce sync.Once
 	var cleanupErr error
 	var serveResult error
 	var serveResultReady bool
 	cleanup := func() error {
 		cleanupOnce.Do(func() {
+			if stopConsole != nil {
+				stopConsole()
+				_ = os.Stdin.Close()
+				select {
+				case <-console.done:
+				case <-time.After(2 * time.Second):
+					cleanupErr = errors.New("pairing console did not stop within 2 seconds")
+				}
+			}
 			cancelRevocation()
 			watcherStopped := false
 			select {
@@ -190,6 +208,9 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 				}
 			}
 			var errs []error
+			if cleanupErr != nil {
+				errs = append(errs, cleanupErr)
+			}
 			if closeErr != nil {
 				errs = append(errs, fmt.Errorf("endpoint cleanup: %w", closeErr))
 			}
@@ -216,13 +237,16 @@ func serve(listen, origin, serverName, certPath, keyPath, clientCAPath, deviceID
 	}
 	defer func() { _ = cleanup() }()
 
-	if printPairing {
-		code, _, issueErr := endpointInstance.IssuePairingCode()
-		if issueErr != nil {
-			return fmt.Errorf("issue local pairing code: %w", issueErr)
-		}
-		// Explicit opt-in operator output only; it is not logged or persisted.
-		fmt.Fprintln(os.Stdout, code)
+	if console != nil {
+		var consoleCtx context.Context
+		consoleCtx, stopConsole = context.WithCancel(context.Background())
+		defer stopConsole()
+		go func() {
+			// Closing stdin belongs to whole-console shutdown, never to an
+			// individual approval timeout. It releases the sole blocked reader.
+			defer os.Stdin.Close()
+			console.run(consoleCtx, readConsoleLines(consoleCtx, os.Stdin), os.Stdout, os.Stderr, endpointInstance.IssuePairingCode)
+		}()
 	}
 	fmt.Fprintf(os.Stdout, "listening=127.0.0.1:%d\n", address.Port)
 	fmt.Fprintln(os.Stdout, "health=/healthz")
@@ -287,66 +311,16 @@ func certificateDeviceResolver(fallback string) endpoint.DeviceResolver {
 	}
 }
 
-func boundedLocalApproval(ctx context.Context, approval endpoint.PairingApproval) bool {
-	if ctx == nil {
-		return false
-	}
-	if approval.Origin == "" || approval.ClientInstanceID == "" || approval.DeviceIdentity == "" {
-		return false
-	}
-	result := make(chan bool, 1)
-	request := approvalRequest{ctx: ctx, approval: approval, result: result}
-	select {
-	case approvalConsoleInstance.requests <- request:
-	case <-ctx.Done():
-		approvalConsoleInstance.abort()
-		return false
-	}
-	select {
-	case approved := <-result:
-		return approved
-	case <-ctx.Done():
-		approvalConsoleInstance.abort()
-		return false
-	}
-}
-
-type approvalRequest struct {
-	ctx      context.Context
-	approval endpoint.PairingApproval
-	result   chan bool
-}
-
-type approvalConsole struct {
-	requests  chan approvalRequest
-	abortOnce sync.Once
-}
-
-func (c *approvalConsole) abort() {
-	c.abortOnce.Do(func() { _ = os.Stdin.Close() })
-}
-
-var approvalConsoleInstance = newApprovalConsole()
-
-func newApprovalConsole() *approvalConsole {
-	console := &approvalConsole{requests: make(chan approvalRequest)}
-	go console.run()
-	return console
-}
-
-func (c *approvalConsole) run() {
-	reader := bufio.NewReader(os.Stdin)
-	for request := range c.requests {
-		if request.ctx.Err() != nil {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "pairing request origin=%s client=%s device=%s; approve? [y/N] ", request.approval.Origin, request.approval.ClientInstanceID, request.approval.DeviceIdentity)
-		line, err := reader.ReadString('\n')
-		approved := err == nil && strings.EqualFold(strings.TrimSpace(line), "y")
-		if request.ctx.Err() == nil {
-			request.result <- approved
+// Pairing material is restricted to an attached Windows console. Redirected
+// input/output must fail before a code is generated or a listener is opened.
+func requirePairingConsole(files ...*os.File) error {
+	for _, file := range files {
+		var mode uint32
+		if file == nil || windows.GetConsoleMode(windows.Handle(file.Fd()), &mode) != nil {
+			return errors.New("pairing requires attached, unredirected console input and output")
 		}
 	}
+	return nil
 }
 
 func requestRevocation(storePath, credentialID string) error {
