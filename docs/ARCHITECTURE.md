@@ -24,6 +24,74 @@ Windows agent -> ConPTY -> user-owned shell
 
 The Vercel request path and the terminal data path are separate. Vercel must not relay terminal frames.
 
+## Host access from independently authorized devices
+
+The personal prototype supports several authorized browsers connecting to one
+configured host. The host owns its credential store and terminal processes;
+each browser receives a separate authorization credential. Pairing another
+browser must neither replace earlier credentials nor stop their sessions.
+Pairing is onboarding, not an operation repeated for each terminal session.
+This clarifies existing protocol 0.2 behavior without changing its wire format.
+
+| Concept | Current implementation and boundary |
+| --- | --- |
+| Host | Agent instance, its configured private TLS endpoint, protected credential store and PTY adapter. `hello_ack.agentId` is metadata, not proof of authorization. |
+| Device/browser | Verified client-certificate identity plus a separately paired browser credential. Two browsers on one device may have different credentials. `clientInstanceId` alone is not trusted identity. |
+| Authorization | A host-local credential record containing ID, secret, expiry and device identity. The host validates fresh HMAC proof and device binding before opening a terminal. |
+| User/account | The local host operator approves onboarding. Optional intelligence accounts and future control-plane accounts do not automatically grant terminal access. No new terminal account service is introduced. |
+| Terminal session | Host-owned running PTY, with a credential and source-device owner for access checks, one attached WebSocket, activity/lifecycle state and bounded volatile history. |
+
+On each additional browser, use a fresh short-lived code issued by the host,
+then approve that exact browser request on the host. A successful ceremony
+creates a new independent credential; it never copies another browser's key.
+The existing 128-bit code, 120-second deadline, single-use consumption,
+60-second approval deadline, rate limits and generic `PAIRING_FAILED` response
+remain unchanged. The host's local onboarding console must support another
+ceremony after expiration or denial without restarting the host or allowing a
+late approval to approve a different request.
+
+Each browser stores its non-extractable HMAC key, credential ID and expiry in
+origin-bound IndexedDB. Raw credential bytes are transient during import;
+future connections send challenge proofs rather than the secret. The host
+protects its credential map using Windows DPAPI CurrentUser. An explicit
+stable `-store` path preserves credentials across restart; the integration
+harness default remains deliberately temporary. Neither option persists
+terminal processes or history across host restart. Credentials expire within
+30 days; renewal currently means fresh operator-approved onboarding, not
+automatic indefinite refresh. Local removal of browser data is not host-side
+revocation. Host revocation deletes that credential and closes its active and
+detached sessions, leaving independently authorized devices unaffected.
+
+The host's own browser follows the same TLS, pairing and authentication checks.
+Tailscale network membership alone grants no terminal permission. The current
+private publication uses raw TCP forwarding to loopback TLS with mandatory
+client certificates, exact HTTPS Origin and `terminus.v0_2`. Each new device
+also needs its own trusted client identity. Vercel serves assets only; terminal
+and intelligence WebSockets connect directly to the configured private agent.
+The production terminal endpoint remains
+`wss://sai.tailf8dcea.ts.net/terminal`.
+
+Requirement A is independent sessions: laptop session A, phone session B and
+host-browser session C can coexist on the same host. Requirement B, sharing
+control of one running session across credentials, is deferred. Existing
+credential/source-device ownership checks and uniform reopen rejection remain
+in place, including when another authorized device knows the session locator.
+A later shared-session design must settle input ownership, resize authority,
+attachment concurrency, revocation and history permissions before implementation.
+
+This change does not introduce a multi-host registry. Browser persistence has
+one active credential per web origin and connection profiles select local or
+private transport, not independent host accounts. A future multi-host selector
+requires approved host-scoped credential storage and legacy migration, stable
+host identity and an explicit endpoint allowlist/CSP policy. It must not derive
+trust from a user-supplied URL or agent ID. The authorization concepts are
+platform-neutral; Linux or mobile hosting requires a separate PTY adapter and
+protected credential-store implementation. Those agents are not implemented.
+Optional device labels, created/last-used timestamps and account associations
+can be added later without treating them as authentication proof. Existing
+credential IDs and selective local revocation provide the current management
+boundary; no remote device-management API is added.
+
 ## Future commercial control plane
 
 ```text
