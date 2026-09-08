@@ -1,4 +1,4 @@
-import { webcrypto } from "node:crypto";
+import { createHmac, webcrypto } from "node:crypto";
 import { waitFor } from "@testing-library/react";
 import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it, vi } from "vitest";
@@ -982,6 +982,138 @@ describe("ProtocolTerminalAdapter", () => {
         expect.objectContaining({ type: "pairing_request" }),
       ]),
     );
+  });
+
+  it("keeps two browser credentials independent while opening sessions on the same host", async () => {
+    // Separate fake IndexedDB factories model independent browser profiles.
+    // WebSocket responses are contract-boundary doubles, not agent acceptance.
+    const browsers = [
+      {
+        id: credentialId,
+        secret: credentialSecret,
+        code: "AAECAwQFBgcICQoLDA0ODw",
+        session: sessionId,
+      },
+      {
+        id: "30000000-0000-4000-8000-000000000002",
+        secret: challenge,
+        code: "EBESExQVFhcYGRobHB0eHw",
+        session: "a7m4-p2q9-wxyz",
+      },
+    ].map((browser) => ({
+      ...browser,
+      database: new IDBFactory(),
+      clientId: "",
+    }));
+
+    for (const browser of browsers) {
+      const store = new IndexedDbCredentialStore(
+        browser.database,
+        cryptoProvider,
+        () => now,
+      );
+      const sockets: MockWebSocket[] = [];
+      const adapter = createAdapter(store, sockets);
+      const connected = adapter.connect();
+      await waitFor(() => expect(sockets).toHaveLength(1));
+      const socket = sockets[0]!;
+      socket.open();
+      await connected;
+      const hello = socket.sentFrame(0);
+      browser.clientId = String(hello.payload.clientInstanceId);
+      expect(hello.payload).not.toHaveProperty("credentialId");
+      await socket.receive(
+        agentFrame(hello.connectionId, 0, "hello_ack", {
+          selectedVersion: "0.2",
+          agentId: "50000000-0000-4000-8000-000000000001",
+        }),
+      );
+      await waitFor(() => expect(adapter.getState()).toBe("pairing"));
+      await adapter.pair(browser.code);
+      expect(socket.sentFrame(1).payload).toEqual({
+        pairingCode: browser.code,
+      });
+      await socket.receive(
+        agentFrame(hello.connectionId, 1, "pairing_result", {
+          credentialId: browser.id,
+          credentialSecret: browser.secret,
+          credentialExpiresAt: "2026-09-25T12:00:00.000Z",
+        }),
+      );
+      await waitFor(async () =>
+        expect((await store.loadCredential())?.credentialId).toBe(browser.id),
+      );
+      await adapter.disconnect();
+    }
+    expect(browsers[0]!.clientId).not.toBe(browsers[1]!.clientId);
+
+    const active: {
+      adapter: ProtocolTerminalAdapter;
+      socket: MockWebSocket;
+      connectionId: string;
+      session: string;
+    }[] = [];
+    for (const browser of browsers) {
+      // Reload A only after B has paired: B must not overwrite A's key.
+      const store = new IndexedDbCredentialStore(
+        browser.database,
+        cryptoProvider,
+        () => now,
+      );
+      expect((await store.loadCredential())?.key.extractable).toBe(false);
+      const sockets: MockWebSocket[] = [];
+      const adapter = createAdapter(store, sockets);
+      const connected = adapter.connect();
+      await waitFor(() => expect(sockets).toHaveLength(1));
+      const socket = sockets[0]!;
+      socket.open();
+      await connected;
+      expect(socket.url).toBe(endpoint);
+      expect(socket.sentFrame(0).payload).toMatchObject({
+        credentialId: browser.id,
+        clientInstanceId: browser.clientId,
+      });
+      const connectionId = await authenticate(socket, "open_session");
+      const expectedProof = createHmac(
+        "sha256",
+        Buffer.from(browser.secret, "base64url"),
+      )
+        .update(
+          Buffer.concat([
+            Buffer.from(`Terminus/0.2/auth\0${connectionId}\0${challengeId}\0`),
+            Buffer.from(challenge, "base64url"),
+          ]),
+        )
+        .digest("base64url");
+      expect(socket.sentFrame(1).payload).toMatchObject({
+        credentialId: browser.id,
+        proof: expectedProof,
+      });
+      expect(
+        socket.sent.map((frame) => (JSON.parse(frame) as ProtocolFrame).type),
+      ).not.toContain("pairing_request");
+      await socket.receive(
+        agentFrame(connectionId, 3, "session_opened", {
+          sessionId: browser.session,
+        }),
+      );
+      await waitFor(() => expect(adapter.getState()).toBe("connected"));
+      active.push({ adapter, socket, connectionId, session: browser.session });
+    }
+    expect(active.map(({ adapter }) => adapter.getState())).toEqual([
+      "connected",
+      "connected",
+    ]);
+    for (const { adapter, socket, connectionId, session } of active) {
+      await adapter.disconnect();
+      expect(socket.sentFrame(3).payload).toMatchObject({ sessionId: session });
+      await socket.receive(
+        agentFrame(connectionId, 4, "session_closed", {
+          sessionId: session,
+          reason: "user_request",
+        }),
+      );
+    }
   });
 
   it("rejects an unconfigured destination before opening a socket", async () => {

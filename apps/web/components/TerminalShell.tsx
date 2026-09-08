@@ -131,7 +131,7 @@ const TRANSLATIONS = {
     switchLanguage: "Switch to Swedish",
     pairingCode: "One-time pairing code",
     pairingHelp:
-      "Confirm this browser locally on the Windows agent. The code is never stored.",
+      "Use a fresh one-time code for each browser and approve it on the host. This browser remembers access until its credential expires or is revoked. Each device opens its own terminal sessions. The code is never stored.",
     pairLocally: "Pair locally",
     pairingPlaceholder: "Enter the 22-character code",
     terminalInput: "Terminal input",
@@ -226,7 +226,7 @@ const TRANSLATIONS = {
     switchLanguage: "Byt till engelska",
     pairingCode: "Engångskod för parkoppling",
     pairingHelp:
-      "Bekräfta webbläsaren lokalt i Windows-agenten. Koden sparas aldrig.",
+      "Använd en ny engångskod för varje webbläsare och godkänn den på värddatorn. Webbläsaren minns åtkomsten tills behörigheten löper ut eller återkallas. Varje enhet öppnar egna terminalsessioner. Koden sparas aldrig.",
     pairLocally: "Parkoppla lokalt",
     pairingPlaceholder: "Ange koden med 22 tecken",
     terminalInput: "Terminalinmatning",
