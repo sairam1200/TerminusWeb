@@ -62,20 +62,53 @@ their SHA-256 fingerprints are used as the private-device identity. The
 listener default is `127.0.0.1:0` and non-loopback binds are rejected before
 and after binding.
 
-The host encrypts its temporary credential map with DPAPI `CurrentUser`, so
-records are bound to the non-elevated integration identity. The default store
-is removed after clean shutdown. Use an explicit path only when its lifecycle
-is managed by the operator. The pairing approval prompt is bounded by the
-endpoint's 60-second limit and displays the Origin, client-instance ID and
-resolved device identity locally. It prints no credential secret, proof or
-password. The pairing code remains explicit operator-console output only and
-must never be redirected or logged.
+The host encrypts its credential map with DPAPI `CurrentUser`, so records are
+bound to the non-elevated integration identity. Use the same explicit `-store`
+path to retain device authorization across host restarts. The default is a
+per-process temporary store removed after clean shutdown. Running terminals
+and bounded output history remain memory-only and do not survive host restart.
+
+With `-print-pairing-code`, startup emits the first short-lived code and enables
+an attached operator console. Type `pair` plus Enter for each additional browser
+or device, or after a code expires. Each fresh code replaces the previous code,
+expires after two minutes, and is consumed by the first syntactically valid
+attempt, including a wrong attempt. Issuing another code keeps existing device
+credentials and terminal sessions intact; it does not restart the agent.
+
+Each request displays its Origin, client-instance ID and verified device
+identity. Review those details and type the exact `approve <request-id>` command
+shown, or `deny`, within 60 seconds. Bare `y` is no longer accepted: a decision
+must identify the current request so delayed input cannot approve another
+device. Timeout denies that request while keeping the console available for
+`pair`. Another code cannot be issued while approval is pending. Console EOF,
+display failure and host shutdown deny pending approvals. Startup refuses this
+flag when stdin, stdout or stderr is redirected, using the installed Windows
+`GetConsoleMode` API (`golang.org/x/sys/windows` v0.47.0).
+
+The temporary pairing code is onboarding only. Each browser receives its own
+credential, valid for slightly under 30 days, and reuses it across terminal
+sessions and reconnects without another code. Pair additional devices separately;
+do not copy credentials between browsers. Each device still needs Tailscale
+access and a client certificate trusted by the configured client CA, including
+a browser running on the host itself. Tailscale access does not bypass pairing.
+
+One configured Windows host is supported today. Its endpoint already accepts an
+agent identity and multiple credentials; this harness retains its existing
+integration identity. Future host types need their own adapters and deployment
+identity provisioning, not shared browser secrets. Account identity is separate
+from terminal authorization. Each authorized browser may create independent
+terminals; an existing session remains bound to its creator's credential and
+verified device. This change does not enable shared attachment.
+
+Pairing material remains explicit operator-console output only and must never
+be redirected, logged, or captured. Approval prompts contain no credential
+secret, proof or password.
 
 Safe commands (run from this directory, with an externally supplied already
 trusted certificate) are:
 
 ```powershell
-go run ./cmd/integration-host -mode serve -listen 127.0.0.1:0 -origin <exact-https-origin> -server-name <certificate-hostname> -cert <existing-cert.pem> -key <existing-key.pem> -client-ca <existing-client-ca.pem> -device-id local-integration-device -print-pairing-code
+go run ./cmd/integration-host -mode serve -listen 127.0.0.1:0 -origin <exact-https-origin> -server-name <certificate-hostname> -cert <existing-cert.pem> -key <existing-key.pem> -client-ca <existing-client-ca.pem> -device-id local-integration-device -store <protected-store-path> -print-pairing-code
 Invoke-WebRequest https://<certificate-hostname>/healthz
 go run ./cmd/integration-host -mode revoke -store <protected-store-path> -revoke-id <credential-id>
 go run ./cmd/integration-host -mode reset -store <protected-store-path>

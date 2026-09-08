@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -24,6 +25,20 @@ func TestValidateLoopbackAddressRejectsBeforeBind(t *testing.T) {
 	address, err := validateLoopbackAddress("127.0.0.1:0")
 	if err != nil || !address.IP.IsLoopback() {
 		t.Fatalf("loopback listener was rejected: %v", err)
+	}
+}
+
+func TestPairingConsoleRejectsRedirectedHandles(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "redirected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if requirePairingConsole(file) == nil {
+		t.Fatal("redirected pairing output accepted")
+	}
+	if requirePairingConsole(nil) == nil {
+		t.Fatal("missing console accepted")
 	}
 }
 

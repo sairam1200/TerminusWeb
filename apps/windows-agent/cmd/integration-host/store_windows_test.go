@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -12,6 +13,57 @@ import (
 
 	"terminus/windows-agent/internal/endpoint"
 )
+
+func TestDPAPIMultipleDevicePersistenceAndSelectiveRevocation(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "host.dpapi")
+	store, err := newDPAPIStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := endpoint.Credential{ID: "70000000-0000-4000-8000-000000000010", ExpiresAt: time.Now().Add(time.Hour), DeviceIdentity: "device-a"}
+	b := endpoint.Credential{ID: "70000000-0000-4000-8000-000000000011", ExpiresAt: time.Now().Add(time.Hour), DeviceIdentity: "device-b"}
+	for i := range a.Secret {
+		a.Secret[i] = byte(i + 1)
+		b.Secret[i] = byte(i + 65)
+	}
+	if err := store.Put(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	// Reopen the same protected file as a restarted host would.
+	reopened, err := newDPAPIStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []endpoint.Credential{a, b} {
+		got, err := reopened.Get(ctx, want.ID)
+		if err != nil || got.ID != want.ID || got.Secret != want.Secret || got.DeviceIdentity != want.DeviceIdentity || !got.ExpiresAt.Equal(want.ExpiresAt) {
+			t.Fatal("device credential not preserved")
+		}
+	}
+	ciphertext, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(ciphertext, a.Secret[:]) || bytes.Contains(ciphertext, b.Secret[:]) || bytes.Contains(ciphertext, []byte(a.DeviceIdentity)) {
+		t.Fatal("credential record persisted in plaintext")
+	}
+	if _, err := reopened.BindDevice(ctx, a.ID, b.DeviceIdentity); err == nil {
+		t.Fatal("cross-device credential accepted")
+	}
+	if err := revokeCredential(ctx, reopened, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(ctx, a.ID); err == nil {
+		t.Fatal("revoked credential remains")
+	}
+	if got, err := store.Get(ctx, b.ID); err != nil || got.Secret != b.Secret {
+		t.Fatal("revocation altered other device")
+	}
+}
 
 func TestDPAPIDevicePinningIsAtomicAcrossStoreInstances(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pin.dpapi")
