@@ -933,16 +933,30 @@ func TestCredentialExpiryClosesDetachedSessionAndHistory(t *testing.T) {
 	client := authorizeExisting(t, server, credential, "10000000-0000-4000-8000-000000000051")
 	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
 	sessionID := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
+	endpoint.sessions.mu.Lock()
+	managed := endpoint.sessions.active[sessionID]
+	endpoint.sessions.mu.Unlock()
+	if managed == nil {
+		t.Fatal("opened session missing from registry")
+	}
 	client.send("detach", protocol.SessionIDPayload{SessionID: sessionID})
 	client.read("session_detached")
 	adapter.mu.Lock()
 	session := adapter.sessions[0]
 	adapter.mu.Unlock()
 	session.output <- []byte("volatile-only")
+	deadline := time.After(2 * time.Second)
 	select {
 	case <-session.closed:
-	case <-time.After(2 * time.Second):
+	case <-deadline:
 		t.Fatal("credential expiry left detached terminal active")
+	}
+	// Terminal.Close signals the fake terminal before registry cleanup is
+	// finished. Wait for the existing lifecycle completion signal as well.
+	select {
+	case <-managed.closeDone:
+	case <-deadline:
+		t.Fatal("credential expiry did not finish registry cleanup")
 	}
 	endpoint.sessions.mu.Lock()
 	active, historyBytes := len(endpoint.sessions.active), endpoint.sessions.historyBytes
