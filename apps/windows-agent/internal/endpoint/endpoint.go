@@ -336,6 +336,13 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 	}
 	switch payload := frame.Value.(type) {
 	case *protocol.ErrorPayload:
+		if payload.Code == protocol.SessionOpenFailed {
+			// Cached browsers used this operational diagnostic for WebSocket
+			// onerror. A received report is not a local containment failure.
+			// Close its connection without destroying a still-running shell.
+			c.shutdown()
+			return nil
+		}
 		// A suspended browser may report a fatal error without completing its
 		// WebSocket close. Finish that connection here, using fail's existing
 		// distinction between recoverable liveness loss and protocol failure.

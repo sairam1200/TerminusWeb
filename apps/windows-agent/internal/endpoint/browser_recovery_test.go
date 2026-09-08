@@ -21,7 +21,7 @@ func waitRecoveryCondition(t *testing.T, condition func() bool) {
 }
 
 func TestBrowserLossPreservesSameShellAndOrderedBackgroundOutput(t *testing.T) {
-	for _, loss := range []string{"client_heartbeat_error", "client_authorization_error", "abrupt_transport"} {
+	for _, loss := range []string{"client_heartbeat_error", "client_authorization_error", "legacy_client_transport_error", "abrupt_transport"} {
 		t.Run(loss, func(t *testing.T) {
 			ep, adapter, _ := newTestEndpoint(t)
 			server := httptest.NewTLSServer(ep)
@@ -47,6 +47,11 @@ func TestBrowserLossPreservesSameShellAndOrderedBackgroundOutput(t *testing.T) {
 				code := protocol.HeartbeatTimeout
 				if loss == "client_authorization_error" {
 					code = protocol.AuthorizationExpired
+				}
+				if loss == "legacy_client_transport_error" {
+					// Deployed older browsers reported WebSocket onerror using
+					// this valid operational error rather than a liveness code.
+					code = protocol.SessionOpenFailed
 				}
 				client.send("error", protocol.ErrorPayload{Code: code, Fatal: true})
 				// Deliberately leave the client's socket open, as a suspended
@@ -111,36 +116,46 @@ func TestBrowserLossPreservesSameShellAndOrderedBackgroundOutput(t *testing.T) {
 }
 
 func TestClientFatalProtocolErrorStillDestroysOwnedShell(t *testing.T) {
-	ep, adapter, _ := newTestEndpoint(t)
-	server := httptest.NewTLSServer(ep)
-	defer server.Close()
-	defer ep.Close()
-	client, _ := pairAndAuthorize(t, ep, server)
-	defer client.ws.Close()
-	client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
-	id := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
-	adapter.mu.Lock()
-	shell := adapter.sessions[0]
-	adapter.mu.Unlock()
-	ep.sessions.mu.Lock()
-	managed := ep.sessions.active[id]
-	ep.sessions.mu.Unlock()
-	client.send("error", protocol.ErrorPayload{Code: protocol.SequenceReplay, Fatal: true})
-	select {
-	case <-managed.closeDone:
-	case <-time.After(time.Second):
-		t.Fatal("fatal protocol error did not finish terminal cleanup")
-	}
-	select {
-	case <-shell.closed:
-	default:
-		t.Fatal("fatal protocol error preserved shell")
-	}
-	ep.sessions.mu.Lock()
-	remaining := len(ep.sessions.active)
-	history := ep.sessions.historyBytes
-	ep.sessions.mu.Unlock()
-	if remaining != 0 || history != 0 {
-		t.Fatal("fatal protocol error retained session resources")
+	for _, source := range []string{"client_protocol_violation", "local_operational_failure"} {
+		t.Run(source, func(t *testing.T) {
+			ep, adapter, _ := newTestEndpoint(t)
+			server := httptest.NewTLSServer(ep)
+			defer server.Close()
+			defer ep.Close()
+			client, _ := pairAndAuthorize(t, ep, server)
+			defer client.ws.Close()
+			client.send("open_session", protocol.OpenSessionPayload{Shell: "powershell", Dimensions: protocol.Dimensions{Columns: 80, Rows: 24}})
+			id := client.read("session_opened").Value.(*protocol.SessionIDPayload).SessionID
+			adapter.mu.Lock()
+			shell := adapter.sessions[0]
+			adapter.mu.Unlock()
+			ep.sessions.mu.Lock()
+			managed := ep.sessions.active[id]
+			ep.sessions.mu.Unlock()
+			if source == "client_protocol_violation" {
+				client.send("error", protocol.ErrorPayload{Code: protocol.SequenceReplay, Fatal: true})
+			} else {
+				// The received-client compatibility exception must not affect the
+				// local failure path or its containment cleanup.
+				go managed.owner.fail(protocol.NewError(protocol.SessionOpenFailed, 1008, nil))
+			}
+			select {
+			case <-managed.closeDone:
+			case <-time.After(time.Second):
+				t.Fatal("fatal protocol error did not finish terminal cleanup")
+			}
+			select {
+			case <-shell.closed:
+			default:
+				t.Fatal("fatal protocol error preserved shell")
+			}
+			ep.sessions.mu.Lock()
+			remaining := len(ep.sessions.active)
+			history := ep.sessions.historyBytes
+			ep.sessions.mu.Unlock()
+			if remaining != 0 || history != 0 {
+				t.Fatal("fatal protocol error retained session resources")
+			}
+		})
 	}
 }
