@@ -335,6 +335,18 @@ func (c *connection) handle(frame protocol.DecodedFrame) error {
 		return protocol.NewError(protocol.AuthorizationExpired, 1008, nil)
 	}
 	switch payload := frame.Value.(type) {
+	case *protocol.ErrorPayload:
+		if payload.Code == protocol.SessionOpenFailed {
+			// Cached browsers used this operational diagnostic for WebSocket
+			// onerror. A received report is not a local containment failure.
+			// Close its connection without destroying a still-running shell.
+			c.shutdown()
+			return nil
+		}
+		// A suspended browser may report a fatal error without completing its
+		// WebSocket close. Finish that connection here, using fail's existing
+		// distinction between recoverable liveness loss and protocol failure.
+		return protocol.NewError(payload.Code, 1008, nil)
 	case *protocol.HelloPayload:
 		c.clientInstanceID = payload.ClientInstanceID
 		if !containsString(payload.SupportedVersions, protocol.Version) {

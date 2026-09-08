@@ -26,6 +26,139 @@ const challenge = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8";
 const sessionId = "k7m4-p2q9-wxyz";
 
 describe("ProtocolTerminalAdapter", () => {
+  it("keeps an explicitly selected recent target when recovery interrupts an older detached session", async () => {
+    const { adapter, sockets } = await connectedFixture();
+    adapter.release();
+    const selected = "a7m4-p2q9-wxyz";
+    const connection = adapter.connect({ sessionId: selected });
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.open();
+    await connection;
+    sockets[1]!.error();
+    expect(adapter.getSessionId()).toBe(selected);
+    const retry = adapter.connect({ sessionId: adapter.getSessionId() });
+    await waitFor(() => expect(sockets).toHaveLength(3));
+    sockets[2]!.open();
+    await retry;
+    await authenticate(sockets[2]!, "reopen_session");
+    expect(sockets[2]!.sentFrame(2).payload).toMatchObject({
+      sessionId: selected,
+    });
+    adapter.release();
+  });
+  it("times out a never-opened transport and reopens its retained locator on retry", async () => {
+    const { adapter, sockets } = await connectedFixture();
+    adapter.release();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pending = adapter.connect();
+      const rejected = expect(pending).rejects.toThrow(
+        "Terminal connection released.",
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sockets).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(10000);
+      await rejected;
+      expect(adapter.getState()).toBe("detached");
+      expect(adapter.getSessionId()).toBe(sessionId);
+    } finally {
+      vi.useRealTimers();
+    }
+    const retry = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(3));
+    sockets[2]!.open();
+    await retry;
+    await authenticate(sockets[2]!, "reopen_session");
+    expect(sockets[2]!.sentFrame(2).payload).toMatchObject({ sessionId });
+    adapter.release();
+  });
+
+  it("clears the pre-open timeout on release and on open without limiting pairing approval", async () => {
+    const { adapter, sockets } = await connectedFixture();
+    adapter.release();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const old = adapter.connect();
+      const rejected = expect(old).rejects.toThrow(
+        "Terminal connection released.",
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      adapter.release();
+      await rejected;
+      const replacement = adapter.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      sockets[2]!.open();
+      await replacement;
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(sockets[2]!.closeCode).toBeUndefined();
+      adapter.release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the locator and recent entry when End Terminal cannot send", async () => {
+    localStorage.clear();
+    const { adapter, socket } = await connectedFixture();
+    socket.send = () => {
+      throw new Error("synthetic transport failure");
+    };
+    await expect(adapter.disconnect()).rejects.toThrow(
+      "Terminal transport send failed.",
+    );
+    expect(adapter.getState()).toBe("detached");
+    expect(adapter.getSessionId()).toBe(sessionId);
+    expect(await adapter.getRecentSessions()).toEqual([
+      { sessionId, lastUsedAt: now },
+    ]);
+  });
+  it("preserves a closing socket's session when input races the close callback", async () => {
+    const { adapter, socket } = await connectedFixture();
+    socket.readyState = 2;
+    adapter.sendInput("synthetic input");
+    await waitFor(() => expect(adapter.getState()).toBe("detached"));
+    expect(adapter.getSessionId()).toBe(sessionId);
+    expect(
+      socket.sent.map((frame) => (JSON.parse(frame) as ProtocolFrame).type),
+    ).not.toContain("error");
+  });
+
+  it("records only successful session metadata and forgets an acknowledged end", async () => {
+    localStorage.clear();
+    const { adapter, socket, connectionId } = await connectedFixture();
+    expect(await adapter.getRecentSessions()).toEqual([
+      { sessionId, lastUsedAt: now },
+    ]);
+    await adapter.disconnect();
+    expect(await adapter.getRecentSessions()).toHaveLength(1);
+    await socket.receive(
+      agentFrame(connectionId, 4, "session_closed", {
+        sessionId,
+        reason: "user_request",
+      }),
+    );
+    await waitFor(async () =>
+      expect(await adapter.getRecentSessions()).toEqual([]),
+    );
+  });
+
+  it("reopens the same session after a transport error without sending a fatal error", async () => {
+    const { adapter, sockets, socket } = await connectedFixture();
+    socket.error();
+    await waitFor(() => expect(adapter.getState()).toBe("detached"));
+    expect(
+      socket.sent.map((frame) => (JSON.parse(frame) as ProtocolFrame).type),
+    ).not.toContain("error");
+    const ready = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const replacement = sockets[1]!;
+    replacement.open();
+    await ready;
+    await authenticate(replacement, "reopen_session");
+    expect(replacement.sentFrame(2).payload).toMatchObject({ sessionId });
+    await adapter.disconnect();
+  });
+
   it("orders a pending old pairing save before a replacement adapter loads credentials", async () => {
     const store = new MemoryCredentialStore(cryptoProvider, () => now);
     const sockets: MockWebSocket[] = [];
@@ -674,7 +807,11 @@ describe("ProtocolTerminalAdapter", () => {
 
     await expect(replacement).resolves.toBeUndefined();
     expect(adapter.getSessionId()).toBe(replacementSessionId);
-    expect(events).toEqual(["session-opened", "session-opened"]);
+    expect(events).toEqual([
+      "session-opened",
+      "session-ended",
+      "session-opened",
+    ]);
   });
 
   it("keeps the attached session retryable when New Session cannot send close", async () => {

@@ -92,6 +92,29 @@ can be added later without treating them as authentication proof. Existing
 credential IDs and selective local revocation provide the current management
 boundary; no remote device-management API is added.
 
+## Browser suspension recovery clarification (2026-09-08)
+
+The browser connection is disposable; the host owns the running shell. Closing
+or minimizing a browser must retain the existing protocol 0.2 session and its
+bounded volatile output history. A recoverable transport/liveness error must
+not turn a reconnect into an implicit new shell. Reopen authenticates again and
+uses the same locator, credential and device checks. An older connection must
+release ownership before another can attach; no automatic takeover is added.
+
+The browser may offer an explicit recent-session choice after a tab is closed.
+This is a bounded local index of non-secret locators and timestamps, scoped to
+the configured host/profile and paired credential, not a server session list.
+It never contains terminal content or grants access. A root page retains its
+independent New Session behavior, and a stored entry does not prove the session
+is still running. Disconnect leaves a shell running; End Terminal explicitly
+terminates it. New Session continues to close and replace the current shell.
+
+Foreground recovery uses a bounded exponential retry episode and never creates
+a replacement shell on failure. Terminal history remains limited to the existing
+memory budgets; browser lifecycle persistence does not imply complete archival
+history or recovery after host restart. A future archive would need explicit
+host-local encryption, retention/deletion, disk limits and key recovery rules.
+
 ## Future commercial control plane
 
 ```text

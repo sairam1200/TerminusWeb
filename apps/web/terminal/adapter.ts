@@ -24,6 +24,7 @@ export interface TerminalConnectOptions {
 }
 
 export type TerminalSessionEvent =
+  | { type: "session-ended"; sessionId: string }
   | { type: "session-opened"; sessionId: string }
   | { type: "session-reopened"; sessionId: string }
   | {
@@ -38,6 +39,10 @@ export interface TerminalAdapter {
   readonly supportsPairing?: boolean;
   connect(options?: TerminalConnectOptions): Promise<void>;
   detach?(): Promise<void>;
+  release?(): void;
+  getRecentSessions?(): Promise<
+    import("../protocol/recentSessions").RecentSession[]
+  >;
   disconnect(): Promise<void>;
   getErrorCode?(): string | undefined;
   /** Local UI diagnosis only; never serialized into the terminal protocol. */
