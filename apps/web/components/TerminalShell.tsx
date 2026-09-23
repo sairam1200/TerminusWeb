@@ -2,6 +2,7 @@
 
 import { IntelligencePanel } from "./IntelligencePanel";
 import { browserRecovery } from "../terminal/browserRecovery";
+import { MAX_TERMINAL_INPUT_BYTES } from "../protocol/constants";
 import type { RecentSession } from "../protocol/recentSessions";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -25,6 +26,7 @@ import type {
 import { MockTerminalAdapter } from "../terminal/mockTerminalAdapter";
 import {
   ProtocolTerminalAdapter,
+  MAX_PASTE_BYTES,
   type ProtocolTerminalAdapterConfig,
 } from "../terminal/protocolTerminalAdapter";
 import {
@@ -122,6 +124,14 @@ const TRANSLATIONS = {
     settings: "Configuration",
     accent: "Accent",
     fontSize: "Font size",
+    accessibility: "Accessibility",
+    screenReader: "Screen reader support",
+    pasteHelp:
+      "Pasted text stays here until you send it. Multiline input may run commands. Use Send for multiple lines.",
+    inputTooLarge: "Input exceeds 256 KiB. Send a smaller selection.",
+    inputFailed:
+      "Input could not finish sending. Some input may have reached the terminal. Check it before trying again.",
+    sending: "Sending…",
     glow: "Glow",
     low: "Low",
     medium: "Medium",
@@ -217,6 +227,14 @@ const TRANSLATIONS = {
     settings: "Konfiguration",
     accent: "Accent",
     fontSize: "Textstorlek",
+    accessibility: "Tillgänglighet",
+    screenReader: "Stöd för skärmläsare",
+    pasteHelp:
+      "Inklistrad text stannar här tills du skickar den. Flera rader kan köra kommandon. Använd Skicka för flera rader.",
+    inputTooLarge: "Inmatningen överstiger 256 KiB. Skicka ett mindre urval.",
+    inputFailed:
+      "Inmatningen kunde inte skickas färdigt. En del kan ha nått terminalen. Kontrollera innan du försöker igen.",
+    sending: "Skickar…",
     glow: "Glöd",
     low: "Låg",
     medium: "Mellan",
@@ -540,6 +558,10 @@ function TerminalWorkspace({
     useState(false);
   const [markers, setMarkers] = useState<string[]>([]);
   const [input, setInput] = useState("");
+  const [inputError, setInputError] = useState<"size" | "send">();
+  const [sending, setSending] = useState(false);
+  const [screenReader, setScreenReader] = useState(false);
+  const sendingRef = useRef(false);
   const [pairingCode, setPairingCode] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accent, setAccent] = useState<AccentKey>("violet");
@@ -593,6 +615,40 @@ function TerminalWorkspace({
     "--accent-glow": `color-mix(in srgb, ${scheme.primary} ${Math.round(GLOW_ALPHA[glow] * 100)}%, transparent)`,
   } as CSSProperties;
 
+  const send = useCallback(
+    async (value: string, pasteInput = false): Promise<boolean> => {
+      if (adapter.getState() !== "connected" || value.length === 0)
+        return false;
+      if (
+        value.length > MAX_PASTE_BYTES ||
+        new TextEncoder().encode(value).length > MAX_PASTE_BYTES
+      ) {
+        setInputError("size");
+        return false;
+      }
+      if (pasteInput && sendingRef.current) return false;
+      setInputError(undefined);
+      if (pasteInput) {
+        sendingRef.current = true;
+        setSending(true);
+      }
+      try {
+        if (pasteInput && adapter.sendPaste) await adapter.sendPaste(value);
+        else adapter.sendInput(value);
+        return true;
+      } catch {
+        setInputError("send");
+        return false;
+      } finally {
+        if (pasteInput) {
+          sendingRef.current = false;
+          setSending(false);
+        }
+      }
+    },
+    [adapter],
+  );
+
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
@@ -633,7 +689,11 @@ function TerminalWorkspace({
       terminal.parser.registerOscHandler(identifier, () => true),
     );
     const inputSubscription = terminal.onData((data) => {
-      if (connectedRef.current) adapter.sendInput(data);
+      if (connectedRef.current)
+        void send(
+          data,
+          new TextEncoder().encode(data).length > MAX_TERMINAL_INPUT_BYTES,
+        );
     });
     xtermRef.current = terminal;
     for (const output of pendingOutputRef.current) terminal.write(output);
@@ -645,7 +705,12 @@ function TerminalWorkspace({
       sideEffectGuards.forEach((guard) => guard.dispose());
       terminal.dispose();
     };
-  }, [adapter, protocolClient]);
+  }, [adapter, protocolClient, send]);
+
+  useEffect(() => {
+    if (xtermRef.current)
+      xtermRef.current.options.screenReaderMode = screenReader;
+  }, [screenReader, adapter, protocolClient]);
 
   useEffect(() => {
     const terminal = xtermRef.current;
@@ -767,14 +832,6 @@ function TerminalWorkspace({
     };
   }, [adapter]);
 
-  const send = useCallback(
-    (value: string) => {
-      if (connectionState !== "connected" || value.length === 0) return;
-      adapter.sendInput(value);
-    },
-    [adapter, connectionState],
-  );
-
   const sendShortcut = (value: string) => {
     if (connectionState !== "connected") return;
     send(value);
@@ -833,19 +890,41 @@ function TerminalWorkspace({
     }
   };
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
-    send(input);
-    setInput("");
+    if (await send(input, true)) setInput("");
   };
 
   const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     event.preventDefault();
-    send(event.clipboardData.getData("text"));
+    if (!connected || sendingRef.current) return;
+    const element = event.currentTarget;
+    const text = event.clipboardData.getData("text");
+    const next =
+      input.slice(0, element.selectionStart) +
+      text +
+      input.slice(element.selectionEnd);
+    if (
+      next.length > MAX_PASTE_BYTES ||
+      new TextEncoder().encode(next).length > MAX_PASTE_BYTES
+    ) {
+      setInputError("size");
+      return;
+    }
+    const caret = element.selectionStart + text.length;
+    setInputError(undefined);
+    setInput(next);
+    requestAnimationFrame(() => element.setSelectionRange(caret, caret));
   };
 
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) submit(event);
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
+      !/[\r\n]/.test(input)
+    )
+      void submit(event);
   };
 
   const connectLabel =
@@ -1067,6 +1146,18 @@ function TerminalWorkspace({
                 </button>
               ))}
             </SettingsGroup>
+            {protocolClient && (
+              <SettingsGroup label={t.accessibility}>
+                <button
+                  className={`settingsChip${screenReader ? " isActive" : ""}`}
+                  type="button"
+                  aria-pressed={screenReader}
+                  onClick={() => setScreenReader((enabled) => !enabled)}
+                >
+                  {t.screenReader}
+                </button>
+              </SettingsGroup>
+            )}
           </div>
         </section>
       )}
@@ -1218,9 +1309,9 @@ function TerminalWorkspace({
           <div
             ref={terminalRef}
             className="terminalViewport"
-            role="log"
+            role={protocolClient ? "region" : "log"}
             aria-label={protocolClient ? t.terminalOutput : t.simulatedOutput}
-            aria-live="polite"
+            aria-live={protocolClient ? "off" : "polite"}
             data-columns={viewport.columns}
             data-rows={viewport.rows}
             tabIndex={0}
@@ -1404,8 +1495,13 @@ function TerminalWorkspace({
                 id="terminal-input"
                 ref={inputRef}
                 value={input}
-                rows={1}
-                disabled={!connected}
+                rows={Math.min(
+                  6,
+                  Math.max(1, input.split(/\r\n|\r|\n/).length),
+                )}
+                disabled={!connected || sending}
+                aria-describedby="terminal-input-help"
+                maxLength={MAX_PASTE_BYTES}
                 placeholder={
                   connected
                     ? protocolClient
@@ -1422,11 +1518,17 @@ function TerminalWorkspace({
               <button
                 className="primaryButton"
                 type="submit"
-                disabled={!connected || input.length === 0}
+                disabled={!connected || sending || input.length === 0}
               >
-                {t.send}
+                {sending ? t.sending : t.send}
               </button>
             </div>
+            <p id="terminal-input-help">{t.pasteHelp}</p>
+            {inputError && (
+              <p role="alert">
+                {inputError === "size" ? t.inputTooLarge : t.inputFailed}
+              </p>
+            )}
           </form>
         </aside>
       </section>

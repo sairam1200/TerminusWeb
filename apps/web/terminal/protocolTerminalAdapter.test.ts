@@ -26,6 +26,199 @@ const challenge = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8";
 const sessionId = "k7m4-p2q9-wxyz";
 
 describe("ProtocolTerminalAdapter", () => {
+  it("decodes UTF-8 across live frames without mixing independent terminals", async () => {
+    const first = await connectedFixture();
+    const second = await connectedFixture();
+    const output = vi.fn();
+    const other = vi.fn();
+    first.adapter.subscribeOutput(output);
+    second.adapter.subscribeOutput(other);
+    const bytes = Buffer.from("A\u{1f600}\u00e5\u4e2d");
+    for (let i = 0; i < bytes.length; i++) {
+      await first.socket.receive(
+        agentFrame(first.connectionId, 4 + i, "terminal_output", {
+          sessionId,
+          offset: i,
+          data: bytes.subarray(i, i + 1).toString("base64url"),
+        }),
+      );
+      if (i === 2)
+        await second.socket.receive(
+          agentFrame(second.connectionId, 4, "terminal_output", {
+            sessionId,
+            offset: 0,
+            data: Buffer.from("B").toString("base64url"),
+          }),
+        );
+    }
+    expect(output.mock.calls.flat().join("")).toBe(bytes.toString());
+    expect(other.mock.calls.flat().join("")).toBe("B");
+    first.adapter.release();
+    second.adapter.release();
+  });
+
+  it("resets incomplete old output on reconnect and preserves history-to-live UTF-8", async () => {
+    const { adapter, socket, sockets, connectionId } = await connectedFixture();
+    const output = vi.fn();
+    adapter.subscribeOutput(output);
+    const bytes = Buffer.from("\u{1f600}");
+    await socket.receive(
+      agentFrame(connectionId, 4, "terminal_output", {
+        sessionId,
+        offset: 0,
+        data: bytes.subarray(0, 1).toString("base64url"),
+      }),
+    );
+    expect(output).not.toHaveBeenCalled();
+    adapter.release();
+    const ready = adapter.connect();
+    await waitFor(() => expect(sockets).toHaveLength(2));
+    const next = sockets[1]!;
+    next.open();
+    await ready;
+    const id = await authenticate(next, "reopen_session");
+    await next.receive(agentFrame(id, 3, "session_reopened", { sessionId }));
+    await next.receive(
+      agentFrame(id, 4, "history_begin", {
+        sessionId,
+        startOffset: 0,
+        endOffset: 2,
+        truncated: false,
+      }),
+    );
+    for (let i = 0; i < 2; i++)
+      await next.receive(
+        agentFrame(id, 5 + i, "history_chunk", {
+          sessionId,
+          offset: i,
+          data: bytes.subarray(i, i + 1).toString("base64url"),
+        }),
+      );
+    await next.receive(
+      agentFrame(id, 7, "history_end", { sessionId, endOffset: 2 }),
+    );
+    await next.receive(
+      agentFrame(id, 8, "terminal_output", {
+        sessionId,
+        offset: 2,
+        data: bytes.subarray(2).toString("base64url"),
+      }),
+    );
+    expect(output.mock.calls.flat().join("")).toBe(bytes.toString());
+    adapter.release();
+  });
+
+  it("splits a large paste into ordered UTF-8 frames within wire limits", async () => {
+    const { adapter, socket } = await connectedFixture();
+    const text = "a".repeat(16383) + "\u{1f600}".repeat(5000);
+    await adapter.sendPaste(text);
+    const frames = socket.sent
+      .slice(3)
+      .map((raw) => JSON.parse(raw) as ProtocolFrame);
+    expect(frames.length).toBeGreaterThan(1);
+    const decoded = frames.map((frame, index) => {
+      expect(frame.type).toBe("terminal_input");
+      expect(frame.sequence).toBe(index + 3);
+      const bytes = Buffer.from(String(frame.payload.data), "base64url");
+      expect(bytes.length).toBeLessThanOrEqual(16384);
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    });
+    expect(decoded.join("")).toBe(text);
+    adapter.release();
+  });
+
+  it("rejects oversized paste before sending and keeps the connection usable", async () => {
+    const { adapter, socket } = await connectedFixture();
+    await expect(adapter.sendPaste("\u{1f600}".repeat(65537))).rejects.toThrow(
+      "Paste is too large.",
+    );
+    expect(socket.sent).toHaveLength(3);
+    expect(adapter.getState()).toBe("connected");
+    adapter.sendInput("x");
+    await waitFor(() => expect(socket.sent).toHaveLength(4));
+    adapter.release();
+  });
+
+  it("rejects a partial paste on transport failure without resending accepted chunks", async () => {
+    const { adapter, socket } = await connectedFixture();
+    const original = socket.send.bind(socket);
+    let inputs = 0;
+    socket.send = (raw: string) => {
+      if (
+        (JSON.parse(raw) as ProtocolFrame).type === "terminal_input" &&
+        ++inputs === 2
+      )
+        throw new Error("synthetic failure");
+      original(raw);
+    };
+    await expect(adapter.sendPaste("x".repeat(40000))).rejects.toThrow(
+      "Terminal transport send failed.",
+    );
+    expect(socket.sent).toHaveLength(4);
+    expect(inputs).toBe(2);
+    expect(adapter.getState()).toBe("detached");
+    expect(adapter.getSessionId()).toBe(sessionId);
+  });
+
+  it("waits for bounded transport space and rejects concurrent paste", async () => {
+    const { adapter, socket } = await connectedFixture();
+    socket.bufferedAmount = 40000;
+    const paste = adapter.sendPaste("x".repeat(40000));
+    await expect(adapter.sendPaste("other")).rejects.toThrow("still sending");
+    expect(() => adapter.sendInput("y")).toThrow("still sending");
+    expect(socket.sent).toHaveLength(3);
+    socket.bufferedAmount = 0;
+    await paste;
+    expect(socket.sent).toHaveLength(6);
+    adapter.release();
+  });
+
+  it("cancels pending paste on disconnect without forwarding it to a replacement", async () => {
+    const { adapter, socket } = await connectedFixture();
+    socket.bufferedAmount = 40000;
+    const paste = adapter.sendPaste("synthetic paste");
+    const rejected = expect(paste).rejects.toThrow("interrupted");
+    adapter.release();
+    await rejected;
+    expect(socket.sent).toHaveLength(3);
+  });
+
+  it("lets Control C cancel a queued paste without sending its remaining content", async () => {
+    const { adapter, socket } = await connectedFixture();
+    socket.bufferedAmount = 40000;
+    const paste = adapter.sendPaste("synthetic paste");
+    const rejected = expect(paste).rejects.toThrow("interrupted");
+    adapter.sendInput("\u0003");
+    await rejected;
+    await waitFor(() => expect(socket.sent).toHaveLength(4));
+    expect(
+      Buffer.from(
+        String(socket.sentFrame(3).payload.data),
+        "base64url",
+      ).toString(),
+    ).toBe("\u0003");
+    expect(adapter.getState()).toBe("connected");
+    adapter.release();
+  });
+
+  it("bounds the wait for a stalled transport without automatic resend", async () => {
+    const { adapter, socket } = await connectedFixture();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    try {
+      socket.bufferedAmount = 40000;
+      const rejected = expect(
+        adapter.sendPaste("synthetic paste"),
+      ).rejects.toThrow("timed out");
+      await vi.advanceTimersByTimeAsync(5020);
+      await rejected;
+      expect(socket.sent).toHaveLength(3);
+      expect(adapter.getState()).toBe("connected");
+    } finally {
+      vi.useRealTimers();
+      adapter.release();
+    }
+  });
+
   it("keeps an explicitly selected recent target when recovery interrupts an older detached session", async () => {
     const { adapter, sockets } = await connectedFixture();
     adapter.release();
