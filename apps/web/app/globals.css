@@ -988,6 +988,17 @@ button:disabled {
   font-size: 0.58rem;
 }
 
+.inputComposer > p {
+  margin: 0.4rem 0 0;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.inputComposer > p[role="alert"] {
+  color: #fda4af;
+}
+
 .privacyFooter {
   flex: 0 0 auto;
   padding: 0.35rem 1rem max(0.35rem, env(safe-area-inset-bottom));

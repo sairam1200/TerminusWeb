@@ -21,7 +21,7 @@ const xtermMock = vi.hoisted(() => ({
   }),
   open: vi.fn(),
   oscDispose: vi.fn(),
-  options: { fontSize: 14, theme: {} },
+  options: { fontSize: 14, theme: {}, screenReaderMode: false },
   parser: {
     registerOscHandler: vi.fn(
       (...args: [number, (data: string) => boolean]) => {
@@ -61,6 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   xtermMock.data.listener = undefined;
+  xtermMock.options.screenReaderMode = false;
   window.history.replaceState(null, "", "/");
 });
 
@@ -139,6 +140,117 @@ it("offers explicit rejected-reopen recovery without changing the link before su
 });
 
 describe("TerminalShell", () => {
+  it("stages multiline paste at the selection and sends only after an explicit button press", async () => {
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter("connected");
+    const sendPaste = vi.fn(async () => {});
+    Object.assign(adapter, { sendPaste });
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    const input = screen.getByRole("textbox", {
+      name: "Terminal input",
+    }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "before OLD after" } });
+    input.setSelectionRange(7, 10);
+    fireEvent.paste(input, { clipboardData: { getData: () => "one\ntwo" } });
+    expect(input).toHaveValue("before one\ntwo after");
+    expect(sendPaste).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(sendPaste).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(sendPaste).toHaveBeenCalledExactlyOnceWith("before one\ntwo after");
+    expect(input).toHaveValue("");
+  });
+
+  it("does not submit an IME composition Enter and rejects oversized pasted text", async () => {
+    const adapter = new ProtocolUiAdapter("connected");
+    const send = vi.spyOn(adapter, "sendInput");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    const input = screen.getByRole("textbox", { name: "Terminal input" });
+    fireEvent.change(input, { target: { value: "synthetic" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.paste(input, {
+      clipboardData: { getData: () => "\u{1f600}".repeat(65537) },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Input exceeds 256 KiB",
+    );
+    expect(input).toHaveValue("synthetic");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("keeps failed input for review and reports partial-send risk without echoing it", async () => {
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter("connected");
+    Object.assign(adapter, {
+      sendPaste: vi
+        .fn()
+        .mockRejectedValue(new Error("synthetic private content")),
+    });
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    const input = screen.getByRole("textbox", { name: "Terminal input" });
+    fireEvent.change(input, { target: { value: "synthetic draft" } });
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(input).toHaveValue("synthetic draft");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Some input may have reached the terminal",
+    );
+    expect(
+      screen.queryByText("synthetic private content"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("prevents duplicate submissions while sending and preserves Control C", async () => {
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter("connected");
+    let finish = () => {};
+    const sendPaste = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const sendInput = vi.spyOn(adapter, "sendInput");
+    Object.assign(adapter, { sendPaste });
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    const input = screen.getByRole("textbox", { name: "Terminal input" });
+    fireEvent.change(input, { target: { value: "synthetic draft" } });
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Send Control C" }));
+    expect(sendInput).toHaveBeenCalledWith("\u0003");
+    expect(sendPaste).toHaveBeenCalledOnce();
+    finish();
+    await waitFor(() => expect(input).toBeEnabled());
+  });
+
+  it("toggles xterm accessibility without recreating the terminal or duplicating announcements", async () => {
+    const user = userEvent.setup();
+    const adapter = new ProtocolUiAdapter("connected");
+    render(<TerminalShell adapterFactory={() => adapter} />);
+    const region = screen.getByRole("region", {
+      name: "Private terminal output",
+    });
+    expect(region).toHaveAttribute("aria-live", "off");
+    expect(xtermMock.options.screenReaderMode).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+    await user.click(
+      screen.getByRole("button", { name: "Screen reader support" }),
+    );
+    expect(xtermMock.options.screenReaderMode).toBe(true);
+    expect(xtermMock.open).toHaveBeenCalledOnce();
+    expect(xtermMock.dispose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Switch to Swedish" }));
+    expect(
+      screen.getByRole("button", { name: "Stöd för skärmläsare" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await user.click(
+      screen.getByRole("button", { name: "Stöd för skärmläsare" }),
+    );
+    expect(xtermMock.options.screenReaderMode).toBe(false);
+  });
+
   it("labels the test double and keeps input disabled until connected", async () => {
     const user = userEvent.setup();
     render(<TerminalShell />);
@@ -173,6 +285,9 @@ describe("TerminalShell", () => {
     fireEvent.paste(input, {
       clipboardData: { getData: () => "synthetic-paste" },
     });
+    expect(inputSpy).not.toHaveBeenCalledWith("synthetic-paste");
+    expect(input).toHaveValue("synthetic-paste");
+    await user.click(screen.getByRole("button", { name: "Send" }));
     expect(inputSpy).toHaveBeenCalledWith("synthetic-paste");
 
     await user.click(screen.getByRole("button", { name: "Send Escape" }));

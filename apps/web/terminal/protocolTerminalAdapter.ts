@@ -69,7 +69,7 @@ export interface ProtocolTerminalAdapterConfig extends PrivateWssPolicy {
 const SOCKET_OPEN = 1;
 const APPLICATION_CLOSE_CODE_OFFSET = 3000;
 const AUTHORIZATION_LIFETIME_MS = 12 * 60 * 60 * 1000;
-const textDecoder = new TextDecoder();
+export const MAX_PASTE_BYTES = 262_144;
 class TerminalTransportError extends Error {}
 
 interface NewSessionOperation {
@@ -147,6 +147,8 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   private authorizationTimer?: ReturnType<typeof setTimeout>;
   private inboundQueue = Promise.resolve();
   private work: ConnectionWork = { tail: Promise.resolve(), outboundBytes: 0 };
+  private outputDecoder = new TextDecoder();
+  private pasteOperation?: object;
 
   constructor(config: ProtocolTerminalAdapterConfig) {
     this.cryptoProvider = config.cryptoProvider ?? globalThis.crypto;
@@ -185,6 +187,8 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     const work: ConnectionWork = { tail: Promise.resolve(), outboundBytes: 0 };
     this.clearConnectTimer();
     this.work = work;
+    this.outputDecoder = new TextDecoder();
+    this.pasteOperation = undefined;
     this.inboundQueue = Promise.resolve();
 
     this.errorCode = undefined;
@@ -512,6 +516,10 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   }
 
   sendInput(data: string): void {
+    if (this.pasteOperation !== undefined) {
+      if (data === "\u0003") this.pasteOperation = undefined;
+      else throw new Error("Terminal paste is still sending.");
+    }
     if (this.state !== "connected" || this.sessionId === undefined) {
       throw new ProtocolViolation("INVALID_STATE", 1008);
     }
@@ -527,6 +535,58 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
     }).catch((error: unknown) => {
       if (this.work === work) this.handleSendFailure(error);
     });
+  }
+
+  async sendPaste(data: string): Promise<void> {
+    // A UI limit, not a wire-contract change. Reject before sending any bytes.
+    if (data.length > MAX_PASTE_BYTES) throw new Error("Paste is too large.");
+    const bytes = new TextEncoder().encode(data);
+    if (bytes.length > MAX_PASTE_BYTES) throw new Error("Paste is too large.");
+    if (this.pasteOperation !== undefined)
+      throw new Error("Terminal paste is still sending.");
+    const operation = {};
+    const work = this.work;
+    const socket = this.socket;
+    const sessionId = this.sessionId;
+    const current = () =>
+      this.pasteOperation === operation &&
+      this.work === work &&
+      this.socket === socket &&
+      socket?.readyState === SOCKET_OPEN &&
+      this.state === "connected" &&
+      this.sessionId === sessionId;
+    this.pasteOperation = operation;
+    try {
+      if (!current()) throw new Error("Terminal paste interrupted.");
+      for (let offset = 0; offset < bytes.length;) {
+        const deadline = this.monotonicNow() + 5000;
+        // Leave room for the next encoded frame and ordinary control traffic.
+        while (
+          current() &&
+          socket!.bufferedAmount + work.outboundBytes > MAX_FRAME_BYTES / 2
+        ) {
+          if (this.monotonicNow() >= deadline)
+            throw new Error("Terminal paste timed out.");
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        if (!current()) throw new Error("Terminal paste interrupted.");
+        let end = Math.min(offset + MAX_TERMINAL_INPUT_BYTES, bytes.length);
+        // Each input frame must itself contain complete UTF-8 characters.
+        while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+        await this.sendFrame("terminal_input", {
+          sessionId,
+          data: encodeBase64Url(bytes.subarray(offset, end)),
+        });
+        if (!current()) throw new Error("Terminal paste interrupted.");
+        offset = end;
+      }
+    } catch (error) {
+      if (this.work === work && error instanceof TerminalTransportError)
+        this.release();
+      throw error;
+    } finally {
+      if (this.pasteOperation === operation) this.pasteOperation = undefined;
+    }
   }
 
   subscribe(listener: (state: TerminalConnectionState) => void): () => void {
@@ -611,6 +671,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         await this.openOrReopen();
         break;
       case "session_opened":
+        this.outputDecoder = new TextDecoder();
         this.sessionId = String(frame.payload.sessionId);
         this.rememberSession(this.sessionId);
         this.requestedSessionId = undefined;
@@ -636,6 +697,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         if (frame.payload.sessionId !== this.sessionId) {
           throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
         }
+        this.outputDecoder = new TextDecoder();
         this.emitSession({
           type: "history-begin",
           sessionId: String(frame.payload.sessionId),
@@ -647,7 +709,9 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
         }
         this.emitOutput(
-          textDecoder.decode(decodeBase64Url(frame.payload.data)),
+          this.outputDecoder.decode(decodeBase64Url(frame.payload.data), {
+            stream: true,
+          }),
         );
         break;
       case "history_end":
@@ -662,7 +726,9 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
           throw new ProtocolViolation("OUTPUT_OFFSET_INVALID", 1008);
         }
         this.emitOutput(
-          textDecoder.decode(decodeBase64Url(frame.payload.data)),
+          this.outputDecoder.decode(decodeBase64Url(frame.payload.data), {
+            stream: true,
+          }),
         );
         break;
       case "heartbeat":
@@ -683,6 +749,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
         this.socket?.close(1000, "detached");
         break;
       case "session_closed":
+        this.emitOutput(this.outputDecoder.decode());
         this.rememberSession(String(frame.payload.sessionId), true);
         this.emitSession({
           type: "session-ended",
@@ -956,6 +1023,7 @@ export class ProtocolTerminalAdapter implements TerminalAdapter {
   }
 
   private emitOutput(output: string): void {
+    if (output.length === 0) return;
     this.outputListeners.forEach((listener) => listener(output));
   }
 

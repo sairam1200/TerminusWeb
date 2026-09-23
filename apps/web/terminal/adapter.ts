@@ -53,6 +53,8 @@ export interface TerminalAdapter {
   pair?(pairingCode: string): Promise<void>;
   resize(viewport: TerminalViewport): void;
   sendInput(data: string): void;
+  /** Bounded, ordered composer/paste input; never retried after a partial send. */
+  sendPaste?(data: string): Promise<void>;
   subscribe(listener: (state: TerminalConnectionState) => void): () => void;
   subscribeOutput(listener: (marker: string) => void): () => void;
   subscribeSession?(
